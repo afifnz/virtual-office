@@ -42,17 +42,18 @@ export function Desk({ status, dim = false }: { status: AgentStatus; dim?: boole
         <boxGeometry args={[1.62, 0.055, 0.78]} />
         <meshStandardMaterial color={dim ? '#5c4632' : '#8a6142'} roughness={0.62} />
       </mesh>
-      {/* front drawer block */}
-      <mesh position={[0, 0.63, 0.28]}>
-        <boxGeometry args={[1.5, 0.18, 0.2]} />
+      {/* front lip: a thin apron, not a full drawer block — the seated
+          avatar's thighs pass under it, so the lap never enters the desk */}
+      <mesh position={[0, 0.6885, 0.345]}>
+        <boxGeometry args={[1.5, 0.058, 0.09]} />
         <meshStandardMaterial color="#6f4c34" roughness={0.7} />
       </mesh>
-      <mesh position={[-0.36, 0.63, 0.385]}>
-        <boxGeometry args={[0.28, 0.03, 0.02]} />
+      <mesh position={[-0.36, 0.6885, 0.393]}>
+        <boxGeometry args={[0.28, 0.02, 0.014]} />
         <meshStandardMaterial color="#b08a52" roughness={0.4} metalness={0.45} />
       </mesh>
-      <mesh position={[0.36, 0.63, 0.385]}>
-        <boxGeometry args={[0.28, 0.03, 0.02]} />
+      <mesh position={[0.36, 0.6885, 0.393]}>
+        <boxGeometry args={[0.28, 0.02, 0.014]} />
         <meshStandardMaterial color="#b08a52" roughness={0.4} metalness={0.45} />
       </mesh>
       {/* legs */}
@@ -68,8 +69,9 @@ export function Desk({ status, dim = false }: { status: AgentStatus; dim?: boole
         </mesh>
       ))}
 
-      {/* laptop, set to the side so a visitor can see the person's face */}
-      <group position={[-0.42, 0.775, -0.02]} rotation={[0, 0.75, 0]}>
+      {/* laptop, set to the side and opened flat: at dashboard distance a
+          taller lid hides the chest, and the chest is what says "working" */}
+      <group position={[-0.47, 0.775, -0.04]} rotation={[0, 0.75, 0]}>
         <mesh position={[0, 0.008, 0]}>
           <boxGeometry args={[0.34, 0.016, 0.24]} />
           <meshStandardMaterial color="#3b3833" roughness={0.55} metalness={0.25} />
@@ -78,13 +80,13 @@ export function Desk({ status, dim = false }: { status: AgentStatus; dim?: boole
           <planeGeometry args={[0.3, 0.17]} />
           <meshStandardMaterial color="#2a2723" roughness={0.7} />
         </mesh>
-        <group position={[0, 0.012, -0.115]} rotation={[-0.32, 0, 0]}>
-          <mesh position={[0, 0.1, 0]}>
-            <boxGeometry args={[0.33, 0.215, 0.012]} />
+        <group position={[0, 0.012, -0.115]} rotation={[-0.5, 0, 0]}>
+          <mesh position={[0, 0.085, 0]}>
+            <boxGeometry args={[0.31, 0.175, 0.012]} />
             <meshStandardMaterial color="#34312c" roughness={0.5} metalness={0.3} />
           </mesh>
-          <mesh position={[0, 0.1, 0.008]}>
-            <planeGeometry args={[0.305, 0.19]} />
+          <mesh position={[0, 0.085, 0.008]}>
+            <planeGeometry args={[0.285, 0.15]} />
             <meshStandardMaterial
               ref={screen}
               color="#1b2430"
@@ -94,15 +96,15 @@ export function Desk({ status, dim = false }: { status: AgentStatus; dim?: boole
             />
           </mesh>
           {!off ? (
-            <group position={[0, 0.1, 0.012]}>
-              {[0.066, 0.028, -0.01, -0.048].map((y, i) => (
-                <mesh key={i} position={[-0.055 + i * 0.012, y, 0]}>
-                  <planeGeometry args={[0.1 + i * 0.05, 0.011]} />
+            <group position={[0, 0.085, 0.012]}>
+              {[0.05, 0.018, -0.014, -0.046].map((y, i) => (
+                <mesh key={i} position={[-0.05 + i * 0.011, y, 0]}>
+                  <planeGeometry args={[0.09 + i * 0.045, 0.009]} />
                   <meshBasicMaterial color={i % 2 ? '#8fc4e0' : '#c9d8e0'} transparent opacity={0.4} />
                 </mesh>
               ))}
-              <mesh ref={cursor} position={[-0.02, -0.075, 0]}>
-                <planeGeometry args={[0.01, 0.024]} />
+              <mesh ref={cursor} position={[-0.02, -0.062, 0]}>
+                <planeGeometry args={[0.01, 0.022]} />
                 <meshBasicMaterial color="#e8c07a" />
               </mesh>
             </group>
@@ -110,12 +112,12 @@ export function Desk({ status, dim = false }: { status: AgentStatus; dim?: boole
         </group>
       </group>
 
-      {/* keyboard + mouse */}
-      <mesh position={[0.06, 0.777, 0.16]} rotation={[0, 0, 0]}>
+      {/* keyboard + mouse, centred on the seated avatar's hands */}
+      <mesh position={[0.04, 0.777, 0.16]} rotation={[0, 0, 0]}>
         <boxGeometry args={[0.42, 0.018, 0.14]} />
         <meshStandardMaterial color="#2f2c29" roughness={0.7} />
       </mesh>
-      <mesh position={[0.34, 0.777, 0.16]} scale={[1, 0.6, 1]}>
+      <mesh position={[0.32, 0.777, 0.16]} scale={[1, 0.6, 1]}>
         <sphereGeometry args={[0.038, 12, 8]} />
         <meshStandardMaterial color="#2f2c29" roughness={0.6} />
       </mesh>
@@ -159,9 +161,10 @@ export function Desk({ status, dim = false }: { status: AgentStatus; dim?: boole
   )
 }
 
-/** Rattan chair; the seated avatar covers the seat. */
+/** Rattan chair; the seated avatar covers the seat. Deliberately darker than
+ *  any outfit in lib/agents.ts so the silhouette separates at overview scale. */
 export function Chair({ dim = false }: { dim?: boolean }) {
-  const wood = dim ? '#4b3a2c' : '#6b4d33'
+  const wood = dim ? '#3a2b20' : '#4f3726'
   return (
     <group>
       <mesh position={[0, 0.45, 0]}>

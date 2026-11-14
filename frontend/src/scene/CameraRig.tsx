@@ -88,6 +88,19 @@ export function CameraRig({
     [],
   )
 
+  /** ?cam=x,y,z&aim=x,y,z — a fixed lens for the verification screenshots. */
+  const fixedCam = useMemo(() => {
+    if (typeof window === 'undefined') return null
+    const q = new URLSearchParams(window.location.search)
+    const cam = q.get('cam')
+    const aim = q.get('aim')
+    if (!cam || !aim) return null
+    const a = cam.split(',').map(Number)
+    const b = aim.split(',').map(Number)
+    if (a.length !== 3 || b.length !== 3 || [...a, ...b].some((n) => !Number.isFinite(n))) return null
+    return { pos: new THREE.Vector3(a[0]!, a[1]!, a[2]!), aim: new THREE.Vector3(b[0]!, b[1]!, b[2]!) }
+  }, [])
+
   // start on the lobby spot
   useEffect(() => {
     const spot = SPOTS.lobby!
@@ -109,7 +122,9 @@ export function CameraRig({
       // A seated agent faces the desk, so a straight-on shot would be blocked
       // by the monitor. Stand beside them, 60 degrees off the facing, and pick
       // whichever side has more free space.
-      const headY = f.seated === false ? 1.6 : 1.33
+      // seated eye line: hips land on the chair (0.47), so the head sits at
+      // ~1.09 and the middle of the face is around 1.19
+      const headY = f.seated === false ? 1.6 : 1.19
       const seatX = f.x + Math.sin(f.rot) * 0.42
       const seatZ = f.z + Math.cos(f.rot) * 0.42
       const fx = -Math.sin(f.rot)
@@ -236,6 +251,13 @@ export function CameraRig({
   useFrame((_, dtRaw) => {
     const dt = Math.min(dtRaw, 0.1)
     const s = state.current
+
+    // verify/ hooks: ?cam=x,y,z&aim=x,y,z pins the lens for a screenshot
+    if (fixedCam) {
+      camera.position.copy(fixedCam.pos)
+      camera.lookAt(fixedCam.aim)
+      return
+    }
 
     if (s.tween) {
       const tw = s.tween

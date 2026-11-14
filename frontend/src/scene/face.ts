@@ -42,8 +42,24 @@ export function buildFace(look: Look, l: FaceLandmarks): { group: THREE.Group; l
   const lids: THREE.Mesh[] = []
   const skin = SKIN(look.skin)
   const irisColor = new THREE.Color(look.hair).lerp(new THREE.Color('#5a3b22'), 0.55)
-  const sclera = new THREE.MeshStandardMaterial({ color: '#f3ece4', roughness: 0.28, metalness: 0 })
-  const iris = new THREE.MeshStandardMaterial({ color: irisColor, roughness: 0.25, metalness: 0 })
+  // The sclera carries a little self-illumination: the room has one key light
+  // from the side, and without it the eye in the shadow of the nose reads
+  // narrower than its twin. Both eyes share these materials, so they always
+  // read at the same brightness.
+  const sclera = new THREE.MeshStandardMaterial({
+    color: '#f3ece4',
+    roughness: 0.28,
+    metalness: 0,
+    emissive: new THREE.Color('#f3ece4').multiplyScalar(0.38),
+    emissiveIntensity: 1,
+  })
+  const iris = new THREE.MeshStandardMaterial({
+    color: irisColor,
+    roughness: 0.25,
+    metalness: 0,
+    emissive: new THREE.Color(irisColor).multiplyScalar(0.22),
+    emissiveIntensity: 1,
+  })
   const pupil = new THREE.MeshStandardMaterial({ color: '#140f0d', roughness: 0.2 })
   const glint = new THREE.MeshBasicMaterial({ color: '#ffffff' })
   const lash = new THREE.MeshStandardMaterial({ color: '#241713', roughness: 0.8 })
@@ -57,7 +73,7 @@ export function buildFace(look: Look, l: FaceLandmarks): { group: THREE.Group; l
     const cx = s * l.eyeX
     // eyeball: a squashed sphere, so the iris sits in a socket rather than on it
     const ball = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 20, 16), sclera)
-    ball.position.set(cx, l.eyeY, l.eyeZ - eyeR * 0.62)
+    ball.position.set(cx, l.eyeY, l.eyeZ - eyeR * 0.30)
     ball.scale.set(1.0, 0.9, 0.55)
     g.add(ball)
 
@@ -76,7 +92,9 @@ export function buildFace(look: Look, l: FaceLandmarks): { group: THREE.Group; l
     g.add(pupilMesh)
 
     const glintMesh = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.11, 8, 6), glint)
-    glintMesh.position.set(cx - s * eyeR * 0.16, l.eyeY + eyeR * 0.18, ball.position.z + eyeR * 0.58)
+    // same corner of both eyes, the way one lamp lights a face: mirroring the
+    // catchlight would make the two eyes disagree about where the light is
+    glintMesh.position.set(cx - eyeR * 0.16, l.eyeY + eyeR * 0.18, ball.position.z + eyeR * 0.58)
     g.add(glintMesh)
 
     // upper lid: a skin cap that rolls down over the eyeball
@@ -87,10 +105,12 @@ export function buildFace(look: Look, l: FaceLandmarks): { group: THREE.Group; l
     g.add(lid)
     lids.push(lid)
 
-    // lash line along the lid edge
-    const lashLine = new THREE.Mesh(new THREE.TorusGeometry(eyeR * 0.96, eyeR * 0.06, 6, 22, Math.PI * 0.9), lash)
-    lashLine.position.set(cx, l.eyeY + eyeR * 0.2, ball.position.z + eyeR * 0.46)
-    lashLine.rotation.z = Math.PI * 1.05
+    // lash line: a half ring sitting on the upper lid edge. A half arc is
+    // mirror-symmetric about the eye's own vertical axis, so both eyes get
+    // byte-identical geometry, material and rotation — only the x offset
+    // differs, which is the whole point of the pair.
+    const lashLine = new THREE.Mesh(new THREE.TorusGeometry(eyeR * 0.96, eyeR * 0.06, 6, 24, Math.PI), lash)
+    lashLine.position.set(cx, l.eyeY + eyeR * 0.16, ball.position.z + eyeR * 0.46)
     g.add(lashLine)
   }
 

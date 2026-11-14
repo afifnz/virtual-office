@@ -182,6 +182,20 @@ D-pad disembunyikan saat sheet terbuka (tidak ada yang menutupi kontrol).
 `verify/portrait.py <id|nama>` mengambil satu potret, `verify/mobile.py`
 mengulang tiga tangkapan panel HP.
 
+Pemeriksaan pose (dipakai untuk merapikan avatar di skala dashboard):
+
+- `verify/pose_check.py` — membaca scene yang hidup dan mencetak, per agen:
+  tinggi pinggul vs dudukan kursi, kerataan paha, sudut lutut kiri/kanan,
+  tinggi sol sepatu, dan posisi kedua pergelangan vs kotak keyboard. Exit
+  non-zero kalau ada yang melenceng (melayang, kaki menembus lantai, lutut
+  asimetris).
+- `verify/final_shots.py` — `final-overview.png` (spot "Tampak", semua agen
+  ditahan di meja lewat `?still=1`) dan `final-closeup.png` (satu agen duduk
+  dari samping, memperlihatkan lutut, telapak, dan tangan di keyboard).
+- `verify/face_sym.py <id>` — potret lurus dengan kamera dipaku di normal
+  wajah (`?cam=&aim=`) lalu skor beda cermin, untuk memisahkan asimetri
+  geometri mata dari asimetri pencahayaan.
+
 ## Catatan desain (beda dari versi p5)
 
 - **Avatar = GLB manusia rigged (Quaternius Ultimate Modular, CC0 1.0)**, bukan
@@ -192,13 +206,24 @@ mengulang tiga tangkapan panel HP.
   diputar 180° (paket menghadap +Z, kantor menghadap −Z), dan variasi per agen
   datang dari override warna material per peran (Skin/Hair/Shirt/Pants/Shoes).
 - **Pose duduk tanpa klip Sit**: paket hanya punya Idle/Walk/Run/Interact. Duduk
-  dibentuk setelah `mixer.update()` dengan memutar tulang paha, lutut, dan lengan
-  atas mengelilingi sumbu X model (di ruang parent, bukan Euler lokal, karena
-  tulang FBX tidak sejajar sumbu); pergelangan tangan diukur sampai mendarat di
-  keyboard. Tulang kaki paket ini menempel ke `Body`, bukan ke shin, jadi tumit
+  tidak dibentuk dari sudut tulang tebakan, tapi dipecahkan terhadap furnitur:
+  `instantiate()` mengukur panjang paha, betis, lengan atas/bawah dan tinggi
+  mata kaki tiap model, lalu `pose()` mengarahkan tiap tulang ke titik yang
+  diturunkan dari kursi (dudukan 0,4725 m), lantai, dan keyboard
+  (`aim()` + IK dua tulang untuk siku). Hasilnya: pinggul mendarat di dudukan,
+  paha mendatar, lutut 90°, telapak di lantai, dan kedua pergelangan tepat di
+  atas tuts — simetris karena target kiri/kanan dicerminkan, bukan karena
+  kebetulan rotasi tulang. `verify/pose_check.py` mencetak angka itu per agen
+  (hip, sudut lutut, tinggi sol, posisi wrist) dan gagal kalau melenceng.
+  Tulang kaki paket ini menempel ke `Body`, bukan ke shin, jadi tumit
   ditempatkan ulang tiap frame agar kaki ikut lutut dan tidak menembus lantai.
   Berdiri/berjalan memakai klip `Walk` yang waktunya disinkronkan ke jarak
   tempuh, diam di POI memakai `Idle_Neutral`.
+- **Proporsi & kontras**: kepala dikecilkan lewat skala tulang `Head` (0,94),
+  pakaian dicampur 8–14% putih plus sedikit emissive per peran, kursi dibuat
+  lebih gelap dari outfit mana pun, dan apron depan meja ditipiskan jadi bibir
+  5,8 cm supaya pangkuan tidak menembus meja. Lid laptop juga direndahkan agar
+  dada tetap terlihat dari kamera "Tampak".
 - **Wajah**: Quaternius hanya memberi mata berupa dua quad hitam dan tidak punya
   mulut, jadi `scene/face.ts` menambahkan bola mata (sklera + iris + pupil +
   kilau), kelopak yang berkedip, lubang hidung, dan bibir. Posisinya diukur dari

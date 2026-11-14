@@ -130,9 +130,11 @@ function roleColor(role: Role, look: Look): string {
     case 'eye':
       return '#2b1f1a'
     case 'shirt':
-      return look.shirt
+      // a touch lighter than the authored colour: at dashboard distance the
+      // torso has to separate from the teak desk and the dark rattan chair
+      return mixHex(look.shirt, '#ffffff', 0.14)
     case 'pants':
-      return look.pants
+      return mixHex(look.pants, '#ffffff', 0.08)
     case 'shoes':
       return shade(look.pants, 0.55)
     case 'trim':
@@ -142,9 +144,28 @@ function roleColor(role: Role, look: Look): string {
   }
 }
 
+/**
+ * A whisper of self-illumination per role. The office lights are warm and low;
+ * without this the darker outfits vanish into the chair back at overview scale.
+ * Kept small enough that the figure still reads as lit, not glowing.
+ */
+const GLOW: Record<Role, number> = {
+  skin: 0.05,
+  skinDark: 0.04,
+  hair: 0.02,
+  brow: 0.02,
+  eye: 0.0,
+  shirt: 0.13,
+  pants: 0.09,
+  shoes: 0.03,
+  trim: 0.1,
+  accent: 0.1,
+}
+
 /** Bone names shared by both packs (the men's and women's rigs match). */
 export const BONES = {
   hips: 'Hips',
+  abdomen: 'Abdomen',
   chest: 'Chest',
   neck: 'Neck',
   head: 'Head',
@@ -152,6 +173,8 @@ export const BONES = {
   armR: 'UpperArmR',
   foreL: 'LowerArmL',
   foreR: 'LowerArmR',
+  wristL: 'WristL',
+  wristR: 'WristR',
   thighL: 'UpperLegL',
   thighR: 'UpperLegR',
   shinL: 'LowerLegL',
@@ -186,6 +209,29 @@ export interface Rig {
   /** model space → head-bone space, captured at rest */
   headMountMatrix: THREE.Matrix4
   height: number
+  /** measured joint lengths and the seat geometry derived from them */
+  metrics: RigMetrics
+}
+
+/**
+ * Everything the seated pose needs, measured from the model itself: the packs
+ * normalise to 1.7 m but their legs differ, so a single hard-coded hip drop
+ * leaves one body floating above the chair and the next sunk into it.
+ */
+export interface RigMetrics {
+  thigh: number
+  shin: number
+  upperArm: number
+  foreArm: number
+  /** hip joint height in the bind pose, above the floor */
+  hipBindY: number
+  /** hip joint height once seated (chair seat + pelvis) */
+  hipY: number
+  /** how far the body group sinks so the hips land on the seat */
+  seatDrop: number
+  headTopY: number
+  /** head height in model space, for proportion checks */
+  headH: number
 }
 
 /** A world-space box re-expressed in an object's local space. */
@@ -221,7 +267,11 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     const clone = mat.clone()
     clone.metalness = 0
     clone.roughness = role === 'skin' || role === 'skinDark' ? 0.62 : 0.78
-    if (role) clone.color.set(roleColor(role, look))
+    if (role) {
+      clone.color.set(roleColor(role, look))
+      clone.emissive = new THREE.Color(roleColor(role, look)).multiplyScalar(GLOW[role])
+      clone.emissiveIntensity = 1
+    }
     mesh.material = clone
     if (role === 'eye') eyeMeshes.push(mesh)
     if (role === 'skin') skinMeshes.push(mesh)
@@ -317,6 +367,53 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     headMountMatrix.copy(head.matrixWorld).invert().multiply(root.matrixWorld)
   }
 
+  // The pack's heads are a shade over a fifth of the body, which reads as a
+  // mascot at dashboard distance. Shrink the head bone a little: the skull,
+  // the face overlay and the hijab all scale about the same joint, so the
+  // neck seam stays put. Applied only after headMountMatrix is captured, so
+  // the model-space mount inherits the new scale instead of cancelling it.
+  if (head) head.scale.setScalar(HEAD_SCALE)
+
+  const dist = (a?: THREE.Object3D, b?: THREE.Object3D): number => {
+    if (!a || !b) return 0
+    return a.getWorldPosition(new THREE.Vector3()).distanceTo(b.getWorldPosition(new THREE.Vector3()))
+  }
+
+  const thighBone = bones[BONES.thighL]
+  const kneeBone = bones[BONES.shinL]
+  const footBone = root.getObjectByName('FootL') as THREE.Bone | undefined
+  const elbowBone = bones[BONES.foreL]
+  const wristBone = bones[BONES.wristL]
+
+  const thigh = dist(thighBone, kneeBone) || 0.45
+  const shin = dist(kneeBone, footBone) || 0.46
+  const hipBindY = thighBone ? thighBone.getWorldPosition(new THREE.Vector3()).y : 0.95
+
+  // how far the sole hangs below the ankle joint: the seated ankle target has
+  // to include it or the shoes hover over the floor. The packs name their
+  // meshes differently (Cube204 in the men's pack), so measure the whole body
+  // in the bind pose instead of hunting for a "feet" mesh: it stands on y = 0.
+  const ankleBindY = footBone ? footBone.getWorldPosition(new THREE.Vector3()).y : 0.012
+  const soleDrop = Math.max(0, ankleBindY)
+
+  // shin straight down puts the sole on the floor with the knee at 90 degrees;
+  // never drop the hips so far that the pelvis sinks into the chair
+  const hipY = Math.max(SIT.minHipY, SIT.ankleY + soleDrop + shin)
+
+  const metrics: RigMetrics = {
+    thigh,
+    shin,
+    upperArm: dist(bones[BONES.armL], elbowBone) || 0.2,
+    foreArm: dist(elbowBone, wristBone) || 0.22,
+    hipBindY,
+    hipY,
+    seatDrop: hipBindY - hipY,
+    headTopY: headBox.max.y,
+    headH: headBox.max.y - headBox.min.y,
+  }
+  // read back by verify/pose_check.py; no runtime cost
+  root.userData.metrics = metrics
+
   const feet: FootRest[] = []
   for (const [shinName, footName] of [
     [BONES.shinL, 'FootL'],
@@ -346,6 +443,7 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     landmarks,
     headMountMatrix,
     height: 1.7,
+    metrics,
   }
 }
 
@@ -353,8 +451,10 @@ const BONE_LOOKUP: ReadonlySet<string> = new Set(Object.values(BONES))
 
 /* ------------------------------------------------------------------ *
  * posing: the packs have no Sit / Type clip, so the seated pose is
- * built by rotating the leg and arm bones about the model's X axis
- * after the mixer has written the Idle pose.
+ * solved against the furniture instead of guessed with bone angles.
+ * Every joint is aimed at a point derived from the chair seat, the
+ * floor and the keyboard, which keeps the two legs symmetric and makes
+ * the result checkable numerically (see verify/pose_check.py).
  * ------------------------------------------------------------------ */
 
 const _axis = new THREE.Vector3()
@@ -363,7 +463,30 @@ const _dq = new THREE.Quaternion()
 const _target = new THREE.Quaternion()
 const _mq = new THREE.Quaternion()
 const MODEL_X = new THREE.Vector3(1, 0, 0)
-const MODEL_Z = new THREE.Vector3(0, 0, 1)
+const UP = new THREE.Vector3(0, 1, 0)
+
+/**
+ * The packs ship a head a shade over a fifth of the body, which reads as a
+ * mascot at dashboard distance. 0.94 keeps a believable adult silhouette
+ * without turning the face into a pinhead in the portrait view.
+ */
+export const HEAD_SCALE = 0.94
+
+/** aim scratch, kept out of the bend()/placeFoot() temporaries */
+const _a0 = new THREE.Vector3()
+const _a1 = new THREE.Vector3()
+const _a2 = new THREE.Vector3()
+const _a3 = new THREE.Vector3()
+const _a4 = new THREE.Vector3()
+const _aimHead = new THREE.Vector3()
+const _aimDir = new THREE.Vector3()
+const _aimNow = new THREE.Vector3()
+const _fwd = new THREE.Vector3()
+const _right = new THREE.Vector3()
+const _q0 = new THREE.Quaternion()
+const _q1 = new THREE.Quaternion()
+const _q2 = new THREE.Quaternion()
+const _q3 = new THREE.Quaternion()
 
 /**
  * Rotate a bone about one or more of the model's own axes, applied on top of
@@ -394,14 +517,59 @@ function bend(
   else bone.quaternion.slerp(_target, weight)
 }
 
-/** Seated pose tuning, in radians / model units. */
+/**
+ * Point a bone at a world position. The pack's bones run along their local +Y,
+ * so the world delta between "where the bone points now" and "where it should
+ * point" is re-expressed in the parent's frame and premultiplied. Unlike a
+ * fixed X rotation this lands the joint exactly, whatever roll the bone has.
+ */
+function aim(bone: THREE.Bone | undefined, target: THREE.Vector3, weight: number) {
+  const parent = bone?.parent
+  if (!bone || !parent) return
+  parent.updateWorldMatrix(true, false)
+  const head = _aimHead.setFromMatrixPosition(bone.matrixWorld)
+  const want = _aimDir.copy(target).sub(head)
+  if (want.lengthSq() < 1e-8) return
+  want.normalize()
+  const now = _aimNow.set(0, 1, 0).applyQuaternion(bone.getWorldQuaternion(_q0)).normalize()
+  if (now.dot(want) > 0.999999) return
+  _q1.setFromUnitVectors(now, want)
+  parent.getWorldQuaternion(_q2)
+  const inv = _q3.copy(_q2).invert()
+  _q1.premultiply(inv).multiply(_q2) // world delta → parent-local delta
+  _q0.copy(bone.quaternion)
+  bone.quaternion.premultiply(_q1)
+  if (weight < 1) bone.quaternion.slerpQuaternions(_q0, bone.quaternion, weight)
+}
+
+/**
+ * Seated pose geometry, in metres in the actor's own frame (-Z faces the desk,
+ * y = 0 is the floor). The numbers come from Desk.tsx: the chair seat top is
+ * 0.4725, the keyboard top is 0.786 at desk-local z 0.16, and the actor sits
+ * 0.42 behind the desk centre.
+ */
 export const SIT = {
-  thigh: -1.48,
-  shin: 1.4,
-  arm: -0.4,
-  elbow: -0.6,
-  armIn: 0.3,
-  drop: 0.26,
+  /** sole clearance above the floor, in metres */
+  ankleY: 0.0,
+  /** never sink the hips lower than this: the pelvis would enter the seat */
+  minHipY: 0.505,
+  /** knees tuck in a little instead of splaying */
+  kneeIn: 0.022,
+  /** thighs sit a hair below level, the way relaxed legs do */
+  kneeDown: 0.012,
+  /** keyboard centre, actor frame */
+  keyX: 0.04,
+  keyZ: -0.26,
+  /** wrist target: over the keys, hands a touch above the keycaps */
+  handX: 0.115,
+  handY: 0.802,
+  /** elbows out and slightly back, like someone actually typing */
+  elbowOut: 1.0,
+  elbowBack: 0.5,
+  elbowDown: 0.25,
+  /** torso leans toward the screen; the neck gives some of it back */
+  spineLean: 0.11,
+  neckLift: 0.06,
 }
 
 export interface PoseOptions {
@@ -411,6 +579,8 @@ export interface PoseOptions {
   headYaw: number
   lean: number
   typing: number
+  /** clock, for the small typing bob */
+  t: number
 }
 
 /** Apply the seated/standing overlay after mixer.update(). */
@@ -419,19 +589,88 @@ export function pose(rig: Rig, o: PoseOptions) {
   if (w <= 0.001) return
   const mq = _mq
   rig.root.getWorldQuaternion(mq)
-  const X = (a: number) => [MODEL_X, a] as const
-  bend(rig.bones[BONES.thighL], rig.rest.get(BONES.thighL), [X(SIT.thigh)], w, mq)
-  bend(rig.bones[BONES.thighR], rig.rest.get(BONES.thighR), [X(SIT.thigh)], w, mq)
-  bend(rig.bones[BONES.shinL], rig.rest.get(BONES.shinL), [X(SIT.shin)], w, mq)
-  bend(rig.bones[BONES.shinR], rig.rest.get(BONES.shinR), [X(SIT.shin)], w, mq)
-  // arms reach the keyboard; the more they type the further forward
-  const arm = SIT.arm + o.typing * 0.1
-  const elbow = SIT.elbow - o.typing * 0.08
-  bend(rig.bones[BONES.armL], rig.rest.get(BONES.armL), [X(arm), [MODEL_Z, -SIT.armIn]], w, mq)
-  bend(rig.bones[BONES.armR], rig.rest.get(BONES.armR), [X(arm), [MODEL_Z, SIT.armIn]], w, mq)
-  bend(rig.bones[BONES.foreL], rig.rest.get(BONES.foreL), [X(elbow)], w, mq)
-  bend(rig.bones[BONES.foreR], rig.rest.get(BONES.foreR), [X(elbow)], w, mq)
+  const m = rig.metrics
+
+  // the actor group carries the seat translation and the desk rotation; work
+  // in its frame so the targets can be written in plain "desk local" metres
+  const actor = rig.root.parent?.parent ?? rig.root
+  actor.updateWorldMatrix(true, false)
+  const M = actor.matrixWorld
+  const fwd = _fwd.set(0, 0, -1).transformDirection(M)
+  const right = _right.set(1, 0, 0).transformDirection(M)
+
+  // ---- torso: a slight lean into the desk, head still facing the screen
+  bend(rig.bones[BONES.abdomen], rig.rest.get(BONES.abdomen), [[MODEL_X, -SIT.spineLean]], w, mq)
+  bend(rig.bones[BONES.neck], rig.rest.get(BONES.neck), [[MODEL_X, SIT.neckLift]], w, mq)
+
+  // ---- legs: thigh level, shin straight down, sole on the floor
+  for (const side of [-1, 1] as const) {
+    const thighBone = rig.bones[side < 0 ? BONES.thighL : BONES.thighR]
+    const shinBone = rig.bones[side < 0 ? BONES.shinL : BONES.shinR]
+    if (!thighBone || !shinBone) continue
+    thighBone.updateWorldMatrix(true, false)
+    const hip = _a0.setFromMatrixPosition(thighBone.matrixWorld).clone()
+    const kneeT = _a1
+      .copy(hip)
+      .addScaledVector(fwd, m.thigh)
+      .addScaledVector(right, -side * SIT.kneeIn)
+    kneeT.y -= SIT.kneeDown
+    aim(thighBone, kneeT, w)
+    shinBone.updateWorldMatrix(true, false)
+    const knee = _a2.setFromMatrixPosition(shinBone.matrixWorld)
+    const ankleT = _a3.copy(knee)
+    ankleT.y -= m.shin
+    aim(shinBone, ankleT, w)
+  }
+
+  // ---- arms: wrists over the keys, elbows solved so both hands land
+  const bob = Math.sin(o.t * 7.5) * 0.006 * o.typing
+  for (const side of [-1, 1] as const) {
+    const armBone = rig.bones[side < 0 ? BONES.armL : BONES.armR]
+    const foreBone = rig.bones[side < 0 ? BONES.foreL : BONES.foreR]
+    if (!armBone || !foreBone) continue
+    armBone.updateWorldMatrix(true, false)
+    const shoulder = _a0.setFromMatrixPosition(armBone.matrixWorld).clone()
+    const wristT = _a1
+      .set(SIT.keyX + side * SIT.handX, SIT.handY + bob * (side < 0 ? 1 : -1), SIT.keyZ)
+      .applyMatrix4(M)
+    const elbow = solveElbow(shoulder, wristT, m.upperArm, m.foreArm, side)
+    aim(armBone, elbow, w)
+    aim(foreBone, wristT, w)
+  }
+
   for (const f of rig.feet) placeFoot(f, w)
+}
+
+/**
+ * Two-bone IK: where the elbow has to sit so the upper arm (l1) and the
+ * forearm (l2) reach from the shoulder to the wrist. The pole vector pulls the
+ * elbow out to the side and a little back, which is what a typist's arm does.
+ */
+function solveElbow(
+  shoulder: THREE.Vector3,
+  wrist: THREE.Vector3,
+  l1: number,
+  l2: number,
+  side: number,
+): THREE.Vector3 {
+  const dir = _a4.copy(wrist).sub(shoulder)
+  const d = THREE.MathUtils.clamp(dir.length(), Math.abs(l1 - l2) + 1e-3, l1 + l2 - 1e-3)
+  dir.normalize()
+  const a = (l1 * l1 - l2 * l2 + d * d) / (2 * d)
+  const h = Math.sqrt(Math.max(0, l1 * l1 - a * a))
+  const pole = _a3
+    .copy(_right)
+    .multiplyScalar(side * SIT.elbowOut)
+    .addScaledVector(_fwd, -SIT.elbowBack)
+    .addScaledVector(UP, -SIT.elbowDown)
+  pole.addScaledVector(dir, -pole.dot(dir))
+  if (pole.lengthSq() < 1e-6) pole.copy(_fwd)
+  pole.normalize()
+  return new THREE.Vector3()
+    .copy(shoulder)
+    .addScaledVector(dir, a)
+    .addScaledVector(pole, h)
 }
 
 /**

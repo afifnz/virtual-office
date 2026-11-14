@@ -89,7 +89,11 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
     const portrait =
       typeof window !== 'undefined' &&
       new URLSearchParams(window.location.search).get('face') !== null
-    const idle = status === 'idle' && !portrait
+    // verify/ screenshots pin everyone to their desk: ?still=1
+    const still =
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('still') === '1'
+    const idle = status === 'idle' && !portrait && !still
     const step = Math.min(dt, 0.1)
 
     // ---- decide whether to leave the desk

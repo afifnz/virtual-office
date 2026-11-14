@@ -7,7 +7,7 @@ import type { AgentStatus } from '../lib/types'
 import { walkerPositions } from '../lib/presence'
 import {
   MODEL_URL,
-  SIT,
+  HEAD_SCALE,
   buildGlasses,
   buildHeadphones,
   buildHijab,
@@ -191,6 +191,14 @@ export function Avatar({ id, look, status, mode, motion, headYaw = 0, lean = 0, 
 
     mixer.m.update(dt)
 
+    // the pack's clip never touches scale, but re-assert it anyway: the head
+    // proportion is the one thing that must not drift between frames
+    if (rig.bones.Head) rig.bones.Head.scale.setScalar(HEAD_SCALE)
+
+    // drop onto the chair before posing: the legs are solved against the
+    // floor, so the body group has to be in its final place first
+    if (bodyRef.current) bodyRef.current.position.y = -rig.metrics.seatDrop * sitW.current
+
     // head turn + glance
     let glanceTarget = 0
     if (!STILL && lookAround && mode === 'seated' && bodyRef.current && walkerPositions.size > 0) {
@@ -219,13 +227,11 @@ export function Avatar({ id, look, status, mode, motion, headYaw = 0, lean = 0, 
       headYaw: 0,
       lean,
       typing: status === 'working' ? 1 : status === 'reviewing' ? 0.5 : 0.2,
+      t,
     })
     const yaw = STILL ? 0 : headYaw + glance.current + Math.sin(t * 0.6 + 0.4) * 0.04
     const pitch = (status === 'blocked' ? 0.16 : 0) + (STILL ? 0 : Math.sin(t * 0.9) * 0.015)
     lookHead(rig, yaw, pitch)
-
-    // drop onto the chair
-    if (bodyRef.current) bodyRef.current.position.y = -SIT.drop * sitW.current
 
     // blink: the upper lid rolls down over the eyeball
     if (!STILL && t > blinkAt.current) {
