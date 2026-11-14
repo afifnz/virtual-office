@@ -46,7 +46,6 @@ const CLIPS = {
   idle: 'Idle',
   neutral: 'Idle_Neutral',
   walk: 'Walk',
-  interact: 'Interact',
 } as const
 
 function clipByName(clips: THREE.AnimationClip[], name: string): THREE.AnimationClip | undefined {
