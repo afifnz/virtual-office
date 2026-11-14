@@ -9,3 +9,6 @@ verify/*.png
 !verify/README.md
 *.log
 .DS_Store
+
+# build artefacts (rebuild with deploy/build.sh)
+deploy/office-api
