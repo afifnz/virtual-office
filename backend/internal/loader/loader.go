@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -92,17 +93,47 @@ func (l *Loader) gateway() derive.Gateway {
 		return derive.Gateway{State: "unknown"}
 	}
 	g := derive.Gateway{State: "unknown"}
-	for _, k := range []string{"state", "status"} {
-		if v, ok := m[k].(string); ok && v != "" {
-			g.State = v
+	// The file may be flat or wrap its payload in an object; collect the top-level
+	// keys so an unexpected shape is diagnosable from /api/status alone.
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	g.Keys = keys
+	g.Source = "gateway_state.json"
+
+	payload := m
+	for _, wrapper := range []string{"gateway", "daemon", "state", "gateway_state"} {
+		if sub, ok := m[wrapper].(map[string]any); ok {
+			payload = sub
+			g.Source = "gateway_state.json." + wrapper
 			break
 		}
 	}
-	if v, ok := m["version"].(string); ok {
-		g.Version = v
+
+	for _, k := range []string{"state", "status", "gateway_state", "lifecycle", "health"} {
+		if v, ok := payload[k].(string); ok && v != "" {
+			g.State = v
+			break
+		}
+		if v, ok := payload[k].(bool); ok {
+			if v {
+				g.State = "running"
+			} else {
+				g.State = "stopped"
+			}
+			break
+		}
 	}
-	for _, k := range []string{"updated_at", "ts", "time"} {
-		switch v := m[k].(type) {
+	for _, k := range []string{"version", "hermes_version", "app_version", "gateway_version"} {
+		if v, ok := payload[k].(string); ok && v != "" {
+			g.Version = v
+			break
+		}
+	}
+	for _, k := range []string{"updated_at", "ts", "time", "started_at"} {
+		switch v := payload[k].(type) {
 		case string:
 			g.UpdatedAt = v
 		case float64:

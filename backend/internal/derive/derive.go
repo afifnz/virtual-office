@@ -34,9 +34,11 @@ var Reviewers = map[string]bool{
 
 // Gateway is the gateway_state.json projection.
 type Gateway struct {
-	State     string `json:"state"`
-	Version   string `json:"version"`
-	UpdatedAt string `json:"updated_at"`
+	State     string   `json:"state"`
+	Version   string   `json:"version"`
+	UpdatedAt string   `json:"updated_at"`
+	Source    string   `json:"source,omitempty"`
+	Keys      []string `json:"keys,omitempty"`
 }
 
 // Current is the live activity of an agent.
