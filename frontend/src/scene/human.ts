@@ -1,0 +1,594 @@
+import * as THREE from 'three'
+import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import type { Look } from '../lib/agents'
+import type { FaceLandmarks } from './face'
+
+/**
+ * Quaternius "Ultimate Modular" humans, CC0 1.0.
+ *
+ * The women's pack ships as .glb; the men's pack ships as .gltf with the
+ * buffer inlined as base64, so it was repacked to .glb byte-for-byte (see
+ * public/models/LICENSE-quaternius.txt). Both packs share one 62-bone rig and
+ * the same 24 clips, so one pose/retarget layer serves every model.
+ */
+
+export type HumanModel =
+  | 'men-suit'
+  | 'men-casual'
+  | 'men-hoodie'
+  | 'women-casual'
+  | 'women-formal'
+
+export const MODEL_URL: Record<HumanModel, string> = {
+  'men-suit': '/models/men-suit.glb',
+  'men-casual': '/models/men-casual.glb',
+  'men-hoodie': '/models/men-hoodie.glb',
+  'women-casual': '/models/women-casual.glb',
+  'women-formal': '/models/women-formal.glb',
+}
+
+/** Which body each agent wears. Keyed by the profile id in lib/agents.ts. */
+export const MODEL_FOR_AGENT: Record<string, HumanModel> = {
+  default: 'women-casual',
+  dev: 'men-suit',
+  planner: 'men-casual',
+  uiux: 'women-formal',
+  coder: 'men-hoodie',
+  reviewer: 'men-suit',
+  tester: 'women-casual',
+  edu: 'women-formal',
+  'edu-designer': 'women-casual',
+  'edu-writer': 'men-casual',
+  'edu-reviewer': 'men-hoodie',
+}
+
+export function modelForAgent(id: string): HumanModel {
+  return MODEL_FOR_AGENT[id] ?? 'men-casual'
+}
+
+/* ------------------------------------------------------------------ *
+ * materials: one palette role per material name, per pack
+ * ------------------------------------------------------------------ */
+
+type Role = 'skin' | 'skinDark' | 'hair' | 'brow' | 'eye' | 'shirt' | 'pants' | 'shoes' | 'trim' | 'accent'
+
+const ROLES: Record<HumanModel, Record<string, Role>> = {
+  'men-suit': {
+    Skin: 'skin',
+    Hair: 'hair',
+    Eyebrows: 'brow',
+    Eye: 'eye',
+    Suit: 'shirt',
+    Tie: 'accent',
+    White: 'trim',
+    DarkBrown: 'shoes',
+    Grey: 'shoes',
+    Black: 'shoes',
+  },
+  'men-casual': {
+    Skin: 'skin',
+    'Skin_Darker': 'skinDark',
+    Hair: 'hair',
+    Eyebrows: 'brow',
+    Eye: 'eye',
+    LightBrown: 'shirt',
+    White: 'trim',
+    Red_Dark: 'shoes',
+    LightBlue: 'pants',
+  },
+  'men-hoodie': {
+    Skin: 'skin',
+    Hair: 'hair',
+    Eyebrows: 'brow',
+    Eye: 'eye',
+    Purple: 'shirt',
+    White: 'trim',
+    LightBlue: 'pants',
+  },
+  'women-casual': {
+    Skin: 'skin',
+    'Hair_Blond': 'hair',
+    'Hair_Brown': 'brow',
+    Brown: 'eye',
+    White: 'shirt',
+    Grey: 'shoes',
+    Orange: 'pants',
+  },
+  'women-formal': {
+    Skin: 'skin',
+    Red: 'hair',
+    Brown: 'eye',
+    LimeGreen: 'shirt',
+    Gold: 'accent',
+    'Formal_Feet/Red': 'shoes',
+  },
+}
+
+/** Roles whose meshes are hair (hidden under a hijab). */
+const HAIR_ROLES: ReadonlySet<Role> = new Set(['hair'])
+
+function shade(hex: string, k: number): string {
+  const c = new THREE.Color(hex)
+  return '#' + c.multiplyScalar(k).getHexString()
+}
+
+function mixHex(a: string, b: string, t: number): string {
+  const c = new THREE.Color(a).lerp(new THREE.Color(b), t)
+  return '#' + c.getHexString()
+}
+
+function roleColor(role: Role, look: Look): string {
+  switch (role) {
+    case 'skin':
+      return look.skin
+    case 'skinDark':
+      return shade(look.skin, 0.9)
+    case 'hair':
+      return look.hair
+    case 'brow':
+      return mixHex(look.hair, '#241a17', 0.4)
+    case 'eye':
+      return '#2b1f1a'
+    case 'shirt':
+      return look.shirt
+    case 'pants':
+      return look.pants
+    case 'shoes':
+      return shade(look.pants, 0.55)
+    case 'trim':
+      return shade(look.shirt, 0.82)
+    case 'accent':
+      return look.accent
+  }
+}
+
+/** Bone names shared by both packs (the men's and women's rigs match). */
+export const BONES = {
+  hips: 'Hips',
+  chest: 'Chest',
+  neck: 'Neck',
+  head: 'Head',
+  armL: 'UpperArmL',
+  armR: 'UpperArmR',
+  foreL: 'LowerArmL',
+  foreR: 'LowerArmR',
+  thighL: 'UpperLegL',
+  thighR: 'UpperLegR',
+  shinL: 'LowerLegL',
+  shinR: 'LowerLegR',
+} as const
+
+/** three.js strips dots from glTF node names ("UpperArm.L" → "UpperArmL"). */
+function normBone(name: string): string {
+  return name.replace(/[^A-Za-z0-9_]/g, '')
+}
+
+interface FootRest {
+  bone: THREE.Bone
+  shin: THREE.Bone
+  /** ankle position in the shin's local frame, so it can follow the knee */
+  offset: THREE.Vector3
+  restPos: THREE.Vector3
+  restWorldQuat: THREE.Quaternion
+}
+
+export interface Rig {
+  /** the cloned glTF scene, already rotated to face -Z and scaled to 1.7 m */
+  root: THREE.Group
+  bones: Record<string, THREE.Bone>
+  rest: Map<string, THREE.Quaternion>
+  eyeMeshes: THREE.Mesh[]
+  hairMeshes: THREE.Mesh[]
+  headSkinMeshes: THREE.Mesh[]
+  feet: FootRest[]
+  /** face measurements in model space, used by the face/hijab/glasses builders */
+  landmarks: FaceLandmarks
+  /** model space → head-bone space, captured at rest */
+  headMountMatrix: THREE.Matrix4
+  height: number
+}
+
+/** A world-space box re-expressed in an object's local space. */
+function boxInRoot(b: THREE.Box3, root: THREE.Object3D): THREE.Box3 {
+  const out = new THREE.Box3()
+  const v = new THREE.Vector3()
+  for (let i = 0; i < 8; i++) {
+    v.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z)
+    out.expandByPoint(root.worldToLocal(v.clone()))
+  }
+  return out
+}
+
+/**
+ * Deep-clone a loaded glTF for one agent: geometry is shared, the skeleton and
+ * every material are not (SkeletonUtils.clone rebuilds the bone graph, so two
+ * agents can never drive the same bones).
+ */
+export function instantiate(source: THREE.Object3D, look: Look, model: HumanModel): Rig {
+  const root = skeletonClone(source) as THREE.Group
+
+  const roles = ROLES[model]
+  const eyeMeshes: THREE.Mesh[] = []
+  const hairMeshes: THREE.Mesh[] = []
+  const skinMeshes: THREE.Mesh[] = []
+
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (!mesh.isMesh) return
+    const mat = mesh.material as THREE.MeshStandardMaterial
+    const name = mat?.name ?? ''
+    const role = roles[`${mesh.name}/${name}`] ?? roles[name]
+    const clone = mat.clone()
+    clone.metalness = 0
+    clone.roughness = role === 'skin' || role === 'skinDark' ? 0.62 : 0.78
+    if (role) clone.color.set(roleColor(role, look))
+    mesh.material = clone
+    if (role === 'eye') eyeMeshes.push(mesh)
+    if (role === 'skin') skinMeshes.push(mesh)
+    if (role && HAIR_ROLES.has(role)) hairMeshes.push(mesh)
+    mesh.castShadow = false
+    mesh.receiveShadow = false
+  })
+
+  // rest pose, captured before any mixer touches the bones
+  const rest = new Map<string, THREE.Quaternion>()
+  const bones: Record<string, THREE.Bone> = {}
+  root.traverse((o) => {
+    const b = o as THREE.Bone
+    if (!b.isBone) return
+    rest.set(b.name, b.quaternion.clone())
+    const key = normBone(b.name)
+    if (BONE_LOOKUP.has(key)) bones[key] = b
+  })
+
+  root.updateMatrixWorld(true)
+  const box = new THREE.Box3().setFromObject(root)
+  const height = box.max.y - box.min.y
+  const scale = 1.7 / height
+  root.scale.setScalar(scale)
+  root.position.y = -box.min.y * scale
+  // the pack is authored facing +Z; the office faces its agents toward -Z
+  root.rotation.y = Math.PI
+
+  root.updateMatrixWorld(true)
+  // the head skin is the skin mesh that reaches highest; the body skin also
+  // reaches into the neck, so only meshes that start above 80% of the body
+  // height count as head
+  const skinBoxes = skinMeshes.map((m) => ({ m, b: new THREE.Box3().setFromObject(m) }))
+  const top = skinBoxes.reduce((a, b) => (b.b.max.y > a.b.max.y ? b : a), skinBoxes[0]!)
+  const headSkinMeshes = top
+    ? [top.m, ...skinBoxes.filter((x) => x !== top && x.b.min.y > box.max.y * 0.8).map((x) => x.m)]
+    : []
+
+  // face landmarks, measured in model space (root-local, +Z = facing)
+  const headBox = new THREE.Box3()
+  for (const m of headSkinMeshes) headBox.union(boxInRoot(new THREE.Box3().setFromObject(m), root))
+  const eyeBox = new THREE.Box3()
+  for (const m of eyeMeshes) eyeBox.union(boxInRoot(new THREE.Box3().setFromObject(m), root))
+  const eyeSize = eyeBox.getSize(new THREE.Vector3())
+  const eyeCenter = eyeBox.getCenter(new THREE.Vector3())
+
+  // head skin vertices in model space: used to find the real surface depth at
+  // the mouth and nose instead of guessing an offset from the nose tip
+  const verts: THREE.Vector3[] = []
+  for (const m of headSkinMeshes) {
+    const pos = m.geometry.attributes.position
+    if (!pos) continue
+    const v = new THREE.Vector3()
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos as THREE.BufferAttribute, i)
+      verts.push(root.worldToLocal(m.localToWorld(v.clone())))
+    }
+  }
+  const surfaceZ = (y: number, halfX: number, tol = 0.012): number => {
+    let best = -Infinity
+    for (const v of verts) {
+      if (Math.abs(v.y - y) > tol || Math.abs(v.x) > halfX) continue
+      if (v.z > best) best = v.z
+    }
+    return Number.isFinite(best) ? best : headBox.max.z - 0.02
+  }
+  const mouthY = eyeCenter.y - 0.108
+  const noseY = eyeCenter.y - 0.07
+
+  const landmarks: FaceLandmarks = {
+    eyeY: eyeCenter.y,
+    eyeZ: eyeBox.max.z,
+    eyeX: Math.max(0.03, eyeSize.x * 0.24),
+    eyeW: Math.max(0.02, eyeSize.x * 0.42),
+    eyeH: Math.max(0.012, eyeSize.y),
+    faceZ: headBox.max.z,
+    chinY: headBox.min.y,
+    headTopY: headBox.max.y,
+    headW: headBox.max.x - headBox.min.x,
+    headCenterY: (headBox.max.y + headBox.min.y) / 2,
+    headCenterZ: (headBox.max.z + headBox.min.z) / 2,
+    mouthY,
+    mouthZ: surfaceZ(mouthY, 0.02),
+    noseY,
+    noseZ: surfaceZ(noseY, 0.012, 0.008),
+  }
+
+  // face/hijab/glasses are authored in model space and mounted on the head
+  // bone through this fixed matrix, so they ride the animation exactly
+  const head = bones[BONES.head]
+  const headMountMatrix = new THREE.Matrix4()
+  if (head) {
+    headMountMatrix.copy(head.matrixWorld).invert().multiply(root.matrixWorld)
+  }
+
+  const feet: FootRest[] = []
+  for (const [shinName, footName] of [
+    [BONES.shinL, 'FootL'],
+    [BONES.shinR, 'FootR'],
+  ] as const) {
+    const shin = bones[shinName]
+    const foot = root.getObjectByName(footName) as THREE.Bone | undefined
+    if (!shin || !foot) continue
+    const world = foot.getWorldPosition(new THREE.Vector3())
+    feet.push({
+      bone: foot,
+      shin,
+      offset: shin.worldToLocal(world.clone()),
+      restPos: foot.position.clone(),
+      restWorldQuat: foot.getWorldQuaternion(new THREE.Quaternion()),
+    })
+  }
+
+  return {
+    root,
+    bones,
+    rest,
+    eyeMeshes,
+    hairMeshes,
+    headSkinMeshes,
+    feet,
+    landmarks,
+    headMountMatrix,
+    height: 1.7,
+  }
+}
+
+const BONE_LOOKUP: ReadonlySet<string> = new Set(Object.values(BONES))
+
+/* ------------------------------------------------------------------ *
+ * posing: the packs have no Sit / Type clip, so the seated pose is
+ * built by rotating the leg and arm bones about the model's X axis
+ * after the mixer has written the Idle pose.
+ * ------------------------------------------------------------------ */
+
+const _axis = new THREE.Vector3()
+const _pq = new THREE.Quaternion()
+const _dq = new THREE.Quaternion()
+const _target = new THREE.Quaternion()
+const _mq = new THREE.Quaternion()
+const MODEL_X = new THREE.Vector3(1, 0, 0)
+const MODEL_Z = new THREE.Vector3(0, 0, 1)
+
+/**
+ * Rotate a bone about one or more of the model's own axes, applied on top of
+ * its rest pose. Working in parent space keeps the pose correct no matter how
+ * the bone was oriented in the source FBX (these leg bones are not axis-aligned).
+ */
+function bend(
+  bone: THREE.Bone | undefined,
+  rest: THREE.Quaternion | undefined,
+  deltas: ReadonlyArray<readonly [THREE.Vector3, number]>,
+  weight: number,
+  modelQuat: THREE.Quaternion,
+) {
+  if (!bone || !rest) return
+  const parent = bone.parent
+  if (!parent) return
+  parent.updateWorldMatrix(true, false)
+  parent.getWorldQuaternion(_pq)
+  _pq.invert()
+  _target.copy(rest)
+  for (const [axis, angle] of deltas) {
+    if (!angle) continue
+    _axis.copy(axis).applyQuaternion(modelQuat).applyQuaternion(_pq)
+    _dq.setFromAxisAngle(_axis, angle)
+    _target.premultiply(_dq)
+  }
+  if (weight >= 1) bone.quaternion.copy(_target)
+  else bone.quaternion.slerp(_target, weight)
+}
+
+/** Seated pose tuning, in radians / model units. */
+export const SIT = {
+  thigh: -1.48,
+  shin: 1.4,
+  arm: -0.4,
+  elbow: -0.6,
+  armIn: 0.3,
+  drop: 0.26,
+}
+
+export interface PoseOptions {
+  seated: boolean
+  /** 0..1, eased by the caller */
+  weight: number
+  headYaw: number
+  lean: number
+  typing: number
+}
+
+/** Apply the seated/standing overlay after mixer.update(). */
+export function pose(rig: Rig, o: PoseOptions) {
+  const w = o.weight
+  if (w <= 0.001) return
+  const mq = _mq
+  rig.root.getWorldQuaternion(mq)
+  const X = (a: number) => [MODEL_X, a] as const
+  bend(rig.bones[BONES.thighL], rig.rest.get(BONES.thighL), [X(SIT.thigh)], w, mq)
+  bend(rig.bones[BONES.thighR], rig.rest.get(BONES.thighR), [X(SIT.thigh)], w, mq)
+  bend(rig.bones[BONES.shinL], rig.rest.get(BONES.shinL), [X(SIT.shin)], w, mq)
+  bend(rig.bones[BONES.shinR], rig.rest.get(BONES.shinR), [X(SIT.shin)], w, mq)
+  // arms reach the keyboard; the more they type the further forward
+  const arm = SIT.arm + o.typing * 0.1
+  const elbow = SIT.elbow - o.typing * 0.08
+  bend(rig.bones[BONES.armL], rig.rest.get(BONES.armL), [X(arm), [MODEL_Z, -SIT.armIn]], w, mq)
+  bend(rig.bones[BONES.armR], rig.rest.get(BONES.armR), [X(arm), [MODEL_Z, SIT.armIn]], w, mq)
+  bend(rig.bones[BONES.foreL], rig.rest.get(BONES.foreL), [X(elbow)], w, mq)
+  bend(rig.bones[BONES.foreR], rig.rest.get(BONES.foreR), [X(elbow)], w, mq)
+  for (const f of rig.feet) placeFoot(f, w)
+}
+
+/**
+ * The pack parents the foot bones to the Body node, not to the shin, so a bent
+ * knee leaves them behind. Re-seat each ankle at the end of its shin and keep
+ * the foot level with the floor.
+ */
+function placeFoot(f: FootRest, w: number) {
+  const body = f.bone.parent
+  if (!body) return
+  f.shin.updateWorldMatrix(true, false)
+  const target = f.shin.localToWorld(f.offset.clone())
+  body.updateWorldMatrix(true, false)
+  const local = body.worldToLocal(target)
+  f.bone.position.copy(f.restPos).lerp(local, w)
+  body.getWorldQuaternion(_pq)
+  _dq.copy(_pq.invert()).multiply(f.restWorldQuat)
+  f.bone.quaternion.slerp(_dq, w)
+}
+
+/** Turn the head about the model's Y axis (glancing at a passing colleague). */
+export function lookHead(rig: Rig, yaw: number, pitch = 0) {
+  const head = rig.bones[BONES.head]
+  if (!head) return
+  const parent = head.parent
+  if (!parent) return
+  parent.updateWorldMatrix(true, false)
+  parent.getWorldQuaternion(_pq)
+  const mq = _mq
+  rig.root.getWorldQuaternion(mq)
+  _axis.set(0, 1, 0).applyQuaternion(mq).applyQuaternion(_pq.clone().invert())
+  _dq.setFromAxisAngle(_axis, yaw)
+  _target.copy(_dq).multiply(rig.rest.get(BONES.head) ?? head.quaternion)
+  head.quaternion.slerp(_target, 0.85)
+  if (pitch !== 0) {
+    _axis.set(1, 0, 0).applyQuaternion(_pq.clone().invert())
+    _dq.setFromAxisAngle(_axis, pitch)
+    head.quaternion.premultiply(_dq)
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * hijab: a cloth shell over the skull with a face opening, mounted on
+ * the Head bone so it turns with the head.
+ * ------------------------------------------------------------------ */
+
+/**
+ * A group parented to the head bone whose local space is the model's own, so
+ * face/hijab/glasses geometry can be authored in plain model coordinates and
+ * still turn with the head. The women's armature carries a 100x node scale and
+ * the men's does not; the fixed matrix absorbs that difference.
+ */
+export function headMount(rig: Rig): { group: THREE.Group } | null {
+  const head = rig.bones[BONES.head]
+  if (!head) return null
+  const group = new THREE.Group()
+  group.name = 'headMount'
+  group.matrixAutoUpdate = false
+  group.matrix.copy(rig.headMountMatrix)
+  head.add(group)
+  return { group }
+}
+
+/**
+ * Hijab: a crown cap plus a shell that wraps the sides and nape, leaving an
+ * oval window over the face, and a drape that falls to the shoulders. All
+ * coordinates are model space, so the same builder fits either pack.
+ */
+export function buildHijab(color: string, l: FaceLandmarks): THREE.Group {
+  const g = new THREE.Group()
+  const R = l.headW * 0.66
+  const cloth = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.95,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  })
+  const cy = l.headCenterY + 0.012
+  const cz = l.headCenterZ
+
+  const crown = new THREE.Mesh(new THREE.SphereGeometry(R, 32, 18, 0, Math.PI * 2, 0, 0.98), cloth)
+  crown.scale.set(1.0, 1.08, 1.02)
+  crown.position.set(0, cy, cz)
+  g.add(crown)
+
+  const back = new THREE.Mesh(
+    new THREE.SphereGeometry(R, 40, 24, Math.PI / 2 + 0.5, Math.PI * 2 - 1.0, 0.9, 1.2),
+    cloth,
+  )
+  back.scale.set(1.03, 1.12, 1.06)
+  back.position.set(0, cy, cz)
+  g.add(back)
+
+  // drape: from the jaw down over the shoulders
+  const drapeTop = l.chinY + 0.02
+  const drape = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.92, R * 2.1, 0.34, 36, 1, true), cloth)
+  drape.position.set(0, drapeTop - 0.17, cz - 0.01)
+  drape.scale.set(1.0, 1.0, 0.86)
+  g.add(drape)
+
+  const hem = new THREE.Mesh(new THREE.TorusGeometry(R * 2.06, 0.0065, 6, 44), cloth)
+  hem.rotation.x = Math.PI / 2
+  hem.position.set(0, drapeTop - 0.34, cz - 0.01)
+  hem.scale.set(1, 0.86, 1)
+  g.add(hem)
+  return g
+}
+
+/** Glasses: two rimmed lenses plus a bridge, sized to the measured eyes. */
+export function buildGlasses(l: FaceLandmarks): THREE.Group {
+  const g = new THREE.Group()
+  const frame = new THREE.MeshStandardMaterial({ color: '#33302c', roughness: 0.35, metalness: 0.6 })
+  const glass = new THREE.MeshStandardMaterial({
+    color: '#cfe0e8',
+    roughness: 0.08,
+    metalness: 0,
+    transparent: true,
+    opacity: 0.14,
+    depthWrite: false,
+  })
+  const r = Math.max(0.024, l.eyeW * 0.78)
+  const z = l.faceZ - 0.012
+  for (const s of [-1, 1]) {
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(r, 0.0026, 8, 22), frame)
+    rim.position.set(s * l.eyeX, l.eyeY + 0.004, z)
+    rim.scale.set(1, 0.86, 1)
+    g.add(rim)
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(r * 0.96, 22), glass)
+    lens.position.set(s * l.eyeX, l.eyeY + 0.004, z - 0.0012)
+    lens.scale.set(1, 0.86, 1)
+    g.add(lens)
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.0026, 0.003, 0.08), frame)
+    arm.position.set(s * (l.eyeX + r * 0.95), l.eyeY + 0.008, z - 0.042)
+    arm.rotation.y = s * 0.38
+    g.add(arm)
+  }
+  const bridge = new THREE.Mesh(new THREE.BoxGeometry(l.eyeX * 0.9, 0.0026, 0.0026), frame)
+  bridge.position.set(0, l.eyeY + 0.008, z)
+  g.add(bridge)
+  return g
+}
+
+/** Headphones around the ears and over the crown. */
+export function buildHeadphones(color: string, l: FaceLandmarks): THREE.Group {
+  const g = new THREE.Group()
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.1 })
+  const R = l.headW * 0.62
+  const band = new THREE.Mesh(new THREE.TorusGeometry(R, 0.0085, 6, 26, Math.PI), mat)
+  band.rotation.z = Math.PI
+  band.rotation.y = Math.PI / 2
+  band.position.set(0, l.eyeY + 0.02, l.headCenterZ)
+  g.add(band)
+  for (const s of [-1, 1]) {
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.026, 16), mat)
+    cup.position.set(s * l.headW * 0.52, l.eyeY - 0.006, l.headCenterZ)
+    cup.rotation.z = Math.PI / 2
+    g.add(cup)
+  }
+  return g
+}

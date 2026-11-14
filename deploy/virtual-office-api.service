@@ -1,0 +1,34 @@
+[Unit]
+Description=Agent Office API (Go, read-only Hermes state)
+Documentation=https://office.afifnurzein.my.id/api/health
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Paths are relative to the deploying user. Adjust "WorkingDirectory" and
+# "ExecStart" if the repo lives somewhere else.
+WorkingDirectory=%h/workspace/virtual-office/backend
+ExecStart=%h/workspace/virtual-office/backend/bin/office-api
+
+Environment=HERMES_HOME=%h/.hermes
+Environment=BIND=127.0.0.1
+Environment=PORT=8131
+# Restrict the roster without touching the code:
+# Environment=PROFILES=default,dev,planner,coder,reviewer,tester,edu
+
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/workspace/virtual-office/backend
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=office-api
+
+[Install]
+WantedBy=default.target

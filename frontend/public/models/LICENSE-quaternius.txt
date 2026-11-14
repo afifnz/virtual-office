@@ -1,0 +1,41 @@
+Quaternius — "Ultimate Modular Women" and "Ultimate Modular Men"
+==========================================================================
+License: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
+         https://creativecommons.org/publicdomain/zero/1.0/
+Author:  @Quaternius — https://quaternius.com — https://www.patreon.com/quaternius
+
+No attribution is legally required under CC0; it is given here because the
+author asks for it.
+
+Files in this folder
+--------------------
+women-casual.glb   Ultimate Modular Women — Casual
+women-formal.glb   Ultimate Modular Women — Formal
+men-casual.glb     Ultimate Modular Men   — Casual_2
+men-hoodie.glb     Ultimate Modular Men   — Casual_Hoodie
+men-suit.glb       Ultimate Modular Men   — Suit
+
+Source
+------
+Pack pages (license linked from each):
+  https://quaternius.com/packs/ultimatemodularwomen.html
+  https://quaternius.com/packs/ultimatemodularmen.html
+
+GLB mirrors used for download:
+  https://github.com/benelog/sim-office/tree/main/quaternius/ultimate-modular-women
+  https://github.com/benelog/sim-office/tree/main/quaternius/ultimate-modular-characters
+  (the women's pack is mirrored there as .glb converted from the pack's FBX by
+   poly.pizza — https://poly.pizza/bundle/Ultimate-Modular-Women-Pack-aCBDXDdTNN)
+
+The men's pack is mirrored as .gltf with the buffer inlined as base64. It was
+repacked to .glb losslessly (JSON chunk + decoded BIN chunk, no re-encode, no
+asset changes) so both packs load through the same GLTFLoader path.
+
+Contents of every file: one 62-bone humanoid rig, 24 animation clips
+(Idle, Idle_Neutral, Interact, Walk, Run, Wave, ...), flat-colour materials and
+no textures, 1.5–1.8 MB each.
+
+Modifications made in this project (all at runtime, the .glb files are
+untouched): per-agent material colour overrides, a seated pose built by
+rotating hip/knee/shoulder bones, and optional hijab / glasses / headphone
+geometry parented to the Head bone.
