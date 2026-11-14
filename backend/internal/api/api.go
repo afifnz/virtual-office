@@ -13,7 +13,16 @@ import (
 )
 
 // Version of the office API.
-const Version = "2.0.0"
+const Version = "2.1.0"
+
+// Build metadata, overridden at build time with -ldflags "-X officeapi/internal/api.BuildCommit=...".
+var (
+	BuildCommit = "dev"
+	BuildTime   = "unknown"
+)
+
+// StackID is what the health endpoint reports and what Caddy-fronted clients can check.
+const StackID = "virtual-office/go+react"
 
 // Server wires the loader to the router.
 type Server struct {
@@ -42,6 +51,8 @@ func (s *Server) withCommon(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Office-Stack", StackID)
+		w.Header().Set("X-Office-Commit", BuildCommit)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -63,13 +74,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":       true,
-		"version":  Version,
-		"now":      float64(time.Now().UnixNano()) / 1e9,
-		"uptime_s": int(time.Since(s.started).Seconds()),
-		"home":     s.loader.Home(),
-		"profiles": len(s.cfg.Profiles),
-		"bind":     s.cfg.ListenAddr(),
+		"ok":         true,
+		"service":    "virtual-office-api",
+		"stack":      StackID,
+		"version":    Version,
+		"commit":     BuildCommit,
+		"build_time": BuildTime,
+		"now":        float64(time.Now().UnixNano()) / 1e9,
+		"uptime_s":   int(time.Since(s.started).Seconds()),
+		"home":       s.loader.Home(),
+		"profiles":   len(s.cfg.Profiles),
+		"bind":       s.cfg.ListenAddr(),
 	})
 }
 
