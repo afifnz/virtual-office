@@ -12,8 +12,10 @@ export function Furniture({ agents }: { agents: Agent[] }) {
   return (
     <group>
       <Reception />
+      <MeetingTable />
       <Lounge />
       <KopiCorner />
+      <CafeTable />
       <Gamelan />
       <ServerRack />
       <TaskBoard
@@ -34,7 +36,7 @@ export function Furniture({ agents }: { agents: Agent[] }) {
       <Lesehan />
       <Cat />
       <Entrance />
-      <Rug shadows={[[-7.0, 9.2], [18.4, 8.8]]} />
+      <Rug shadows={[[-5.4, 10.6], [18.4, 8.8], [8.0, 12.0]]} />
     </group>
   )
 }
@@ -63,7 +65,9 @@ function Reception() {
     px: 44,
   })
   return (
-    <group position={[-7.0, 0, 12.0]}>
+    // beside Galuh's desk, its front turned to the entrance path (+x), so a
+    // visitor walking in sees the plate and nobody sits staring at its back
+    <group position={[-3.9, 0, 10.8]} rotation={[0, Math.PI / 2, 0]}>
       <mesh position={[0, 0.52, 0]}>
         <boxGeometry args={[2.6, 1.04, 0.62]} />
         <meshStandardMaterial color="#7c5638" roughness={0.72} />
@@ -88,6 +92,111 @@ function Reception() {
         <sphereGeometry args={[0.14, 10, 8]} />
         <meshStandardMaterial color="#5c7d4a" roughness={0.9} />
       </mesh>
+    </group>
+  )
+}
+
+/** Meja rapat: a teak table for six on the pendopo's east side. */
+function MeetingTable() {
+  const wood = '#4f3726'
+  const chairs: Array<[number, number, number]> = [-1.0, 0, 1.0].flatMap((x) => [
+    [x, -0.8, Math.PI] as [number, number, number],
+    [x, 0.8, 0] as [number, number, number],
+  ])
+  return (
+    <group position={[8.0, 0, 12.0]}>
+      <mesh position={[0, 0.745, 0]}>
+        <boxGeometry args={[3.0, 0.06, 1.1]} />
+        <meshStandardMaterial color="#8a6142" roughness={0.6} />
+      </mesh>
+      {[
+        [-1.38, -0.45],
+        [1.38, -0.45],
+        [-1.38, 0.45],
+        [1.38, 0.45],
+      ].map(([x, z], i) => (
+        <mesh key={i} position={[x!, 0.36, z!]}>
+          <boxGeometry args={[0.08, 0.72, 0.08]} />
+          <meshStandardMaterial color="#5a3d29" roughness={0.72} />
+        </mesh>
+      ))}
+      {/* papers and a clay kendi in the middle */}
+      {[-0.7, 0.55].map((x, i) => (
+        <mesh key={x} position={[x, 0.782, i ? 0.12 : -0.1]} rotation={[0, i ? -0.2 : 0.15, 0]}>
+          <boxGeometry args={[0.3, 0.012, 0.22]} />
+          <meshStandardMaterial color="#efe6d4" roughness={0.8} />
+        </mesh>
+      ))}
+      <mesh position={[0, 0.87, 0]}>
+        <sphereGeometry args={[0.11, 14, 12]} />
+        <meshStandardMaterial color="#a8603e" roughness={0.75} />
+      </mesh>
+      <mesh position={[0, 1.0, 0]}>
+        <cylinderGeometry args={[0.03, 0.045, 0.1, 10]} />
+        <meshStandardMaterial color="#a8603e" roughness={0.75} />
+      </mesh>
+      {chairs.map(([x, z, r], i) => (
+        <group key={i} position={[x, 0, z]} rotation={[0, r, 0]}>
+          <mesh position={[0, 0.45, 0]}>
+            <boxGeometry args={[0.46, 0.045, 0.44]} />
+            <meshStandardMaterial color={wood} roughness={0.78} />
+          </mesh>
+          <mesh position={[0, 0.74, 0.215]}>
+            <boxGeometry args={[0.44, 0.5, 0.04]} />
+            <meshStandardMaterial color={wood} roughness={0.78} />
+          </mesh>
+          {[
+            [-0.19, -0.18],
+            [0.19, -0.18],
+            [-0.19, 0.18],
+            [0.19, 0.18],
+          ].map(([lx, lz], j) => (
+            <mesh key={j} position={[lx!, 0.22, lz!]}>
+              <boxGeometry args={[0.04, 0.45, 0.04]} />
+              <meshStandardMaterial color={wood} roughness={0.78} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </group>
+  )
+}
+
+/** A round bistro table with two stools, a step away from the warung kopi. */
+function CafeTable() {
+  return (
+    <group position={[-15.5, 0, 5.2]}>
+      <mesh position={[0, 0.74, 0]}>
+        <cylinderGeometry args={[0.42, 0.42, 0.05, 20]} />
+        <meshStandardMaterial color="#8a6142" roughness={0.6} />
+      </mesh>
+      <mesh position={[0, 0.37, 0]}>
+        <cylinderGeometry args={[0.04, 0.04, 0.72, 8]} />
+        <meshStandardMaterial color="#3a2b20" roughness={0.6} />
+      </mesh>
+      <mesh position={[0, 0.02, 0]}>
+        <cylinderGeometry args={[0.22, 0.24, 0.04, 14]} />
+        <meshStandardMaterial color="#3a2b20" roughness={0.6} />
+      </mesh>
+      {/* two cups of kopi tubruk */}
+      {[-0.14, 0.16].map((x) => (
+        <mesh key={x} position={[x, 0.8, x > 0 ? 0.08 : -0.06]}>
+          <cylinderGeometry args={[0.045, 0.038, 0.08, 12]} />
+          <meshStandardMaterial color="#dfd3bd" roughness={0.5} />
+        </mesh>
+      ))}
+      {[-0.72, 0.72].map((x) => (
+        <group key={x} position={[x, 0, 0]}>
+          <mesh position={[0, 0.46, 0]}>
+            <cylinderGeometry args={[0.2, 0.2, 0.06, 14]} />
+            <meshStandardMaterial color="#8c6a44" roughness={0.85} />
+          </mesh>
+          <mesh position={[0, 0.22, 0]}>
+            <cylinderGeometry args={[0.035, 0.05, 0.44, 8]} />
+            <meshStandardMaterial color="#6d4f31" roughness={0.9} />
+          </mesh>
+        </group>
+      ))}
     </group>
   )
 }
