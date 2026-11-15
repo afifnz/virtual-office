@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { AgentMeta } from '../lib/agents'
 import type { Agent } from '../lib/types'
-import { DESK_EXIT, POIS, nearestNode, type Poi } from '../lib/rooms'
+import { deskExit, POIS, nearestNode, type Poi } from '../lib/rooms'
 import { navPath, type Pt } from '../lib/nav'
 import { labelTexture } from '../lib/label'
 import { statusLabel, toolLabel } from '../lib/format'
@@ -200,6 +200,8 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
       {/* the person can move */}
       <group
         ref={root}
+        name={`agent:${meta.id}`}
+        userData={{ agentId: meta.id, team: meta.team }}
         position={[seat[0], 0, seat[1]]}
         rotation={[0, meta.desk.rot, 0]}
         onClick={(e) => {
@@ -258,7 +260,7 @@ function pickPoi(meta: AgentMeta): Poi | null {
 
 /** exit → nav graph → destination */
 function onward(meta: AgentMeta, to: Pt): Pt[] {
-  const exit = DESK_EXIT[meta.id] ?? [seatPoint(meta)[0], seatPoint(meta)[1] + 1.3]
+  const exit = deskExit(meta.desk)
   const a = nearestNode(exit[0], exit[1]!)
   const b = nearestNode(to[0], to[1])
   return [[exit[0], exit[1]!], ...navPath(a.id, b.id), to]
@@ -266,7 +268,7 @@ function onward(meta: AgentMeta, to: Pt): Pt[] {
 
 /** current position → nav graph → seat, so the walk ends in the chair */
 function homeward(meta: AgentMeta, from: Pt): Pt[] {
-  const exit = DESK_EXIT[meta.id] ?? [seatPoint(meta)[0], seatPoint(meta)[1] + 1.3]
+  const exit = deskExit(meta.desk)
   const a = nearestNode(from[0], from[1])
   const b = nearestNode(exit[0], exit[1]!)
   const seat = seatPoint(meta)

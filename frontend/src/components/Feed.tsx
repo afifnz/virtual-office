@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
-import { agentMeta } from '../lib/agents'
+import { agentMeta } from '../lib/roster'
 import type { StatusPayload } from '../lib/types'
-import { kindLabel, relTime, toolLabel, wibClock } from '../lib/format'
+import { kindLabel, officeClock, relTime, toolLabel } from '../lib/format'
 
 export type FeedTab = 'aktivitas' | 'komunikasi'
 
@@ -102,7 +102,7 @@ export function Feed({
               const to = agentMeta(c.to)
               return (
                 <li key={`${c.ts}-${i}`} className="comm-row">
-                  <time>{wibClock(c.ts)}</time>
+                  <time>{officeClock(c.ts)}</time>
                   <div className="comm-main">
                     <span className="comm-from">{from.name}</span>
                     <span className={`comm-arrow ${c.kind}`} aria-hidden="true">

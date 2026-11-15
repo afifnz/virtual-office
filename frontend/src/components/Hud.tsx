@@ -1,6 +1,6 @@
 import { useIsMobile, useIsNarrow } from '../hooks/useViewport'
 import type { StatusPayload } from '../lib/types'
-import { TEAMS } from '../lib/agents'
+import { teamMeta, tzLabel } from '../lib/roster'
 import { compact } from '../lib/format'
 
 const DOTS: Array<{ key: string; label: string }> = [
@@ -57,7 +57,7 @@ export function Hud({
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-text">
             <strong>AGENT OFFICE</strong>
-            {!narrow ? <small>kantor virtual · WIB</small> : null}
+            {!narrow ? <small>kantor virtual · {tzLabel()}</small> : null}
           </span>
         </div>
 
@@ -81,9 +81,9 @@ export function Hud({
                 type="button"
                 className={`spot-btn ${spot === id ? 'is-active' : ''}`}
                 onClick={() => onSpot(id)}
-                title={TEAMS[id].sub}
+                title={teamMeta(id).sub}
               >
-                {narrow ? TEAMS[id].label.split(' ')[1] ?? TEAMS[id].name : TEAMS[id].name}
+                {narrow ? teamMeta(id).label.split(' ')[1] ?? teamMeta(id).name : teamMeta(id).name}
               </button>
             )
           })}

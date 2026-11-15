@@ -1,4 +1,4 @@
-import { agentMeta } from '../lib/agents'
+import { agentMeta } from '../lib/roster'
 import type { Agent } from '../lib/types'
 import { compact, pct, relTime, statusLabel, toolLabel } from '../lib/format'
 

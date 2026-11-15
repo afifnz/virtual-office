@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Comm } from '../lib/types'
-import { agentMeta } from '../lib/agents'
+import { agentMeta } from '../lib/roster'
 import { labelTexture } from '../lib/label'
 
 interface Packet {
