@@ -145,9 +145,12 @@ Inggris untuk kode/komentar/commit.
 Deploy dijalankan **dari host** (sandbox tidak punya akses systemd/Caddy):
 
 ```bash
-# satu baris, idempoten: sync kode → stop unit → pasang binary → start → sync statis
+# satu baris, idempoten: sync kode → backup versi jalan → stop unit → pasang binary
+# → start → sync statis
 rsync -a --delete --exclude node_modules --exclude .git \
   ~/.hermes/sandboxes/docker/default/workspace/virtual-office/ ~/workspace/virtual-office/ \
+&& cp -a ~/.local/bin/office-api ~/.local/bin/office-api.prev \
+&& sudo rsync -a --delete /var/www/office/ /var/www/office.prev/ \
 && systemctl --user stop virtual-office-api \
 && install -m 0755 ~/workspace/virtual-office/deploy/office-api ~/.local/bin/office-api \
 && systemctl --user start virtual-office-api \
@@ -156,8 +159,19 @@ rsync -a --delete --exclude node_modules --exclude .git \
 && curl -s http://127.0.0.1:8130/api/health
 ```
 
-Atau lewat script: `bash ~/.hermes/scripts/deploy-virtual-office.sh` (cron, script-only).
-Rollback frontend: `sudo cp -a /var/www/office/index.html.bak-p5 /var/www/office/index.html`.
+Atau lewat script: `bash ~/.hermes/scripts/deploy-virtual-office.sh` (melakukan hal yang sama,
+termasuk backup `.prev`; `--dry-run` untuk melihat saja).
+
+**Rollback** (satu generasi ke belakang, dari backup `.prev` yang dibuat saat deploy):
+
+```bash
+systemctl --user stop virtual-office-api \
+&& install -m 0755 ~/.local/bin/office-api.prev ~/.local/bin/office-api \
+&& systemctl --user start virtual-office-api \
+&& sudo rsync -a --delete /var/www/office.prev/ /var/www/office/ \
+&& curl -s http://127.0.0.1:8130/api/health    # commit harus kembali ke versi lama
+```
+Atau: `bash ~/.hermes/scripts/deploy-virtual-office.sh --rollback`.
 
 **Verifikasi setelah deploy** (dari luar, bukan dari output script):
 `/api/health` → `commit` harus sama dengan `git log -1`, `dbs_err: 0`, `degraded: false`;

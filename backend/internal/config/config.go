@@ -195,6 +195,28 @@ func ValidateBaseURL(raw string) (string, error) {
 // RedactURL returns the URL with the userinfo section removed. Credentials in
 // REMOTE_API_URL (basic auth, or a bare token as the username) must never reach
 // a response body or a log line; only the HTTP client sees the raw value.
+// ShownHome is the HERMES_HOME as published on public endpoints: the user's
+// home directory becomes "~", so /api/config and /api/health do not reveal
+// the server's account name. Paths outside the home dir are returned as is.
+func ShownHome(path string) string {
+	return shownHome(path, os.Getenv("HOME"))
+}
+
+func shownHome(path, userHome string) string {
+	path = filepath.Clean(path)
+	userHome = filepath.Clean(userHome)
+	if userHome == "" || userHome == "/" || userHome == "." {
+		return path
+	}
+	if path == userHome {
+		return "~"
+	}
+	if rest, ok := strings.CutPrefix(path, userHome+"/"); ok {
+		return "~/" + rest
+	}
+	return path
+}
+
 func RedactURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

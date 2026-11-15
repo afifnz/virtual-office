@@ -68,7 +68,7 @@ func Build(cfg Config, set roster.Set) Payload {
 	}
 	if !cfg.IsRemote() {
 		// Only the local source owns a filesystem; a remote office has its own.
-		p.HermesHome = cfg.Home
+		p.HermesHome = ShownHome(cfg.Home)
 	} else {
 		// Never publish credentials that may sit in the userinfo section.
 		p.RemoteURL = RedactURL(cfg.RemoteURL)
