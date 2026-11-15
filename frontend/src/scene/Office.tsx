@@ -6,6 +6,7 @@ import { agentMeta, agentsFor, resolveAgentId, rosterAgents } from '../lib/roste
 import { Room } from './Room'
 import { Exterior } from './Exterior'
 import { Furniture } from './Furniture'
+import { Nusantara } from './Nusantara'
 import { AgentActor } from './AgentActor'
 import { Envelopes } from './Envelopes'
 import { CameraRig, type MoveIntent, type RigCommand } from './CameraRig'
@@ -67,6 +68,7 @@ export function Office({ status, command, moveIntent, onNear, onMove, onPick, dp
       <Exterior showRoof={command.spot === 'luar'} />
       <Room />
       <Furniture agents={status?.agents ?? []} />
+      <Nusantara />
 
       {metas.filter((meta) => !solo || meta.id === solo).map((meta) => (
         <AgentActor

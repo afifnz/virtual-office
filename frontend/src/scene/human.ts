@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { Look } from '../lib/agents'
 import type { FaceLandmarks } from './face'
+import { addOutline, smoothGeometry, toToon } from './toon'
 
 /**
  * Quaternius "Ultimate Modular" humans, CC0 1.0.
@@ -255,6 +256,15 @@ function boxInRoot(b: THREE.Box3, root: THREE.Object3D): THREE.Box3 {
 export function instantiate(source: THREE.Object3D, look: Look, model: HumanModel): Rig {
   const root = skeletonClone(source) as THREE.Group
 
+  // The pack is a shooter kit: men-suit carries a Pistol node in the right
+  // hand. Nobody in this office is armed — drop every prop before measuring,
+  // so it can neither show nor skew the height/landmark boxes.
+  const props: THREE.Object3D[] = []
+  root.traverse((o) => {
+    if (WEAPON.test(o.name) && !(o as THREE.Bone).isBone) props.push(o)
+  })
+  for (const o of props) o.parent?.remove(o)
+
   const roles = ROLES[model]
   const eyeMeshes: THREE.Mesh[] = []
   const hairMeshes: THREE.Mesh[] = []
@@ -275,6 +285,7 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
       clone.emissiveIntensity = 1
     }
     mesh.material = clone
+    mesh.userData.role = role
     if (role === 'eye') eyeMeshes.push(mesh)
     if (role === 'skin') skinMeshes.push(mesh)
     if (role && HAIR_ROLES.has(role)) hairMeshes.push(mesh)
@@ -446,6 +457,26 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     })
   }
 
+  // ---- smooth 2D look: welded normals, soft toon ramp, thin ink outline.
+  // Done last so every measurement above sees the pack's own geometry.
+  root.updateMatrixWorld(true)
+  const packMeshes: THREE.Mesh[] = []
+  root.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) packMeshes.push(o as THREE.Mesh)
+  })
+  const ws = new THREE.Vector3()
+  for (const mesh of packMeshes) {
+    mesh.geometry = smoothGeometry(mesh.geometry)
+    const old = mesh.material as THREE.Material
+    mesh.material = toToon(old)
+    if (mesh.material !== old) old.dispose()
+    const role = mesh.userData.role as Role | undefined
+    if ((mesh as THREE.SkinnedMesh).isSkinnedMesh && role !== 'eye' && role !== 'brow') {
+      mesh.getWorldScale(ws)
+      addOutline(mesh as THREE.SkinnedMesh, OUTLINE_M / Math.max(1e-6, ws.x))
+    }
+  }
+
   return {
     root,
     bones,
@@ -461,6 +492,12 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     metrics,
   }
 }
+
+/** Props the pack ships on its characters that an office has no use for. */
+const WEAPON = /pistol|gun|rifle|sword|knife|weapon/i
+
+/** Ink outline width in metres per metre of camera distance (~1.5 px at 55° fov). */
+const OUTLINE_M = 0.0022
 
 const BONE_LOOKUP: ReadonlySet<string> = new Set(Object.values(BONES))
 

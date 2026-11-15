@@ -18,6 +18,7 @@ import {
 } from './human'
 import { buildFace, type Lid } from './face'
 import { buildHijabHead, buildSleeves } from './galuh'
+import { toonify } from './toon'
 
 export type AvatarMode = 'seated' | 'walk' | 'stand'
 
@@ -114,6 +115,8 @@ export function Avatar({ id, look, status, mode, motion, headYaw = 0, lean = 0, 
       // replace them instead of sitting on top of them
       for (const e of rig.eyeMeshes) e.visible = false
     }
+    // same smooth cel shading as the body, so the face does not look pasted on
+    for (const o of added) toonify(o)
     setReady(true)
 
     return () => {
@@ -236,7 +239,9 @@ export function Avatar({ id, look, status, mode, motion, headYaw = 0, lean = 0, 
       t,
     })
     const yaw = STILL ? 0 : headYaw + glance.current + Math.sin(t * 0.6 + 0.4) * 0.04
-    const pitch = (status === 'blocked' ? 0.16 : 0) + (STILL ? 0 : Math.sin(t * 0.9) * 0.015)
+    // seated eyes sit ~0.25 m above the laptop screen: look down at it
+    const gaze = mode !== 'seated' ? 0 : status === 'blocked' ? 0.16 : status === 'offline' ? 0.04 : 0.1
+    const pitch = gaze + (STILL ? 0 : Math.sin(t * 0.9) * 0.015)
     lookHead(rig, yaw, pitch)
 
     // blink: the upper lid rolls down over the eyeball

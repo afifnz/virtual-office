@@ -69,24 +69,30 @@ export function Desk({ status, dim = false }: { status: AgentStatus; dim?: boole
         </mesh>
       ))}
 
-      {/* laptop, set to the side and opened flat: at dashboard distance a
-          taller lid hides the chest, and the chest is what says "working" */}
-      <group position={[-0.47, 0.775, -0.04]} rotation={[0, 0.75, 0]}>
+      {/* laptop on a low teak stand, dead centre in front of the chair with
+          the screen facing the sitter: the seated pose looks straight down the
+          desk (-z), so anything off to the side reads as "not looking at it" */}
+      <mesh position={[0, 0.79, -0.17]}>
+        <boxGeometry args={[0.4, 0.03, 0.26]} />
+        <meshStandardMaterial color="#6f4c34" roughness={0.7} />
+      </mesh>
+      <group position={[0, 0.805, -0.17]}>
         <mesh position={[0, 0.008, 0]}>
-          <boxGeometry args={[0.34, 0.016, 0.24]} />
+          <boxGeometry args={[0.36, 0.016, 0.24]} />
           <meshStandardMaterial color="#3b3833" roughness={0.55} metalness={0.25} />
         </mesh>
-        <mesh position={[0, 0.02, 0.02]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[0.3, 0.17]} />
+        <mesh position={[0, 0.0165, 0.02]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.31, 0.15]} />
           <meshStandardMaterial color="#2a2723" roughness={0.7} />
         </mesh>
-        <group position={[0, 0.012, -0.115]} rotation={[-0.5, 0, 0]}>
-          <mesh position={[0, 0.085, 0]}>
-            <boxGeometry args={[0.31, 0.175, 0.012]} />
+        {/* lid hinged at the back edge, leaning away from the sitter */}
+        <group position={[0, 0.014, -0.115]} rotation={[-0.32, 0, 0]}>
+          <mesh position={[0, 0.11, 0]}>
+            <boxGeometry args={[0.36, 0.22, 0.012]} />
             <meshStandardMaterial color="#34312c" roughness={0.5} metalness={0.3} />
           </mesh>
-          <mesh position={[0, 0.085, 0.008]}>
-            <planeGeometry args={[0.285, 0.15]} />
+          <mesh position={[0, 0.11, 0.0065]}>
+            <planeGeometry args={[0.33, 0.195]} />
             <meshStandardMaterial
               ref={screen}
               color="#1b2430"
@@ -96,15 +102,15 @@ export function Desk({ status, dim = false }: { status: AgentStatus; dim?: boole
             />
           </mesh>
           {!off ? (
-            <group position={[0, 0.085, 0.012]}>
-              {[0.05, 0.018, -0.014, -0.046].map((y, i) => (
-                <mesh key={i} position={[-0.05 + i * 0.011, y, 0]}>
-                  <planeGeometry args={[0.09 + i * 0.045, 0.009]} />
+            <group position={[0, 0.11, 0.0095]}>
+              {[0.06, 0.03, 0.0, -0.03].map((y, i) => (
+                <mesh key={i} position={[-0.06 + i * 0.012, y, 0]}>
+                  <planeGeometry args={[0.1 + i * 0.05, 0.01]} />
                   <meshBasicMaterial color={i % 2 ? '#8fc4e0' : '#c9d8e0'} transparent opacity={0.4} />
                 </mesh>
               ))}
-              <mesh ref={cursor} position={[-0.02, -0.062, 0]}>
-                <planeGeometry args={[0.01, 0.022]} />
+              <mesh ref={cursor} position={[-0.02, -0.07, 0]}>
+                <planeGeometry args={[0.01, 0.024]} />
                 <meshBasicMaterial color="#e8c07a" />
               </mesh>
             </group>
