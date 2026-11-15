@@ -7,14 +7,18 @@ Wants=network-online.target
 [Service]
 Type=simple
 
-# Paths are relative to the deploying user. Adjust "WorkingDirectory" and
-# "ExecStart" if the repo lives somewhere else.
-WorkingDirectory=%h/workspace/virtual-office/backend
-ExecStart=%h/workspace/virtual-office/backend/bin/office-api
+# Binary dipasang oleh deploy/deploy-from-release.sh (atau deploy manual) ke
+# ~/.local/bin/office-api. Versi lama berkas ini menunjuk backend/bin/office-api
+# dan PORT=8131 — keduanya tidak pernah dipakai produksi, sehingga siapa pun yang
+# mengikuti repo akan menghasilkan deployment yang berbeda dari yang berjalan.
+WorkingDirectory=%h/workspace/virtual-office
+ExecStart=%h/.local/bin/office-api
 
 Environment=HERMES_HOME=%h/.hermes
 Environment=BIND=127.0.0.1
-Environment=PORT=8131
+Environment=PORT=8130
+# Override tanpa mengedit unit: tulis KEY=value di berkas ini.
+EnvironmentFile=-%h/.config/office-api.env
 # Restrict the roster without touching the code:
 # Environment=PROFILES=default,dev,planner,coder,reviewer,tester,edu
 
@@ -24,7 +28,6 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/workspace/virtual-office/backend
 
 StandardOutput=journal
 StandardError=journal
