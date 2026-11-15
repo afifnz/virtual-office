@@ -11,6 +11,11 @@ deploy/    systemd unit, blok Caddy, build script, pembuat fixture
 verify/    skrip screenshot Playwright + hasil PNG
 ```
 
+> **Agen otomatis / AI coding tools:** baca [`AGENTS.md`](AGENTS.md) sebelum bekerja —
+> di situ ada aturan wajib (privasi metadata-only, kontrak API, larangan menulis ke `state.db`),
+> alur branch → PR → review, definisi "selesai", prosedur deploy/rollback, dan daftar jebakan
+> yang sudah pernah menggigit. `CLAUDE.md` hanya penunjuk ke berkas yang sama.
+
 ## Isi ruangan
 
 | Ruang | Agen |
