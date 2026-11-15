@@ -132,38 +132,41 @@ Catatan:
   `docker run --user "$(id -u):$(id -g)" ...` (compose: `OFFICE_UID`/`OFFICE_GID`).
 - Kesehatan: `curl localhost:8080/api/health`; image punya `HEALTHCHECK`.
 
-## Deploy (manual, tidak dijalankan otomatis)
+## Deploy
 
-1. **Build** di mesin yang sama:
-   ```bash
-   cd ~/workspace/virtual-office && deploy/build.sh
-   ```
-2. **API sebagai systemd user unit** (port 8131, menggantikan `office-api`
-   Python di 8130 — keduanya bisa hidup berdampingan):
-   ```bash
-   mkdir -p ~/.config/systemd/user
-   cp deploy/virtual-office-api.service ~/.config/systemd/user/
-   systemctl --user daemon-reload
-   systemctl --user enable --now virtual-office-api
-   systemctl --user status virtual-office-api --no-pager
-   curl -s http://127.0.0.1:8131/api/health
-   loginctl enable-linger "$USER"      # supaya tetap jalan setelah logout
-   ```
-3. **Static frontend**: salin `frontend/dist/` ke root baru, mis.
-   `/var/www/office-v2` (jangan menimpa `/var/www/office` sebelum yakin):
-   ```bash
-   sudo mkdir -p /var/www/office-v2
-   sudo rsync -a --delete frontend/dist/ /var/www/office-v2/
-   ```
-4. **Caddy**: tempel isi `deploy/Caddyfile.block` ke blok situs
-   `office.afifnurzein.my.id`, lalu:
-   ```bash
-   sudo caddy validate --config /etc/caddy/Caddyfile
-   sudo systemctl reload caddy
-   curl -s https://office.afifnurzein.my.id/api/health
-   ```
-5. **Rollback**: `systemctl --user disable --now virtual-office-api`, kembalikan
-   blok Caddy lama (proxy ke 8130 + `/var/www/office`).
+Dua jalur: otomatis (rilis GitHub → host) dan manual. Keduanya idempoten dan selalu
+membuat backup `.prev` sebelum menimpa apa pun.
+
+**Otomatis (disarankan).** `.github/workflows/publish.yml` membangun binary + bundle pada
+setiap push ke `main` dan menerbitkannya sebagai GitHub Release `deploy-<sha7>`. Di host,
+cron tiap 5 menit menjalankan:
+
+```bash
+cd ~/workspace/virtual-office && ./deploy/deploy-from-release.sh   # --dry-run untuk cek
+```
+
+Script membandingkan `commit` di `/api/health` dengan rilis terakhir, lalu unduh → verifikasi
+SHA256 → backup `.prev` → pasang → verifikasi commit aktif; gagal = rollback otomatis.
+Pasang cron:
+
+```bash
+( crontab -l 2>/dev/null; echo "*/5 * * * * cd \$HOME/workspace/virtual-office && ./deploy/deploy-from-release.sh >> \$HOME/.cache/office-deploy.log 2>&1" ) | crontab -
+```
+
+**Manual.** Build dulu di commit yang akan dikirim (`deploy/build.sh`), lalu di host:
+
+```bash
+systemctl --user stop virtual-office-api \
+&& install -m 0755 ~/workspace/virtual-office/deploy/office-api ~/.local/bin/office-api \
+&& systemctl --user start virtual-office-api \
+&& sudo rsync -a --delete ~/workspace/virtual-office/frontend/dist/ /var/www/office/ \
+&& curl -s http://127.0.0.1:8130/api/health
+```
+
+**Caddy**: lihat `deploy/Caddyfile.block` untuk blok situs lengkap (proxy ke `8130`,
+root `/var/www/office`).
+
+**Rollback**: `systemctl --user stop virtual-office-api && install -m 0755 ~/.local/bin/office-api.prev ~/.local/bin/office-api && systemctl --user start virtual-office-api && sudo rsync -a --delete /var/www/office.prev/ /var/www/office/`.
 
 ## API
 

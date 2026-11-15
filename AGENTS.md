@@ -166,6 +166,32 @@ rsync -a --delete --exclude node_modules --exclude .git \
 Atau lewat script: `bash ~/.hermes/scripts/deploy-virtual-office.sh` (melakukan hal yang sama,
 termasuk backup `.prev`; `--dry-run` untuk melihat saja).
 
+### CD otomatis (rilis GitHub → host)
+
+Deploy manual di atas masih sah, tetapi jalur utama sekarang otomatis dan **tidak butuh runner,
+token, atau port baru**:
+
+1. `.github/workflows/publish.yml` jalan pada setiap push ke `main` (dan `workflow_dispatch`):
+   membangun `office-api` + `dist.tar.gz`, menulis `SHA256SUMS`, lalu menerbitkannya sebagai
+   GitHub Release bertanda `deploy-<sha7>` (aset publik, repo publik).
+2. Di host, cron tiap 5 menit menjalankan `deploy/deploy-from-release.sh`:
+   membaca `commit` dari `/api/health`, membandingkannya dengan tag rilis terakhir, dan hanya
+   bertindak kalau berbeda — unduh → verifikasi SHA256 → backup `.prev` → stop unit → pasang
+   binary → start → sync statis → **verifikasi commit baru benar-benar aktif**. Gagal di titik
+   mana pun = rollback otomatis. `--dry-run` untuk melihat rencananya.
+
+```bash
+# sekali saja di host: biar /var/www/office bisa ditulis tanpa sudo
+sudo chown -R "$USER":www-data /var/www/office && sudo chmod -R 755 /var/www/office
+
+# pasang cron
+( crontab -l 2>/dev/null; echo "*/5 * * * * cd \$HOME/workspace/virtual-office && ./deploy/deploy-from-release.sh >> \$HOME/.cache/office-deploy.log 2>&1" ) | crontab -
+```
+
+Script memakai `flock`, jadi aman walau cron tumpang tindih. Kalau `/var/www/office` tetap
+milik root, script memakai `sudo -n` dan butuh aturan NOPASSWD untuk `rsync` — lebih baik
+jalankan `chown` di atas sekali saja.
+
 **Rollback** (satu generasi ke belakang, dari backup `.prev` yang dibuat saat deploy):
 
 ```bash
