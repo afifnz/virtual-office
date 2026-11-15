@@ -10,14 +10,14 @@ import {
   HEAD_SCALE,
   buildGlasses,
   buildHeadphones,
-  buildHijab,
   headMount,
   instantiate,
   lookHead,
   modelForAgent,
   pose,
 } from './human'
-import { buildFace } from './face'
+import { buildFace, type Lid } from './face'
+import { buildHijabHead, buildSleeves } from './galuh'
 
 export type AvatarMode = 'seated' | 'walk' | 'stand'
 
@@ -39,8 +39,6 @@ export interface AvatarProps {
 const STILL =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).get('front') === '1'
-
-const LID_OPEN = -0.3
 
 const CLIPS = {
   idle: 'Idle',
@@ -70,7 +68,7 @@ export function Avatar({ id, look, status, mode, motion, headYaw = 0, lean = 0, 
   const sitW = useRef(mode === 'seated' ? 1 : 0)
   const glance = useRef(0)
   const blinkAt = useRef(1.4)
-  const lids = useRef<THREE.Mesh[]>([])
+  const lids = useRef<Lid[]>([])
   const [ready, setReady] = useState(false)
 
   // ---- accessories: hijab / glasses / headphones ride on the head bone
@@ -82,24 +80,32 @@ export function Avatar({ id, look, status, mode, motion, headYaw = 0, lean = 0, 
 
     const added: THREE.Object3D[] = []
     if (look.hijab) {
-      const hijab = buildHijab(look.hijab, lm)
-      mount.group.add(hijab)
-      added.push(hijab)
-      for (const m of rig.hairMeshes) m.visible = false
-    }
-    if (look.glasses) {
-      const glasses = buildGlasses(lm)
-      mount.group.add(glasses)
-      added.push(glasses)
-    }
-    if (look.headphones) {
-      const hp = buildHeadphones(look.headphones, lm)
-      mount.group.add(hp)
-      added.push(hp)
-    }
+      // A hijab hides the whole head, so the pack's skull (and its 14 mm
+      // off-axis skin mesh) is replaced by our own head: the face, the cloth
+      // and the drape are one surface and cannot leave a gap.
+      for (const m of rig.headMeshes) m.visible = false
+      const head = buildHijabHead(look, lm)
+      mount.group.add(head.group)
+      added.push(head.group)
+      lids.current = head.lids
+      // a long-sleeve top: the pack only ships a tee, so the sleeves are
+      // grown along the arm bones (they follow the seated IK for free)
+      for (const sleeve of buildSleeves(rig, look.shirt)) {
+        added.push(sleeve)
+      }
+    } else {
+      if (look.glasses) {
+        const glasses = buildGlasses(lm)
+        mount.group.add(glasses)
+        added.push(glasses)
+      }
+      if (look.headphones) {
+        const hp = buildHeadphones(look.headphones, lm)
+        mount.group.add(hp)
+        added.push(hp)
+      }
 
-    // ---- face: eyeballs, lids, nostrils, lips measured off the model itself
-    {
+      // ---- face: eyeballs, lids, nostrils, lips measured off the model itself
       const face = buildFace(look, lm)
       mount.group.add(face.group)
       added.push(face.group)
@@ -236,10 +242,10 @@ export function Avatar({ id, look, status, mode, motion, headYaw = 0, lean = 0, 
     // blink: the upper lid rolls down over the eyeball
     if (!STILL && t > blinkAt.current) {
       const close = Math.max(0, 1 - Math.abs(t - blinkAt.current) / 0.11)
-      for (const lid of lids.current) lid.rotation.x = LID_OPEN - close * 1.05
+      for (const lid of lids.current) lid.mesh.rotation.x = THREE.MathUtils.lerp(lid.open, lid.shut, close)
       if (t > blinkAt.current + 0.22) blinkAt.current = t + 2.6 + Math.random() * 3.4
     } else if (lids.current.length) {
-      for (const lid of lids.current) lid.rotation.x = LID_OPEN
+      for (const lid of lids.current) lid.mesh.rotation.x = lid.open
     }
 
     // breathing: the chest bone gets a whisper of lift, nothing more

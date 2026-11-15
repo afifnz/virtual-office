@@ -12,6 +12,13 @@ import type { Look } from '../lib/agents'
  * so it lands on the face for both packs without per-model numbers.
  */
 
+/** A lid that blinks: `open` and `shut` are rotations about the eye's X axis. */
+export interface Lid {
+  mesh: THREE.Mesh
+  open: number
+  shut: number
+}
+
 export interface FaceLandmarks {
   /** centre of the two eye quads, in model space */
   eyeY: number
@@ -25,6 +32,8 @@ export interface FaceLandmarks {
   chinY: number
   headTopY: number
   headW: number
+  /** the head is not always centred on the root; this is its real x */
+  headCenterX: number
   headCenterY: number
   headCenterZ: number
   /** measured surface depth at the mouth and at the nose base */
@@ -37,9 +46,9 @@ export interface FaceLandmarks {
 const SKIN = (color: string) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.62, metalness: 0 })
 
-export function buildFace(look: Look, l: FaceLandmarks): { group: THREE.Group; lids: THREE.Mesh[] } {
+export function buildFace(look: Look, l: FaceLandmarks): { group: THREE.Group; lids: Lid[] } {
   const g = new THREE.Group()
-  const lids: THREE.Mesh[] = []
+  const lids: Lid[] = []
   const skin = SKIN(look.skin)
   const irisColor = new THREE.Color(look.hair).lerp(new THREE.Color('#5a3b22'), 0.55)
   // The sclera carries a little self-illumination: the room has one key light
@@ -103,7 +112,8 @@ export function buildFace(look: Look, l: FaceLandmarks): { group: THREE.Group; l
     lid.scale.set(1.08, 1.0, 0.72)
     lid.rotation.x = -0.3
     g.add(lid)
-    lids.push(lid)
+    // legacy geometry closes by rotating further negative
+    lids.push({ mesh: lid, open: -0.3, shut: -1.35 })
 
     // lash line: a half ring sitting on the upper lid edge. A half arc is
     // mirror-symmetric about the eye's own vertical axis, so both eyes get

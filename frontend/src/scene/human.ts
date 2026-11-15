@@ -203,6 +203,8 @@ export interface Rig {
   eyeMeshes: THREE.Mesh[]
   hairMeshes: THREE.Mesh[]
   headSkinMeshes: THREE.Mesh[]
+  /** every pack mesh that lives above the collar: brows, eye quads, hair, skull */
+  headMeshes: THREE.Mesh[]
   feet: FootRest[]
   /** face measurements in model space, used by the face/hijab/glasses builders */
   landmarks: FaceLandmarks
@@ -310,6 +312,17 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     ? [top.m, ...skinBoxes.filter((x) => x !== top && x.b.min.y > box.max.y * 0.8).map((x) => x.m)]
     : []
 
+  // everything above the collar. The stylized head replaces all of it, so the
+  // pack's own eyebrow quads and eye rectangles have to go too, not just the
+  // skull and the hair.
+  const headMeshes: THREE.Mesh[] = []
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (!mesh.isMesh) return
+    const b = boxInRoot(new THREE.Box3().setFromObject(mesh), root)
+    if (b.min.y > box.max.y * 0.8) headMeshes.push(mesh)
+  })
+
   // face landmarks, measured in model space (root-local, +Z = facing)
   const headBox = new THREE.Box3()
   for (const m of headSkinMeshes) headBox.union(boxInRoot(new THREE.Box3().setFromObject(m), root))
@@ -351,6 +364,7 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     chinY: headBox.min.y,
     headTopY: headBox.max.y,
     headW: headBox.max.x - headBox.min.x,
+    headCenterX: (headBox.max.x + headBox.min.x) / 2,
     headCenterY: (headBox.max.y + headBox.min.y) / 2,
     headCenterZ: (headBox.max.z + headBox.min.z) / 2,
     mouthY,
@@ -439,6 +453,7 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     eyeMeshes,
     hairMeshes,
     headSkinMeshes,
+    headMeshes,
     feet,
     landmarks,
     headMountMatrix,

@@ -126,7 +126,7 @@ func (l *Loader) gateway() derive.Gateway {
 			break
 		}
 	}
-	for _, k := range []string{"version", "hermes_version", "app_version", "gateway_version"} {
+	for _, k := range []string{"version", "code_version", "hermes_version", "app_version", "gateway_version"} {
 		if v, ok := payload[k].(string); ok && v != "" {
 			g.Version = v
 			break

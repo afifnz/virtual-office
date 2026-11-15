@@ -75,3 +75,11 @@ func TestGatewayMissingFile(t *testing.T) {
 		t.Fatalf("missing file should be unknown, got %q", g.State)
 	}
 }
+
+func TestGatewayCodeVersionKey(t *testing.T) {
+	// The live gateway_state.json carries code_version/code_sha, not version.
+	_, version, _ := gatewayFor(t, `{"gateway_state":"running","code_version":"0.23.1","code_sha":"abc123"}`)
+	if version != "0.23.1" {
+		t.Fatalf("code_version not resolved: got %q", version)
+	}
+}

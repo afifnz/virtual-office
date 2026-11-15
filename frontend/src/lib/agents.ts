@@ -47,8 +47,8 @@ export const AGENTS: AgentMeta[] = [
     team: 'lobby',
     desc: 'Pintu masuk semua permintaan pengguna lewat Telegram dan chat. Urusan produktivitas: memori, cron, email, review mingguan.',
     look: {
-      skin: '#d9a184', hair: '#2b2320', style: 'long', shirt: '#efe3cd', pants: '#4a3a52',
-      accent: '#d4805c', hijab: '#b98e8c', skirt: true, build: 0.9, tall: 1.0, female: true,
+      skin: '#e2ab88', hair: '#2b2320', style: 'long', shirt: '#efe6d6', pants: '#4a3a52',
+      accent: '#d4805c', hijab: '#b3797e', skirt: true, build: 0.9, tall: 1.0, female: true,
     },
     desk: { x: -7.0, z: 9.2, rot: Math.PI },
   },
@@ -207,6 +207,6 @@ export function agentMeta(id: string): AgentMeta {
       skin: '#c99772', hair: '#2a2220', style: 'short', shirt: '#5a6570', pants: '#33383d',
       accent: '#93a1ae', build: 1, tall: 1,
     },
-    desk: { x: 7.75, z: -10.4, rot: Math.PI },
+    desk: { x: 5.0, z: 8.6, rot: Math.PI },
   }
 }
