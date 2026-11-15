@@ -195,8 +195,10 @@ systemctl --user stop virtual-office-api \
 `deploy/build.sh` tanpa `--out` menulis ke `backend/bin/office-api`; pakai `--out` supaya
 jalur di atas dan artefak rilis menunjuk berkas yang sama.
 
-**Caddy**: lihat `deploy/Caddyfile.block` untuk blok situs lengkap (proxy ke `8130`,
-root `/var/www/office`).
+**Caddy** (cache + header keamanan): `bash deploy/apply-caddy-headers.sh` — menyisipkan
+`@assets immutable` / `@shell no-cache` dan header keamanan ke site block, dengan
+`caddy validate` + rollback otomatis. Rujukan lengkap blok situs (proxy ke `8130`, root
+`/var/www/office`): `deploy/Caddyfile.block`.
 
 **Rollback**: `systemctl --user stop virtual-office-api && install -m 0755 ~/.local/bin/office-api.prev ~/.local/bin/office-api && systemctl --user start virtual-office-api && sudo rsync -a --delete /var/www/office.prev/ /var/www/office/`.
 Rollback hanya mungkin kalau `.prev` ada; pada instalasi pertama keduanya belum ada, jadi
