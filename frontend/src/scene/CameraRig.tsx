@@ -176,6 +176,13 @@ export function CameraRig({
       if (!spot) return
       pos = new THREE.Vector3(...spot.pos)
       target = new THREE.Vector3(...spot.target)
+      // the whole building must fit a portrait phone: back off along the view line.
+      // 1.35 keeps both eaves >= 11 px inside a 360 px screen (the view is off-centre,
+      // so the right eave is the tight one); 1.0 cropped ~35 px off each side.
+      if (command.spot === 'luar' && pCam.aspect < 1) {
+        const k = 1.35 * Math.sqrt(Math.min(1 / pCam.aspect, 2.2))
+        pos = target.clone().add(pos.clone().sub(target).multiplyScalar(k))
+      }
     }
     state.current.free = false
     const frontal =
@@ -187,7 +194,9 @@ export function CameraRig({
         : command.tight === true
           ? 30
           : 42
-      : (SPOTS[command.spot]?.fov ?? 55)
+      : command.spot === 'luar' && pCam.aspect < 1
+        ? Math.min(62, (SPOTS.luar?.fov ?? 44) * Math.sqrt(1 / pCam.aspect))
+        : (SPOTS[command.spot]?.fov ?? 55)
     state.current.tween = {
       from: camera.position.clone(),
       to: pos,
@@ -293,6 +302,13 @@ export function CameraRig({
     side += intent.x
 
     if (fwd !== 0 || side !== 0) {
+      // walking from an outside view starts at the entrance, facing in
+      if (Math.abs(camera.position.x) > FLOOR.w / 2 || Math.abs(camera.position.z) > FLOOR.d / 2) {
+        s.tween = null
+        camera.position.set(0, EYE, FLOOR.d / 2 - 1.6)
+        s.yaw = 0
+        s.pitch = -0.06
+      }
       s.free = true
       const len = Math.hypot(fwd, side) || 1
       const nf = fwd / len

@@ -53,7 +53,7 @@ export const TEAM_CENTRE: Record<string, [number, number]> = {
   edu: [10, -6.4],
 }
 
-/** A desk's axis-aligned footprint on the floor (rotation is always PI). */
+/** A desk's axis-aligned footprint on the floor, for any of the four right-angle rotations. */
 export function deskObstacle(d: DeskPoint, id?: string): Obstacle {
   const cos = Math.cos(d.rot)
   const sin = Math.sin(d.rot)

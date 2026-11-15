@@ -40,18 +40,27 @@ function hits(ax: number, az: number, bx: number, bz: number, o: Obstacle, pad =
 const inRoom = (x: number, z: number) =>
   Math.abs(x) <= FLOOR.w / 2 - 0.6 && Math.abs(z) <= FLOOR.d / 2 - 0.6
 
-// ---------------------------------------------------------------- grid
+// ---------------------------------------------------------------- pods
+// Team rooms are facing pods: a front row (rot 0) and a back row (rot PI) on the
+// same columns, 4.5 apart, desk tops meeting 0.8 apart in z.
+const POD_DZ = 0.8
+/** the desk across the pod, if any */
+const partnerOf = (d: { id: string; x: number; z: number; rot: number }) =>
+  DESKS.find((o) => o.id !== d.id && near(o.x, d.x) && near(Math.abs(o.z - d.z), POD_DZ) && !near(o.rot, d.rot))
 const dev = DESKS.filter((d) => d.x < 0 && d.z < 2)
 const edu = DESKS.filter((d) => d.x > 0 && d.z < 2)
 for (const [name, group] of [['dev', dev], ['edu', edu]] as const) {
   const xs = [...new Set(group.map((d) => d.x))].sort((a, b) => a - b)
-  const zs = [...new Set(group.map((d) => d.z))].sort((a, b) => a - b)
   const dxs = xs.slice(1).map((x, i) => +(x - xs[i]!).toFixed(3))
-  const dzs = zs.slice(1).map((z, i) => +(z - zs[i]!).toFixed(3))
-  if (dxs.every((d) => near(d, 4.5)) && dzs.every((d) => near(d, 4.0))) {
-    ok(`${name}: ${xs.length} kolom x ${zs.length} baris, jarak kolom ${dxs.join('/')} baris ${dzs.join('/')}`)
-  } else fail(`${name}: grid tidak konsisten cols=${dxs} rows=${dzs}`)
-  for (const d of group) if (d.rot !== Math.PI) fail(`${name}/${d.id}: rot ${d.rot} bukan PI`)
+  if (dxs.every((d) => near(d, 4.5))) ok(`${name}: ${xs.length} kolom, jarak ${dxs.join('/')}`)
+  else fail(`${name}: jarak kolom tidak konsisten ${dxs}`)
+  for (const d of group) {
+    const p = partnerOf(d)
+    if (!p) { fail(`${name}/${d.id}: tidak punya pasangan di seberang pod`); continue }
+    const front = d.z > p.z ? d : p
+    if (!near(front.rot, 0)) fail(`${name}/${front.id}: baris depan harus rot 0 (menghadap -z)`)
+  }
+  ok(`${name}: ${group.length} meja dalam pod berhadapan`)
 }
 
 // ------------------------------------------------------------ circulation
@@ -71,7 +80,13 @@ for (const d of deskObs) {
     FLOOR.d / 2 - 0.11 - d.z2,
     d.z1 + FLOOR.d / 2 - 0.11,
   )
-  for (const o of OBSTACLES) if (o !== d) clear = Math.min(clear, rectGap(d, o))
+  // the desk across the pod is meant to touch; every other neighbour keeps the aisle
+  const self = DESKS.find((k) => `desk-${k.id}` === d.id)
+  const partner = self ? partnerOf(self) : undefined
+  for (const o of OBSTACLES) {
+    if (o === d || (partner && o.id === `desk-${partner.id}`)) continue
+    clear = Math.min(clear, rectGap(d, o))
+  }
   minClear = Math.min(minClear, clear)
   if (clear < 1.6) fail(`${d.id}: sirkulasi ${clear.toFixed(2)} < 1.6`)
 }

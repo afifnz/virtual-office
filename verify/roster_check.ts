@@ -1,7 +1,7 @@
 /**
  * Roster checker: proves /api/config drives the office and that a new agent is
  * placed on the 4.5 x 4.0 lattice with a clear aisle — without moving a single
- * existing desk.
+ * existing desk. Hand-placed team desks are facing pods (see layout_check.ts).
  *
  *   frontend/node_modules/.bin/esbuild verify/roster_check.ts --bundle \
  *     --format=esm --platform=node --outfile=/tmp/roster_check.mjs
@@ -93,12 +93,26 @@ else ok('roster tz is applied to the client clock')
 const all = rosterAgents()
 const allObstacles: Obstacle[] = [...WALL_OBSTACLES, ...OBSTACLES.filter((o) => !o.id.startsWith('desk-')), ...all.map((a) => deskObstacle(a.desk, a.id))]
 
+// Team rooms are facing pods: a front row (rot 0) and a back row (rot PI) on the
+// same column, desk tops meeting POD_DZ apart in z. Mirrors layout_check.ts.
+const POD_DZ = 0.8
+const partnerOf = (a: (typeof all)[number]) =>
+  all.find(
+    (o) =>
+      o.id !== a.id &&
+      near(o.desk.x, a.desk.x) &&
+      near(Math.abs(o.desk.z - a.desk.z), POD_DZ) &&
+      !near(o.desk.rot, a.desk.rot),
+  )
+
 let minClear = 99
 for (const a of all) {
+  // the desk across the pod is meant to touch; every other neighbour keeps the aisle
+  const partner = partnerOf(a)
   const clear = clearance({
     spot: a.desk,
     id: a.id,
-    obstacles: allObstacles,
+    obstacles: partner ? allObstacles.filter((o) => o.id !== `desk-${partner.id}`) : allObstacles,
     floor: FLOOR,
     wallT: WALL_T,
   })
@@ -107,19 +121,35 @@ for (const a of all) {
 }
 ok(`aisle: minimum ${minClear.toFixed(2)} for all ${all.length} desks`)
 
-// the hand-placed desks keep their own lattice
+// the hand-placed desks keep their own lattice: lobby on the plain grid, the
+// team rooms as facing pods on 4.5 columns
 for (const team of ['lobby', 'dev', 'edu']) {
   const group = all.filter((a) => a.team === team && AGENTS.some((s) => s.id === a.id))
   if (group.length < 2) continue
   const x0 = Math.min(...group.map((a) => a.desk.x))
   const z0 = Math.min(...group.map((a) => a.desk.z))
+  const pods = team !== 'lobby'
   for (const a of group) {
     const kx = (a.desk.x - x0) / DEFAULT_GRID.dx
-    const kz = (a.desk.z - z0) / DEFAULT_GRID.dz
     if (Math.abs(kx - Math.round(kx)) > 0.002) fail(`${team}/${a.id}: x ${a.desk.x} off the ${DEFAULT_GRID.dx} lattice`)
-    if (Math.abs(kz - Math.round(kz)) > 0.002) fail(`${team}/${a.id}: z ${a.desk.z} off the ${DEFAULT_GRID.dz} lattice`)
+    if (pods) {
+      const p = partnerOf(a)
+      if (!p || !group.includes(p)) {
+        fail(`${team}/${a.id}: no facing desk across the pod`)
+        continue
+      }
+      const front = a.desk.z > p.desk.z ? a : p
+      if (!near(front.desk.rot, 0)) fail(`${team}/${front.id}: pod front row must be rot 0`)
+    } else {
+      const kz = (a.desk.z - z0) / DEFAULT_GRID.dz
+      if (Math.abs(kz - Math.round(kz)) > 0.002) fail(`${team}/${a.id}: z ${a.desk.z} off the ${DEFAULT_GRID.dz} lattice`)
+    }
   }
-  ok(`${team}: ${group.length} hand-placed desks on the ${DEFAULT_GRID.dx} x ${DEFAULT_GRID.dz} lattice`)
+  ok(
+    pods
+      ? `${team}: ${group.length} hand-placed desks in facing pods on ${DEFAULT_GRID.dx} columns`
+      : `${team}: ${group.length} hand-placed desks on the ${DEFAULT_GRID.dx} x ${DEFAULT_GRID.dz} lattice`,
+  )
 }
 
 // the auto-placed desks of one team share one lattice block

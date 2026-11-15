@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import type { StatusPayload } from '../lib/types'
 import { agentMeta, agentsFor, resolveAgentId, rosterAgents } from '../lib/roster'
 import { Room } from './Room'
+import { Exterior } from './Exterior'
 import { Furniture } from './Furniture'
 import { AgentActor } from './AgentActor'
 import { Envelopes } from './Envelopes'
@@ -63,6 +64,7 @@ export function Office({ status, command, moveIntent, onNear, onMove, onPick, dp
       <directionalLight position={[14, 20, 12]} intensity={1.15} color="#fff4e0" />
       <directionalLight position={[-16, 12, -10]} intensity={0.35} color="#c8d6ff" />
 
+      <Exterior showRoof={command.spot === 'luar'} />
       <Room />
       <Furniture agents={status?.agents ?? []} />
 
