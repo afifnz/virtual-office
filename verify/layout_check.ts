@@ -9,7 +9,8 @@ import {
   DESKS, DESK_EXIT, FLOOR, NAV, NAV_EDGES, OBSTACLES, POIS, SPOTS, WALLS, nearestNode,
   type Obstacle,
 } from '../frontend/src/lib/rooms'
-import { navPath } from '../frontend/src/lib/nav'
+import { navPath, type Pt } from '../frontend/src/lib/nav'
+import { SIDESTEP, avoid, homeward, onward, retrace, seatPoint } from '../frontend/src/lib/routes'
 
 const RADIUS = 0.35 // walker half-width
 let fails = 0
@@ -124,6 +125,114 @@ for (const d of DESKS) {
   if (Math.hypot(seat[0] - e[0], seat[1] - e[1]) < 1.2) fail(`exit ${d.id} terlalu dekat kursi`)
 }
 ok('poi + desk exit: semua kaki lurus bebas furniture')
+
+// ------------------------------------------------------- errand replay
+// Every desk to every POI of its team and back, exactly as AgentActor builds
+// the routes — including the walk home from the POI and a mid-route recall.
+// The first leg (seat -> desk exit) runs through the agent's own chair.
+const legsClear = (who: string, route: Pt[], skipOwnFirst: boolean, label: string): boolean => {
+  for (let i = 1; i < route.length; i++) {
+    const [a, b] = [route[i - 1]!, route[i]!]
+    for (const o of OBSTACLES) {
+      const own = o.id === `desk-${who}`
+      if (own && ((skipOwnFirst && i === 1) || i === route.length - 1)) continue
+      if (hits(a[0], a[1], b[0], b[1], o)) {
+        fail(`${label}: kaki ${i} (${a.map((v) => v.toFixed(1))})->(${b.map((v) => v.toFixed(1))}) menembus ${o.id}`)
+        return false
+      }
+    }
+  }
+  return true
+}
+let trips = 0
+for (const d of DESKS) {
+  const meta = { desk: d }
+  const team = d.z > 3 ? 'lobby' : d.x < 0 ? 'dev' : 'edu'
+  for (const p of POIS.filter((q) => q.team === team)) {
+    const out = [seatPoint(meta), ...onward(meta, p.pos)]
+    const home = [p.pos, ...homeward(meta, p.pos)]
+    legsClear(d.id, out, true, `${d.id}->${p.id}`)
+    legsClear(d.id, home, false, `${p.id}->${d.id}`)
+    // recalled half-way: from the middle of each outbound leg
+    const route = onward(meta, p.pos)
+    for (let k = 1; k < route.length; k++) {
+      const a = route[k - 1]!, b = route[k]!
+      const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+      legsClear(d.id, [mid, ...retrace(meta, route, k)], false, `${d.id}->${p.id} dipanggil di kaki ${k}`)
+    }
+    trips++
+  }
+}
+ok(`errand: ${trips} perjalanan meja->poi->meja (+ dipanggil di tengah jalan) bebas furniture`)
+
+// Passing room: walkers keep right by SIDESTEP (lib/routes.ts) when they meet, so
+// every nav edge needs body half-width + sidestep of clearance.
+const PASS = 0.25 + SIDESTEP
+let tight = 0
+for (const [a, b] of NAV_EDGES) {
+  const na = NAV.find((n) => n.id === a)!, nb = NAV.find((n) => n.id === b)!
+  for (const o of OBSTACLES) if (hits(na.x, na.z, nb.x, nb.z, o, PASS)) { tight++; fail(`edge ${a}->${b}: ruang papasan < ${PASS} ke ${o.id}`) }
+}
+if (!tight) ok(`ruang papasan: semua edge punya >= ${PASS} m ke furniture`)
+
+// ------------------------------------------------------ walker meeting
+// Same stepping as AgentActor (route follow + avoid() + eased sidestep), run
+// headless: two walkers must pass without their bodies overlapping, and a
+// colleague standing on the route must not stall anyone.
+interface Sim { id: string; path: Pt[]; idx: number; x: number; z: number; ox: number; oz: number; yielded: number; still?: boolean }
+const damp = (a: number, b: number, l: number, dt: number) => a + (b - a) * (1 - Math.exp(-l * dt))
+function simulate(walkers: Sim[], seconds: number): { minD: number; done: boolean } {
+  const dt = 1 / 30
+  let minD = 99
+  const pos = new Map<string, { x: number; z: number }>()
+  for (const w of walkers) pos.set(w.id, { x: w.x, z: w.z })
+  for (let t = 0; t < seconds; t += dt) {
+    for (const w of walkers) {
+      if (w.still || w.idx >= w.path.length) continue
+      const tg = w.path[w.idx]!
+      const d0 = Math.hypot(tg[0] - w.x, tg[1] - w.z)
+      const dx = d0 > 1e-4 ? (tg[0] - w.x) / d0 : 0
+      const dz = d0 > 1e-4 ? (tg[1] - w.z) / d0 : 0
+      const av = avoid(w.id, w, dx, dz, pos)
+      w.ox = damp(w.ox, -dz * av.side, 4, dt)
+      w.oz = damp(w.oz, dx * av.side, 4, dt)
+      w.yielded = av.hold ? w.yielded + dt : Math.max(0, w.yielded - dt * 0.5)
+      let budget = 1.0 * dt * av.speed
+      while (budget > 0 && w.idx < w.path.length) {
+        const p = w.path[w.idx]!
+        const ex = p[0] - w.x, ez = p[1] - w.z
+        const d = Math.hypot(ex, ez)
+        if (d < 1e-4) { w.idx++; continue }
+        const m = Math.min(budget, d)
+        w.x += (ex / d) * m; w.z += (ez / d) * m; budget -= m
+        if (m >= d - 1e-3) w.idx++
+      }
+      pos.set(w.id, { x: w.x + w.ox, z: w.z + w.oz })
+    }
+    const ps = [...pos.values()]
+    for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+      minD = Math.min(minD, Math.hypot(ps[i]!.x - ps[j]!.x, ps[i]!.z - ps[j]!.z))
+    }
+    if (walkers.every((w) => w.still || w.idx >= w.path.length)) return { minD, done: true }
+  }
+  return { minD, done: false }
+}
+const walker = (id: string, path: Pt[], still = false): Sim =>
+  ({ id, path: path.slice(1), idx: 0, x: path[0]![0], z: path[0]![1], ox: 0, oz: 0, yielded: 0, still })
+const W: Pt = [-17.3, -9.6], E: Pt = [-2.4, -9.6]
+const cases: Array<[string, Sim[], number]> = [
+  ['berpapasan di lorong belakang', [walker('a', [W, E]), walker('b', [E, W])], 0.45],
+  ['berpapasan, prioritas terbalik', [walker('b', [W, E]), walker('a', [E, W])], 0.45],
+  ['menyusul dari belakang', [walker('a', [W, [-4.4, -9.6]]), walker('b', [[-15.8, -9.6], E])], 0.45],
+  ['bersilangan di depan pintu tim', [walker('a', [[-17.3, -2.4], [-2.4, -2.4]]), walker('b', [[-10, 1.8], [-10, -2.6], [-10, -6.0]])], 0.45],
+  ['rekan berdiri di jalur', [walker('a', [W, E]), walker('z', [[-10, -9.6]], true)], 0.4],
+]
+for (const [name, ws, need] of cases) {
+  const r = simulate(ws, 60)
+  if (!r.done) fail(`papasan "${name}": tidak sampai tujuan dalam 60 s (macet)`)
+  else if (r.minD < need) fail(`papasan "${name}": jarak terdekat ${r.minD.toFixed(2)} < ${need}`)
+  else ok(`papasan "${name}": jarak terdekat ${r.minD.toFixed(2)} m`)
+}
 
 // -------------------------------------------------------- reachability
 const adj = new Map<string, string[]>()

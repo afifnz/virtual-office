@@ -1,13 +1,14 @@
-import { Suspense, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { AgentMeta } from '../lib/agents'
 import type { Agent } from '../lib/types'
-import { deskExit, POIS, nearestNode, type Poi } from '../lib/rooms'
-import { navPath, type Pt } from '../lib/nav'
+import { POIS, type Poi } from '../lib/rooms'
+import { avoid, homeward, onward, retrace, seatPoint } from '../lib/routes'
+import type { Pt } from '../lib/nav'
 import { labelTexture } from '../lib/label'
 import { statusLabel, toolLabel } from '../lib/format'
-import { walkerPositions } from '../lib/presence'
+import { poiTaken, walkerPositions } from '../lib/presence'
 import { Avatar, type AvatarMode } from './Avatar'
 import { Chair, Desk, STATUS_COLOR } from './Desk'
 
@@ -23,6 +24,15 @@ interface WalkStateData {
   nextTrip: number
   speed: number
   away: boolean
+  /** position on the route; the body is drawn at this plus a sidestep */
+  x: number
+  z: number
+  /** sidestep offset (world x/z), eased so turns do not jerk the body */
+  ox: number
+  oz: number
+  /** seconds spent giving way, so two walkers can never wait on each other forever */
+  yielded: number
+  poi: string | null
 }
 
 export interface AgentActorProps {
@@ -33,13 +43,6 @@ export interface AgentActorProps {
   onPick: (id: string) => void
 }
 
-/** Seat point in world space (the avatar's hip sits this far behind the desk). */
-function seatPoint(meta: AgentMeta): Pt {
-  return [
-    meta.desk.x + Math.sin(meta.desk.rot) * 0.42,
-    meta.desk.z + Math.cos(meta.desk.rot) * 0.42,
-  ]
-}
 
 /**
  * One desk + one agent. Seated while working/reviewing/blocked, wandering the
@@ -60,7 +63,23 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
     nextTrip: 18 + Math.random() * 60,
     speed: 1.0,
     away: false,
+    x: seat[0],
+    z: seat[1],
+    ox: 0,
+    oz: 0,
+    yielded: 0,
+    poi: null,
   })
+
+  // an actor removed mid-errand must not keep its POI or its ghost position
+  useEffect(
+    () => () => {
+      const id = meta.id
+      walkerPositions.delete(id)
+      for (const [poi, who] of poiTaken) if (who === id) poiTaken.delete(poi)
+    },
+    [meta.id],
+  )
 
   const plate = labelTexture({
     text: meta.name,
@@ -102,6 +121,12 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
         const poi = pickPoi(meta)
         if (poi) {
           slots.count++
+          poiTaken.set(poi.id, meta.id)
+          w.poi = poi.id
+          w.x = seat[0]
+          w.z = seat[1]
+          w.ox = 0
+          w.oz = 0
           w.path = onward(meta, poi.pos)
           w.idx = 0
           w.state = 'out'
@@ -121,7 +146,10 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
 
     // ---- a status change always sends the agent home, in a hurry
     if (!idle && w.state !== 'back') {
-      w.path = homeward(meta, [g.position.x, g.position.z])
+      // Mid-errand the agent can be anywhere on a route leg, and a straight
+      // line from there to the nearest nav node may cut through a desk.
+      // Retracing the legs already walked is always clear.
+      w.path = w.state === 'out' ? retrace(meta, w.path, w.idx) : homeward(meta, [w.x, w.z])
       w.idx = 0
       w.state = 'back'
       w.speed = 2.35
@@ -131,7 +159,9 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
     if (w.state === 'poi') {
       w.wait -= step
       if (w.wait <= 0) {
-        w.path = homeward(meta, seat)
+        // from where the agent actually stands (the POI), not from the seat:
+        // starting at the seat made the walk home a straight line through desks
+        w.path = homeward(meta, [w.x, w.z])
         w.idx = 0
         w.state = 'back'
         w.speed = 1.0
@@ -141,25 +171,52 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
       return
     }
 
-    // ---- follow the polyline
-    let budget = w.speed * step
+    // ---- follow the polyline, giving way to colleagues
+    const tgt = w.path[w.idx]
+    let dirX = 0
+    let dirZ = 0
+    if (tgt) {
+      const d0 = Math.hypot(tgt[0] - w.x, tgt[1] - w.z)
+      if (d0 > 1e-4) {
+        dirX = (tgt[0] - w.x) / d0
+        dirZ = (tgt[1] - w.z) / d0
+      }
+    }
+    const av = avoid(meta.id, w, dirX, dirZ, walkerPositions)
+    // Sidestep only on nav-graph legs, the ones verify/layout_check.ts proves
+    // wide enough. The first leg (chair -> desk exit, or POI -> graph) and the
+    // last ones (graph -> POI, desk exit -> chair) only have room for the body.
+    // out:  [exit, node, ..., node, poi]   graph legs end at idx 2 .. len-2
+    // back: [node, ..., node, exit, seat]  graph legs end at idx 1 .. len-3
+    const onGraph =
+      w.state === 'back' ? w.idx >= 1 && w.idx < w.path.length - 2 : w.idx >= 2 && w.idx < w.path.length - 1
+    const sideT = onGraph ? av.side : 0
+    // keep right: right of the heading is (-dirZ, dirX)
+    w.ox = THREE.MathUtils.damp(w.ox, -dirZ * sideT, 4, step)
+    w.oz = THREE.MathUtils.damp(w.oz, dirX * sideT, 4, step)
+    if (av.hold) w.yielded += step
+    else w.yielded = Math.max(0, w.yielded - step * 0.5)
+
+    let budget = w.speed * step * av.speed
     while (budget > 0 && w.idx < w.path.length) {
       const target = w.path[w.idx]!
-      const dx = target[0] - g.position.x
-      const dz = target[1] - g.position.z
+      const dx = target[0] - w.x
+      const dz = target[1] - w.z
       const d = Math.hypot(dx, dz)
       if (d < 1e-4) {
         w.idx++
         continue
       }
       const move = Math.min(budget, d)
-      g.position.x += (dx / d) * move
-      g.position.z += (dz / d) * move
+      w.x += (dx / d) * move
+      w.z += (dz / d) * move
       w.yaw = Math.atan2(-dx, -dz)
       w.phase += move * 7.6
       budget -= move
       if (move >= d - 1e-3) w.idx++
     }
+    g.position.x = w.x + w.ox
+    g.position.z = w.z + w.oz
     g.rotation.y = dampAngle(g.rotation.y, w.yaw, 9, step)
     walkerPositions.set(meta.id, { x: g.position.x, z: g.position.z })
 
@@ -177,6 +234,12 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
           w.away = false
           slots.count = Math.max(0, slots.count - 1)
         }
+        if (w.poi && poiTaken.get(w.poi) === meta.id) poiTaken.delete(w.poi)
+        w.poi = null
+        w.x = seat[0]
+        w.z = seat[1]
+        w.ox = 0
+        w.oz = 0
         setMode('seated')
         walkerPositions.delete(meta.id)
       }
@@ -253,27 +316,13 @@ function BlockedRing({ walking }: { walking: boolean }) {
 }
 
 function pickPoi(meta: AgentMeta): Poi | null {
-  const pool = POIS.filter((p) => p.team === meta.team)
+  const pool = POIS.filter((p) => p.team === meta.team && !poiTaken.has(p.id))
   if (pool.length === 0) return null
   return pool[Math.floor(Math.random() * pool.length)] ?? null
 }
 
-/** exit → nav graph → destination */
-function onward(meta: AgentMeta, to: Pt): Pt[] {
-  const exit = deskExit(meta.desk)
-  const a = nearestNode(exit[0], exit[1]!)
-  const b = nearestNode(to[0], to[1])
-  return [[exit[0], exit[1]!], ...navPath(a.id, b.id), to]
-}
 
-/** current position → nav graph → seat, so the walk ends in the chair */
-function homeward(meta: AgentMeta, from: Pt): Pt[] {
-  const exit = deskExit(meta.desk)
-  const a = nearestNode(from[0], from[1])
-  const b = nearestNode(exit[0], exit[1]!)
-  const seat = seatPoint(meta)
-  return [...navPath(a.id, b.id), [exit[0], exit[1]!], [seat[0], seat[1]]]
-}
+
 
 function dampAngle(current: number, target: number, lambda: number, dt: number): number {
   const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current))
