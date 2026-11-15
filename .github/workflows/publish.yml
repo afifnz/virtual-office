@@ -1,0 +1,82 @@
+name: Publish
+
+# CI (.github/workflows/ci.yml) menjaga kualitas di setiap PR.
+# Workflow ini yang menyiapkan artefak deploy: binary Go + bundle statis,
+# dipaketkan sebagai GitHub Release bertanda commit. Host menariknya lewat
+# deploy/deploy-from-release.sh — jadi tidak perlu runner, token, atau port baru.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: build artifacts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Build API binary
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cd backend
+          CGO_ENABLED=0 GOOS=linux go build -trimpath \
+            -ldflags "-s -w \
+              -X officeapi/internal/api.BuildCommit=${GITHUB_SHA::7} \
+              -X officeapi/internal/api.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o ../out/office-api ./cmd/office-api
+          file ../out/office-api
+          ls -l ../out/office-api
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build web bundle
+        run: |
+          set -euo pipefail
+          cd frontend
+          npm ci
+          npm run build
+          tar -C dist -czf ../out/dist.tar.gz .
+          ls -l ../out/dist.tar.gz
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd out
+          sha256sum office-api dist.tar.gz | tee SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="deploy-${GITHUB_SHA::7}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+          {
+            echo "Artefak deploy dari commit ${GITHUB_SHA}."
+            echo
+            echo "Pasang di host: bash ~/workspace/virtual-office/deploy/deploy-from-release.sh"
+          } > /tmp/notes.md
+          gh release create "$TAG" out/office-api out/dist.tar.gz out/SHA256SUMS \
+            --title "build ${GITHUB_SHA::7}" \
+            --latest \
+            --notes-file /tmp/notes.md
