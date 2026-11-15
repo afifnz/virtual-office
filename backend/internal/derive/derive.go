@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"officeapi/internal/store"
 )
@@ -141,6 +142,9 @@ type Dataset struct {
 	Profiles     []ProfileData
 	Gateway      Gateway
 	Now          float64
+	// Location is the timezone the office day boundary and hourly buckets
+	// follow (OFFICE_TZ). nil means the historical default, WIB.
+	Location *time.Location
 }
 
 type sessionWork struct {
@@ -301,7 +305,7 @@ func routedProfile(parent *sessionWork, idx int) string {
 }
 
 func buildAgents(ds Dataset, works []*sessionWork, byID map[string]*sessionWork, now float64) []Agent {
-	dayStart := wibDayStart(now)
+	dayStart := dayStartFor(now, ds.Location)
 	byAgent := map[string][]*sessionWork{}
 	for _, w := range works {
 		byAgent[w.owner] = append(byAgent[w.owner], w)
@@ -726,13 +730,18 @@ func buildComms(works []*sessionWork, byID map[string]*sessionWork, now float64)
 
 // ---- small helpers ----
 
-func wibDayStart(now float64) float64 {
-	shifted := now + wibOffset
-	day := shifted - float64(int(shifted)%86400)
-	if day < 0 {
-		day += 86400
+// defaultLocation is WIB, the timezone the office ran on before OFFICE_TZ
+// existed. A nil Dataset.Location keeps that behaviour.
+var defaultLocation = time.FixedZone("WIB", wibOffset)
+
+// dayStartFor returns the unix time of local midnight in loc.
+func dayStartFor(now float64, loc *time.Location) float64 {
+	if loc == nil {
+		loc = defaultLocation
 	}
-	return day - wibOffset
+	t := time.Unix(int64(now), 0).In(loc)
+	y, m, d := t.Date()
+	return float64(time.Date(y, m, d, 0, 0, 0, 0, loc).Unix())
 }
 
 func shortID(id string) string {

@@ -19,8 +19,48 @@ verify/    skrip screenshot Playwright + hasil PNG
 | **Ruang Tim Dev** (kiri belakang) | Bima `dev`, Raka `planner`, Laras `uiux`, Dimas `coder`, Yoga `reviewer`, Sari `tester` |
 | **Ruang Tim Edu** (kanan belakang) | Ayu `edu`, Nisa `edu-designer`, Yohan `edu-writer`, Hadi `edu-reviewer` |
 
-`id` agen = nama profil Hermes. Nama tampilan & peran ada di
-`frontend/src/lib/agents.ts` (satu sumber untuk 3D, roster, dan kartu).
+`id` agen = nama profil Hermes. Nama tampilan & peran bawaan ada di
+`frontend/src/lib/agents.ts`; server juga menerbitkan roster yang sama di
+`GET /api/config` (bisa dioverride lewat `OFFICE_ROSTER`, lihat
+[Roster dinamis](#roster-dinamis)).
+
+## Quick start
+
+Cukup tiga langkah, tanpa mengedit kode. Butuh Docker (Compose v2) dan satu
+folder Hermes (`~/.hermes` — bawaan; lewati kalau beda).
+
+```bash
+# 1. build image (Go API + frontend jadi satu proses) dan jalankan
+docker compose up -d --build
+
+# 2. pastikan kantornya sudah membaca data
+curl -s localhost:8080/api/config
+curl -s localhost:8080/api/status | head -c 400
+
+# 3. buka http://localhost:8080
+```
+
+Kalau folder Hermes bukan `~/.hermes`, sebutkan sekali:
+
+```bash
+HERMES_HOME=/path/ke/.hermes docker compose up -d
+```
+
+Tanpa Docker (Go 1.23+ dan Node 20+):
+
+```bash
+# 1. API — membaca ~/.hermes, melayani :8131
+cd backend && HERMES_HOME=~/.hermes go run ./cmd/office-api
+
+# 2. frontend dev server, proxy /api ke :8131
+cd ../frontend && npm ci && npm run dev
+
+# 3. buka http://127.0.0.1:5173
+```
+
+Tanpa data Hermes sungguhan, bikin contoh dulu: `python3 deploy/make-fixture.py /tmp/hermes-demo`
+lalu pakai `HERMES_HOME=/tmp/hermes-demo`. Frontend memanggil API dengan path
+relatif (`/api/...`, same origin), jadi tidak ada URL yang perlu di-hardcode.
 
 ## Menjalankan di lokal
 
@@ -49,6 +89,37 @@ cd ../frontend && npm ci && npm run build     # -> frontend/dist
 # atau sekaligus:
 deploy/build.sh
 ```
+
+## Docker (satu image, satu proses)
+
+`Dockerfile` dua tahap: build Go (`CGO_ENABLED=0`), build frontend, lalu
+menyalin keduanya ke `alpine` tanpa toolchain. Binary yang sama menyajikan
+`/api/*` **dan** `frontend/dist` (`WEB_DIR=/app/web`), jadi tidak perlu Caddy
+atau nginx di dalam image.
+
+```bash
+docker build -t virtual-office .
+docker run --rm -p 8080:8080 \
+  -v ~/.hermes:/hermes:ro \
+  -e HERMES_HOME=/hermes \
+  virtual-office
+```
+
+Atau `docker compose up -d --build` (lihat `docker-compose.yml`; contoh
+`OFFICE_SOURCE=remote` dan mount roster ada di komentar file itu).
+
+Catatan:
+
+- `~/.hermes` di-mount **read-only**; kantor tidak pernah menulis ke state
+  Hermes. SQLite dibuka `mode=ro`.
+- Hermes menulis `state.db` dalam mode WAL, jadi saat gateway hidup ada
+  `state.db-wal`/`-shm` di folder itu. Mount `:ro` tetap bisa membacanya selama
+  kedua file itu ada; kalau muncul error "attempt to write a readonly
+  database", lepas `:ro` (mount read-write) — API tetap tidak menulis apa pun.
+- Image berjalan sebagai uid 10001. Kalau `~/.hermes` milik uid lain (biasanya
+  `0700`), jalankan container sebagai diri sendiri:
+  `docker run --user "$(id -u):$(id -g)" ...` (compose: `OFFICE_UID`/`OFFICE_GID`).
+- Kesehatan: `curl localhost:8080/api/health`; image punya `HEALTHCHECK`.
 
 ## Deploy (manual, tidak dijalankan otomatis)
 
@@ -89,7 +160,8 @@ Read-only, tanpa auth, bind `127.0.0.1` saja (Caddy yang mempublikasikan).
 
 | Endpoint | Isi |
 |---|---|
-| `GET /api/health` | `{ok, version, now, uptime_s, home, profiles, bind}` |
+| `GET /api/health` | `{ok, version, now, uptime_s, source, home, profiles, bind, tz}` |
+| `GET /api/config` | `{title, tz, source, hermes_home, profiles, roster[], layout, teams[]}` |
 | `GET /api/status` | `{now, gateway, agents[], feed[], tasks[], comms[]}` |
 | `GET /api/agents/{id}` | satu objek agen, `404` kalau tidak ada |
 
@@ -137,22 +209,76 @@ id di payload (pengguna tampil sebagai "Pengguna").
 
 ### Konfigurasi (env)
 
+Semua lewat environment variable; tidak ada path user yang di-hardcode.
+
 | Variabel | Default | Arti |
 |---|---|---|
-| `HERMES_HOME` | `~/.hermes` | sumber `state.db` + `gateway_state.json` |
-| `PORT` | `8131` | port HTTP |
-| `BIND` | `127.0.0.1` | alamat bind |
-| `PROFILES` | 11 profil bawaan | daftar profil dipisah koma (mengganti default) |
+| `HERMES_HOME` | `~/.hermes` | sumber `state.db` + `gateway_state.json` (mode `local`) |
+| `PORT` | `8131` | port HTTP (image Docker: `8080`) |
+| `BIND` | `127.0.0.1` | alamat bind (`0.0.0.0` di Docker) |
+| `OFFICE_SOURCE` | `local` | `local` = baca `state.db` di mesin ini; `remote` = ambil dari instance lain lewat HTTP, tanpa akses filesystem |
+| `REMOTE_API_URL` | — | wajib untuk `OFFICE_SOURCE=remote`, mis. `https://office.example.com` |
+| `OFFICE_ROSTER` | — | path file roster JSON/YAML (nama, peran, tim). Lihat `deploy/roster.example.yaml` |
+| `OFFICE_ROSTER_JSON` | — | roster inline JSON; menang atas `OFFICE_ROSTER` |
+| `OFFICE_TITLE` | `Agent Office` | judul kantor (dipakai frontend dari `/api/config`) |
+| `OFFICE_TZ` | `Asia/Jakarta` | zona waktu untuk batas hari & bucket per jam |
+| `PROFILES` | 11 profil bawaan | daftar profil dipisah koma (mengganti default; mode `remote` tidak memakai ini) |
 | `GATEWAY_FILE` | `$HERMES_HOME/gateway_state.json` | status gateway |
+| `WEB_DIR` | — | folder `dist` frontend; kalau diisi, API juga menyajikan SPA (dipakai image Docker) |
 | `LOG_REQUESTS` | `0` | log tiap request ke stderr |
 
 Profil yang punya folder `$HERMES_HOME/profiles/<nama>/state.db` otomatis
-ditambahkan ke roster walau tidak ada di `PROFILES`.
+ditambahkan ke roster walau tidak ada di `PROFILES`. Profil tanpa `state.db`
+tetap dapat meja (status `offline`), dan nama/peran/tim-nya bisa dioverride
+tanpa mengubah kode.
+
+### Roster dinamis
+
+`GET /api/config` adalah satu-satunya sumber yang dibutuhkan frontend:
+
+```jsonc
+{
+  "title": "Agent Office",
+  "tz": "Asia/Jakarta",
+  "source": "local",
+  "hermes_home": "/hermes",
+  "profiles": ["default", "dev", "coder"],
+  "roster": [{ "id": "dev", "name": "Bima", "role": "Lead Dev", "team": "dev" }],
+  "layout": { "floor": { "w": 40, "d": 30 } },
+  "teams": [{ "id": "dev", "label": "Ruang Tim Dev" }]
+}
+```
+
+Roster diturunkan dari profil yang ditemukan: id profil jadi `id`, namanya
+default = id, peran default `Agen`, tim ditebak dari nama (`default` → pendopo,
+`edu*` → edu, sisanya dev). Override berlapis, prioritas dari atas:
+`OFFICE_ROSTER_JSON` → file `OFFICE_ROSTER` → roster instance upstream (mode
+`remote`) → default. Desain lengkapnya ada di `deploy/roster.example.yaml`;
+file YAML-nya subset sederhana (daftar `- id:` + `name/role/team`), JSON dengan
+bentuk sama juga diterima, dan keluaran `/api/config` bisa langsung dipakai
+ulang sebagai file roster.
+
+### Federasi (`OFFICE_SOURCE=remote`)
+
+Satu instance kantor bisa menunjuk instance lain — mis. kantor pusat di server,
+kantor rumah cuma jadi penampil:
+
+```bash
+OFFICE_SOURCE=remote REMOTE_API_URL=https://office.example.com ./office-api
+```
+
+Mode ini tidak membuka `state.db` sama sekali: `/api/status` diproksikan ke
+`$REMOTE_API_URL/api/status`, dan roster/judul/zona diambil dari
+`$REMOTE_API_URL/api/config` (cache 30 detik) supaya nama & peran tetap benar.
+Kalau upstream mati, `/api/status` menjawab `502` dengan pesan error — bukan
+kantor kosong yang menyesatkan. Status agen tetap dibaca dari `state.db` di
+instance pemilik data: API Hermes sendiri (`/v1/chat/completions`, `/v1/models`,
+…) tidak punya endpoint status sesi, jadi tidak bisa dijadikan sumber langsung.
 
 ## Verifikasi
 
 ```bash
-cd backend  && go vet ./... && go test ./...          # 24 test, semua lulus
+cd backend  && go vet ./... && go test ./...          # 68 test, semua lulus
 cd frontend && npx tsc --noEmit && npm run build      # dist/ (1,04 MB, 289 kB gzip)
 python3 verify/shoot.py                               # screenshot + cek layout
 ```

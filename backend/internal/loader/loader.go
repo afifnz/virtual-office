@@ -24,12 +24,20 @@ const MessageWindow = 12000
 type Loader struct {
 	cfg config.Config
 	log *log.Logger
+	loc *time.Location
 	mu  sync.Mutex
 }
 
 // New builds a Loader.
 func New(cfg config.Config, logger *log.Logger) *Loader {
-	return &Loader{cfg: cfg, log: logger}
+	loc, err := config.LocationOf(cfg.TZ)
+	if err != nil {
+		if logger != nil {
+			logger.Printf("warn tz=%q tidak dikenal, pakai %s", cfg.TZ, config.DefaultTZ)
+		}
+		loc, _ = config.LocationOf(config.DefaultTZ)
+	}
+	return &Loader{cfg: cfg, log: logger, loc: loc}
 }
 
 // Snapshot loads every profile DB and derives the payload. Errors are per
@@ -76,6 +84,7 @@ func (l *Loader) Snapshot(now time.Time) derive.Snapshot {
 		Profiles:     datasets,
 		Gateway:      l.gateway(),
 		Now:          nowF,
+		Location:     l.loc,
 	})
 	l.log.Printf("info snapshot agents=%d feed=%d tasks=%d comms=%d dbs_ok=%d dbs_err=%d",
 		len(snap.Agents), len(snap.Feed), len(snap.Tasks), len(snap.Comms), ok, bad)

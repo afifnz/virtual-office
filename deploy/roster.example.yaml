@@ -1,0 +1,60 @@
+# Contoh roster override — salin, ubah, lalu tunjuk lewat OFFICE_ROSTER.
+#
+#   OFFICE_ROSTER=./deploy/roster.example.yaml ./office-api
+#
+# Semua field opsional. Profil yang tidak disebut tetap muncul di kantor dengan
+# nama = id profil dan peran generik ("Agen"). Format JSON dengan bentuk yang
+# sama juga diterima (.json), dan isi /api/config bisa langsung dipakai ulang
+# sebagai file roster karena kunci "roster" diterima selain "agents".
+title: Agent Office
+tz: Asia/Jakarta
+
+teams:
+  - id: pendopo
+    label: Pendopo
+  - id: dev
+    label: Ruang Tim Dev
+  - id: edu
+    label: Ruang Tim Edu
+
+agents:
+  - id: default
+    name: Galuh
+    role: Asisten Pribadi
+    team: pendopo
+  - id: dev
+    name: Bima
+    role: Lead Dev
+    team: dev
+  - id: planner
+    name: Raka
+    role: Perencana
+    team: dev
+  - id: coder
+    name: Dimas
+    role: Programmer
+    team: dev
+  - id: reviewer
+    name: Yoga
+    role: Reviewer
+    team: dev
+  - id: tester
+    name: Sari
+    role: Tester
+    team: dev
+  - id: edu
+    name: Ayu
+    role: Lead Edu
+    team: edu
+  - id: edu-designer
+    name: Nisa
+    role: Desainer Materi
+    team: edu
+  - id: edu-writer
+    name: Yohan
+    role: Penulis Materi
+    team: edu
+  - id: edu-reviewer
+    name: Hadi
+    role: Reviewer Materi
+    team: edu

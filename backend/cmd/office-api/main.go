@@ -1,8 +1,14 @@
 // Command office-api serves the 3D agent office data as read-only JSON.
 //
-//	HERMES_HOME=/home/ubuntu/.hermes PORT=8131 ./office-api
+// Local (default) — read a Hermes home on this machine:
 //
-// It binds to localhost only; Caddy reverse-proxies /api/* to it.
+//	HERMES_HOME=~/.hermes PORT=8131 ./office-api
+//
+// Remote — federate another office instance, no filesystem access:
+//
+//	OFFICE_SOURCE=remote REMOTE_API_URL=https://office.example.com ./office-api
+//
+// Every setting is an environment variable; see README.md.
 package main
 
 import (
@@ -17,23 +23,65 @@ import (
 
 	"officeapi/internal/api"
 	"officeapi/internal/config"
-	"officeapi/internal/loader"
+	"officeapi/internal/roster"
+	"officeapi/internal/source"
 )
 
 func main() {
 	logger := log.New(os.Stderr, "office-api ", log.LstdFlags|log.LUTC)
-	cfg := config.Load()
+
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Printf("error config=%q", err.Error())
+		os.Exit(2)
+	}
+
+	// Roster overrides: inline JSON wins over the file. Missing file is fatal
+	// (a typo in OFFICE_ROSTER should be visible, not silently ignored).
+	fileDoc, err := roster.LoadFile(cfg.RosterPath)
+	if err != nil {
+		logger.Printf("error %q", err.Error())
+		os.Exit(2)
+	}
+	var inlineDoc *roster.Document
+	if cfg.RosterJSON != "" {
+		inlineDoc, err = roster.ParseJSON([]byte(cfg.RosterJSON))
+		if err != nil {
+			logger.Printf("error OFFICE_ROSTER_JSON=%q", err.Error())
+			os.Exit(2)
+		}
+	}
+	override := roster.Merge(inlineDoc, fileDoc)
+
+	res := roster.Resolver{Profiles: cfg.Profiles}
+	if override != nil {
+		res.Layers = []*roster.Document{override}
+	}
+	set := res.Resolve()
+
+	// The roster is the source of truth for which desks exist: a desk named in
+	// an override but missing from PROFILES still gets an offline agent.
+	if !cfg.IsRemote() {
+		cfg.Profiles = set.IDs()
+	}
+
+	src, err := source.New(cfg, logger)
+	if err != nil {
+		logger.Printf("error source=%q", err.Error())
+		os.Exit(2)
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr(),
-		Handler:           api.NewServer(cfg, loader.New(cfg, logger), logger).Handler(),
+		Handler:           api.NewServer(cfg, src, res, logger).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	logger.Printf("info start version=%s addr=%s home=%s profiles=%d", api.Version, cfg.ListenAddr(), cfg.Home, len(cfg.Profiles))
+	logger.Printf("info start version=%s addr=%s source=%s home=%s desks=%d tz=%s web=%q",
+		api.Version, cfg.ListenAddr(), src.Kind(), src.Home(), len(set.IDs()), cfg.TZ, cfg.WebDir)
 
 	errCh := make(chan error, 1)
 	go func() {
