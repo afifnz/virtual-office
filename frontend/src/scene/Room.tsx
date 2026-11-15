@@ -138,8 +138,8 @@ const LAMPS: Array<[number, number]> = [
   [0, 12.8],
   [-18.6, 8.0],
   [18.6, 8.8],
-  [-10.0, -8.4],
-  [10.0, -8.4],
+  [-10.0, -6.4],
+  [10.0, -6.4],
 ]
 
 const PLANTS: Array<[number, number]> = [

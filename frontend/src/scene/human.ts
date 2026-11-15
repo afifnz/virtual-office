@@ -832,15 +832,18 @@ export function buildGlasses(l: FaceLandmarks): THREE.Group {
 export function buildHeadphones(color: string, l: FaceLandmarks): THREE.Group {
   const g = new THREE.Group()
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.1 })
-  const R = l.headW * 0.62
-  const band = new THREE.Mesh(new THREE.TorusGeometry(R, 0.0085, 6, 26, Math.PI), mat)
-  band.rotation.z = Math.PI
-  band.rotation.y = Math.PI / 2
-  band.position.set(0, l.eyeY + 0.02, l.headCenterZ)
+  const cupX = l.headW * 0.52
+  const cupY = l.eyeY - 0.006
+  // The band is the upper half of a torus in the cups' own XY plane, so both
+  // ends land on the cups, stretched vertically to clear the crown. Turning it
+  // about Y (as before) swung the arc down through the face.
+  const band = new THREE.Mesh(new THREE.TorusGeometry(cupX, 0.0085, 6, 26, Math.PI), mat)
+  band.position.set(0, cupY, l.headCenterZ)
+  band.scale.y = Math.max(1, (l.headTopY + 0.012 - cupY) / cupX)
   g.add(band)
   for (const s of [-1, 1]) {
     const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.026, 16), mat)
-    cup.position.set(s * l.headW * 0.52, l.eyeY - 0.006, l.headCenterZ)
+    cup.position.set(s * cupX, cupY, l.headCenterZ)
     cup.rotation.z = Math.PI / 2
     g.add(cup)
   }

@@ -49,8 +49,8 @@ export const DESK_FOOTPRINT = { halfW: 0.81, front: 0.39, back: 0.64 }
 /** Default room centre per team, used when a team has no desk yet. */
 export const TEAM_CENTRE: Record<string, [number, number]> = {
   lobby: [0, 9.2],
-  dev: [-10, -8.4],
-  edu: [10, -8.4],
+  dev: [-10, -6.4],
+  edu: [10, -6.4],
 }
 
 /** A desk's axis-aligned footprint on the floor (rotation is always PI). */
