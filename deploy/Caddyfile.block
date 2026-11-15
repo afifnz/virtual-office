@@ -1,43 +1,54 @@
-# Agent Office — Caddy block
+# Agent Office — Caddy block (produksi)
 #
-# Paste inside the site block for office.afifnurzein.my.id, replacing the old
-# Python API (127.0.0.1:8130) and /var/www/office. Reload with:
-#   sudo caddy validate --config /etc/caddy/Caddyfile
-#   sudo systemctl reload caddy
+# Salinan ini mencerminkan layout yang BENAR-BENAR berjalan di VPS:
+#   API Go      : 127.0.0.1:8130  (unit systemd user: virtual-office-api)
+#   Static SPA  : /var/www/office (hasil `frontend/dist`)
 #
-# The frontend is a static build (frontend/dist). The API is read-only JSON and
-# binds to localhost, so it is only reachable through this proxy.
+# Versi lama berkas ini menunjuk 8131 dan /var/www/office-v2 — dua-duanya tidak
+# pernah dipakai produksi, dan itu sebabnya header di bawah tidak pernah aktif.
+#
+# Cara pasang: `bash deploy/apply-caddy-headers.sh` (backup + validate + rollback
+# otomatis), atau rekatkan blok ini ke dalam site block lalu:
+#   sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 
 office.afifnurzein.my.id {
 	encode zstd gzip
 
-	# JSON API — Go service on :8131 (the old Python one stayed on :8130)
+	# JSON API — Go service, hanya lewat localhost
 	handle /api/* {
-		reverse_proxy 127.0.0.1:8131 {
+		reverse_proxy 127.0.0.1:8130 {
 			header_up X-Real-IP {remote_host}
 		}
 	}
 
 	# Static SPA build
 	handle {
-		root * /var/www/office-v2
+		root * /var/www/office
 		try_files {path} /index.html
 		file_server
 	}
 
-	# The API is public metadata; keep the usual hardening headers anyway.
+	# --- Header keamanan -------------------------------------------------
+	# API ini publik tapi hanya metadata; header tetap dipasang karena satu
+	# origin dengan SPA. CSP aman untuk build Vite: tidak ada inline script
+	# maupun inline style di index.html (favicon pun data: URI di img-src).
 	header {
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
-		X-Frame-Options SAMEORIGIN
+		X-Frame-Options DENY
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+		Cross-Origin-Opener-Policy same-origin
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
 		-Server
 	}
 
-	# Long cache for hashed assets, no cache for the shell.
+	# --- Cache ------------------------------------------------------------
+	# Aset ber-hash: immutable. Shell HTML: no-cache, supaya deploy langsung
+	# terlihat tanpa hard reload (dulu sempat menyajikan bundle lama berjam-jam).
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
-	@index path / /
-	header @index Cache-Control "no-cache"
+	@shell path / /index.html
+	header @shell Cache-Control "no-cache"
 
 	log {
 		output file /var/log/caddy/office.log {

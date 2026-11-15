@@ -163,8 +163,9 @@ systemctl --user stop virtual-office-api \
 && curl -s http://127.0.0.1:8130/api/health
 ```
 
-**Caddy**: lihat `deploy/Caddyfile.block` untuk blok situs lengkap (proxy ke `8130`,
-root `/var/www/office`).
+**Caddy** (cache + header keamanan): `bash deploy/apply-caddy-headers.sh` — menyisipkan
+`@assets immutable` / `@shell no-cache` dan header keamanan ke site block, dengan
+`caddy validate` + rollback otomatis. Rujukan lengkap: `deploy/Caddyfile.block`.
 
 **Rollback**: `systemctl --user stop virtual-office-api && install -m 0755 ~/.local/bin/office-api.prev ~/.local/bin/office-api && systemctl --user start virtual-office-api && sudo rsync -a --delete /var/www/office.prev/ /var/www/office/`.
 
