@@ -308,7 +308,7 @@ function hijabRings(h: HeadShape, f: Features): Ring[] {
       cz: h.cz,
       // a little fullness over the skull: zero at the crown, growing toward
       // the jaw, so the crown is taut but the sides are not a helmet
-      fold: 0.016 * Math.sin(Math.min(Math.PI, phi * 1.05)) ** 1.25,
+      fold: 0.021 * Math.sin(Math.min(Math.PI, phi * 1.02)) ** 1.15,
       tone: 0,
     })
   }
@@ -376,7 +376,7 @@ function buildCloth(h: HeadShape, f: Features, base: THREE.Color, deep: THREE.Co
     const hem = r >= rows - 1
     for (let s = 0; s <= SEG; s++) {
       const theta = (s / SEG) * Math.PI * 2
-      const fold = foldAt(theta, ring.fold)
+      const fold = foldAt(theta + (ring.y - h.cy) * 3.1, ring.fold)
       const rx = ring.rx * (1 + fold)
       const rz = ring.rz * (1 + fold)
       const x = h.cx + Math.sin(theta) * rx
@@ -386,7 +386,7 @@ function buildCloth(h: HeadShape, f: Features, base: THREE.Color, deep: THREE.Co
 
       // face window: the cloth dives behind the face inside the opening
       const d = windowDist(h, f, Math.atan2(x - h.cx, z - ring.cz), y)
-      const inside = THREE.MathUtils.smoothstep(d, -0.0062, 0.0062)
+      const inside = THREE.MathUtils.smoothstep(d, -0.0030, 0.0030)
       const shrink = Math.min(CLOTH_IN, rx * 0.62, rz * 0.62)
       const off = CLOTH + (-CLOTH - shrink - CLOTH) * 0
       const scale = (rx - inside * shrink) / rx
@@ -398,7 +398,7 @@ function buildCloth(h: HeadShape, f: Features, base: THREE.Color, deep: THREE.Co
       // tone: the cap is lighter, the drape deeper; ridges catch light
       const tone = base.clone().lerp(deep, ring.tone * 0.55)
       const ridge = ring.fold > 0 ? fold / ring.fold : 0
-      const lipShade = 1 - 0.30 * inside * (1 - inside) * 4
+      const lipShade = 1 - 0.42 * inside * (1 - inside) * 4
       const occl = 1 - 0.10 * THREE.MathUtils.clamp((h.cy - 0.055 - y) / 0.20, 0, 1)
       const k = occl * (1 + 0.17 * ridge) * lipShade
       col.push(tone.r * k, tone.g * k, tone.b * k)
