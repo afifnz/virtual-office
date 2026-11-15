@@ -11,7 +11,11 @@ Type=simple
 # ~/.local/bin/office-api. Versi lama berkas ini menunjuk backend/bin/office-api
 # dan PORT=8131 — keduanya tidak pernah dipakai produksi, sehingga siapa pun yang
 # mengikuti repo akan menghasilkan deployment yang berbeda dari yang berjalan.
-WorkingDirectory=%h/workspace/virtual-office
+#
+# WorkingDirectory sengaja hanya $HOME: API tidak membaca berkas relatif, dan
+# host yang hanya memasang artefak rilis (tanpa salinan rsync repo) tidak boleh
+# gagal start dengan 200/CHDIR.
+WorkingDirectory=%h
 ExecStart=%h/.local/bin/office-api
 
 Environment=HERMES_HOME=%h/.hermes
