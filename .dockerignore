@@ -1,0 +1,12 @@
+# Keep the build context small; both stages re-create what they need.
+.git
+.gitignore
+**/node_modules
+frontend/dist
+backend/bin
+backend/*.test
+verify
+*.log
+deploy/office-api
+docker-compose.yml
+README.md

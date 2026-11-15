@@ -1,4 +1,5 @@
 import type { AgentStatus, FeedKind } from './types'
+import { officeTZ } from './roster'
 
 /** Compact age label in Indonesian units: 12dtk, 4mnt, 3j, 2hr. */
 export function relTime(ts: number, now: number): string {
@@ -10,12 +11,34 @@ export function relTime(ts: number, now: number): string {
   return `${Math.round(s / 86400)}hr`
 }
 
-/** WIB wall clock (the office runs on Jakarta time). */
-export function wibClock(ts: number): string {
-  const d = new Date((ts + 7 * 3600) * 1000)
-  const hh = String(d.getUTCHours()).padStart(2, '0')
-  const mm = String(d.getUTCMinutes()).padStart(2, '0')
-  return `${hh}:${mm}`
+let clockFmt: Intl.DateTimeFormat | null = null
+let clockTZ = ''
+
+/**
+ * Wall clock in the office timezone (OFFICE_TZ / the roster `tz`), not the
+ * browser's. For the default Asia/Jakarta this is the same WIB clock the office
+ * has always shown.
+ */
+export function officeClock(ts: number): string {
+  const tz = officeTZ()
+  if (!clockFmt || clockTZ !== tz) {
+    try {
+      clockFmt = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })
+    } catch {
+      clockFmt = null
+    }
+    clockTZ = tz
+  }
+  if (!clockFmt) {
+    const d = new Date((ts + 7 * 3600) * 1000)
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+  }
+  return clockFmt.format(new Date(ts * 1000))
 }
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {

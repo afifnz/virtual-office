@@ -1,8 +1,9 @@
-import { TEAMS, agentMeta } from '../lib/agents'
+import { agentMeta, teamIds, teamMeta } from '../lib/roster'
 import type { Agent, StatusPayload } from '../lib/types'
 import { relTime, statusLabel } from '../lib/format'
 
-const ORDER: Array<'lobby' | 'dev' | 'edu'> = ['lobby', 'dev', 'edu']
+/** Rooms in scene order; a roster may add a custom team, which lands last. */
+const ORDER = (): string[] => teamIds()
 
 /** Left rail: every agent grouped by team, click to fly to the desk. */
 export function Roster({
@@ -21,7 +22,7 @@ export function Roster({
   const byId = new Map<string, Agent>()
   for (const a of status?.agents ?? []) byId.set(a.id, a)
 
-  const rows = ORDER.map((team) => {
+  const rows = ORDER().map((team) => {
     const agents = (status?.agents ?? [])
       .filter((a) => agentMeta(a.id).team === team)
       .sort((a, b) => a.id.localeCompare(b.id))
@@ -41,7 +42,7 @@ export function Roster({
           <section key={team} className="roster-team">
             <h3>
               <i className={`team-bar ${team}`} aria-hidden="true" />
-              {TEAMS[team].label}
+              {teamMeta(team).label}
               <span>{agents.length}</span>
             </h3>
             {agents.map((a) => {

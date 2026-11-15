@@ -285,6 +285,39 @@ func TestTodayCountersUseWIBBuckets(t *testing.T) {
 	}
 }
 
+func snapshotTZ(t *testing.T, home *fixture.Home, tz string, profiles ...string) derive.Snapshot {
+	t.Helper()
+	cfg := config.Config{Home: home.Dir, Profiles: profiles, TZ: tz,
+		GatewayPath: home.Dir + "/gateway_state.json"}
+	l := loader.New(cfg, testLogger(t))
+	return l.Snapshot(time.Unix(int64(nowF), 0))
+}
+
+// OFFICE_TZ moves the day boundary and the hourly buckets: the same messages
+// are "today" in Jakarta and "yesterday" in a zone where it just turned
+// midnight.
+func TestTodayCountersFollowOfficeTZ(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("default")
+	// nowF is 08:00Z = 15:00 WIB = 00:00 in Los Angeles; these messages are two
+	// hours earlier, so they are today in Jakarta and yesterday in LA.
+	w.Session(fixture.Session{ID: "s1", Profile: "default", Source: "telegram",
+		Started: nowF - 2*3600, Updated: nowF - 2*3600 + 1})
+	w.Msg(fixture.Msg{Session: "s1", Role: "user", Content: "menjelang tengah malam", TS: nowF - 2*3600})
+	w.Msg(fixture.Msg{Session: "s1", Role: "assistant", Content: "ok", TS: nowF - 2*3600 + 1})
+	w.Close()
+
+	if a := agent(t, snapshotTZ(t, home, "Asia/Jakarta", "default"), "default"); a.Today.Messages != 2 {
+		t.Fatalf("Jakarta today.messages = %d, want 2", a.Today.Messages)
+	}
+	if a := agent(t, snapshotTZ(t, home, "America/Los_Angeles", "default"), "default"); a.Today.Messages != 0 {
+		t.Fatalf("Los Angeles today.messages = %d, want 0 (still yesterday there)", a.Today.Messages)
+	}
+	if a := agent(t, snapshot(t, home, "default"), "default"); a.Today.Messages != 2 {
+		t.Fatalf("default tz today.messages = %d, want 2 (WIB fallback)", a.Today.Messages)
+	}
+}
+
 func TestFeedIsNewestFirstAndCapped(t *testing.T) {
 	home := fixture.New(t)
 	w := home.Profile("default")
@@ -336,8 +369,22 @@ func TestJSONShapeMatchesLegacyContract(t *testing.T) {
 			t.Fatalf("top-level key %q missing", k)
 		}
 	}
-	if len(top) != 6 {
-		t.Fatalf("top-level keys = %d, want exactly 6: %v", len(top), keys(top))
+	// The contract is additive: the six legacy keys plus the database health
+	// block. Anything else is a new field nobody agreed on.
+	allowed := map[string]bool{
+		"now": true, "gateway": true, "agents": true, "feed": true,
+		"tasks": true, "comms": true,
+		"dbs_checked": true, "dbs_ok": true, "dbs_err": true, "dbs_failed": true,
+	}
+	for _, k := range keys(top) {
+		if !allowed[k] {
+			t.Fatalf("unexpected top-level key %q", k)
+		}
+	}
+	for _, k := range []string{"dbs_checked", "dbs_ok", "dbs_err"} {
+		if _, ok := top[k]; !ok {
+			t.Fatalf("db health key %q missing", k)
+		}
 	}
 
 	var agents []map[string]json.RawMessage

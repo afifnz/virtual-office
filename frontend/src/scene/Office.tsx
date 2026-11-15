@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react'
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { StatusPayload } from '../lib/types'
-import { AGENTS, agentMeta, resolveAgentId } from '../lib/agents'
+import { agentMeta, agentsFor, resolveAgentId, rosterAgents } from '../lib/roster'
 import { Room } from './Room'
 import { Furniture } from './Furniture'
 import { AgentActor } from './AgentActor'
@@ -35,6 +35,9 @@ export function Office({ status, command, moveIntent, onNear, onMove, onPick, dp
   }, [status])
   const now = status?.now ?? Date.now() / 1000
   const mountedAt = useRef(now)
+  // Every desk the roster knows about, plus any agent /api/status reports that
+  // /api/config did not list (a desk is created on the lattice for it).
+  const metas = useMemo(() => agentsFor((status?.agents ?? []).map((a) => a.id)), [status])
 
   return (
     <Canvas
@@ -63,7 +66,7 @@ export function Office({ status, command, moveIntent, onNear, onMove, onPick, dp
       <Room />
       <Furniture agents={status?.agents ?? []} />
 
-      {AGENTS.filter((meta) => !solo || meta.id === solo).map((meta) => (
+      {metas.filter((meta) => !solo || meta.id === solo).map((meta) => (
         <AgentActor
           key={meta.id}
           meta={meta}
@@ -87,7 +90,7 @@ export function agentFocus(id: string): RigCommand['focus'] {
 
 /** Helper used by the HUD to know where a team sits. */
 export function teamCenter(team: 'lobby' | 'dev' | 'edu'): THREE.Vector3 {
-  const members = AGENTS.filter((a) => a.team === team)
+  const members = rosterAgents().filter((a) => a.team === team)
   const v = new THREE.Vector3()
   for (const m of members) v.add(new THREE.Vector3(m.desk.x, 0, m.desk.z))
   return v.multiplyScalar(1 / Math.max(1, members.length))

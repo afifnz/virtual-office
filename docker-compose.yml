@@ -1,0 +1,43 @@
+# Plug-and-play stack: one container, one process (Go API + built frontend).
+#
+#   docker compose up -d --build
+#   curl -s localhost:8080/api/config | head
+#
+# The only thing this needs is a Hermes home. Override it with HERMES_HOME in
+# your shell (the default is ~/.hermes) — the mount is read-only, the office
+# never writes to your Hermes state.
+services:
+  office:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    image: virtual-office:${VERSION:-latest}
+    container_name: virtual-office
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      HERMES_HOME: /hermes
+      PORT: "8080"
+      BIND: 0.0.0.0
+      WEB_DIR: /app/web
+      OFFICE_SOURCE: ${OFFICE_SOURCE:-local}
+      OFFICE_TITLE: ${OFFICE_TITLE:-Agent Office}
+      OFFICE_TZ: ${OFFICE_TZ:-Asia/Jakarta}
+      # Optional roster override (JSON or YAML), see deploy/roster.example.yaml.
+      # Both are passed through from your shell; empty means "no override".
+      OFFICE_ROSTER: ${OFFICE_ROSTER:-}
+      OFFICE_ROSTER_JSON: ${OFFICE_ROSTER_JSON:-}
+      # Federation: point this office at another one, no local state.db needed.
+      # The URL is only ever read by the HTTP client; it is published redacted.
+      REMOTE_API_URL: ${REMOTE_API_URL:-}
+    volumes:
+      # ~/.hermes on the host, mounted read-only. Compose expands $HOME; if you
+      # prefer, replace the whole value with an absolute path or use
+      # `docker run ... -v ~/.hermes:/hermes:ro`.
+      - ${HERMES_HOME:-$HOME/.hermes}:/hermes:ro
+      # - ./deploy/roster.example.yaml:/config/roster.yaml:ro
+    # The image runs as uid 10001; a bind-mounted ~/.hermes is usually 0700 for
+    # your own uid, so run the container as you. `id -u` / `id -g` to check.
+    user: "${OFFICE_UID:-1000}:${OFFICE_GID:-1000}"

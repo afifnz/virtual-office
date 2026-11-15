@@ -1,9 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchStatus } from '../lib/api'
-import type { StatusPayload } from '../lib/types'
+import { rosterAgents } from '../lib/roster'
+import type { Agent, StatusPayload } from '../lib/types'
 
 const POLL_MS = 4000
 const BACKOFF_MS = [6000, 12000, 24000, 30000]
+
+/**
+ * A snapshot built from the roster alone, every agent `offline`. The office is
+ * rendered from /api/status, so without it the room used to go empty; an API
+ * outage must still show the desks that exist.
+ */
+function offlinePayload(): StatusPayload {
+  const agents: Agent[] = rosterAgents().map((a) => ({
+    id: a.id,
+    status: 'offline',
+    last_active: 0,
+    current: null,
+    today: { sessions: 0, messages: 0, tool_calls: 0, tokens: 0, hourly: [] },
+    total: { sessions: 0, messages: 0 },
+    task: null,
+    source: null,
+    blocked: null,
+  }))
+  return {
+    now: Date.now() / 1000,
+    gateway: { state: 'unknown', version: '', updated_at: '' },
+    agents,
+    feed: [],
+    tasks: [],
+    comms: [],
+  }
+}
 
 export interface StatusState {
   data: StatusPayload | null
@@ -62,6 +90,8 @@ export function useStatus(): StatusState {
         if (!alive.current || ac.signal.aborted) return
         failures.current += 1
         const wait = BACKOFF_MS[Math.min(failures.current - 1, BACKOFF_MS.length - 1)] ?? 30000
+        // Keep the last good snapshot; if we never had one, render the roster offline.
+        setData((prev) => prev ?? offlinePayload())
         setError(err instanceof Error ? err.message : 'gagal memuat status')
         schedule(wait)
       })

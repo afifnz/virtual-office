@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
-import { AGENTS } from '../lib/agents'
+import { rosterAgents } from '../lib/roster'
 import { FLOOR, SPOTS, WALLS } from '../lib/rooms'
 
 export interface RigCommand {
@@ -84,7 +84,7 @@ export function CameraRig({
   }, [camera])
 
   const positions = useMemo(
-    () => AGENTS.map((a) => ({ id: a.id, x: a.desk.x, z: a.desk.z })),
+    () => rosterAgents().map((a) => ({ id: a.id, x: a.desk.x, z: a.desk.z })),
     [],
   )
 

@@ -1,4 +1,6 @@
 import { AGENTS } from './agents'
+import { deskObstacle as deskFootprint, type Edge, type Obstacle } from './layout'
+import { setFloorContext, setFurniture } from './roster'
 
 /** The floor is 40 x 30 in world units (1 unit ~ 1 m): 4:3, not a corridor. */
 export const FLOOR = { w: 40, d: 30, y: 0 } as const
@@ -61,6 +63,8 @@ export interface DeskSpot {
   rot: number
 }
 
+export type { Obstacle }
+
 /** One desk per agent, on a 4.5 x 4.0 grid (see lib/agents.ts). */
 export const DESKS: DeskSpot[] = AGENTS.map((a) => ({ id: a.id, ...a.desk }))
 
@@ -72,6 +76,11 @@ export const DESK_EXIT: Record<string, [number, number]> = Object.fromEntries(
     return [d.id, [d.x + fx * 2.0, d.z + fz * 2.0] as [number, number]]
   }),
 )
+
+/** Where a seated agent stands up to: 2.0 behind the chair, never through the desk. */
+export function deskExit(spot: { x: number; z: number; rot: number }): [number, number] {
+  return [spot.x + Math.sin(spot.rot) * 2.0, spot.z + Math.cos(spot.rot) * 2.0]
+}
 
 /** Camera presets; the HUD jumps between them. */
 export interface Spot {
@@ -163,6 +172,14 @@ export const NAV: NavNode[] = [
   { id: 'edu-back-e', x: 15.5, z: -12.4 },
 ]
 
+/** Wall footprints, so a new desk never lands inside a partition. */
+export const WALL_OBSTACLES: Obstacle[] = WALLS.map((w, i) => {
+  const t = WALL_T / 2
+  return w.axis === 'x'
+    ? { id: `wall-x${i}`, x1: Math.min(w.from, w.to), z1: w.at - t, x2: Math.max(w.from, w.to), z2: w.at + t }
+    : { id: `wall-z${i}`, x1: w.at - t, z1: Math.min(w.from, w.to), x2: w.at + t, z2: Math.max(w.from, w.to) }
+})
+
 export const NAV_EDGES: Array<[string, string]> = [
   ['gate', 'lobby-n'],
   ['gate', 'lobby-c'],
@@ -226,28 +243,9 @@ export function nearestNode(x: number, z: number): NavNode {
   return best
 }
 
-/** Axis-aligned footprint on the floor, used by the layout checks. */
-export interface Obstacle {
-  id: string
-  x1: number
-  z1: number
-  x2: number
-  z2: number
-}
-
 /** Desk + chair footprint, from the local box (1.62 wide, 0.39 front, 0.64 back). */
 function deskObstacle(d: DeskSpot): Obstacle {
-  const cos = Math.cos(d.rot)
-  const sin = Math.sin(d.rot)
-  const corners: Array<[number, number]> = [
-    [-0.81, -0.39],
-    [0.81, -0.39],
-    [0.81, 0.64],
-    [-0.81, 0.64],
-  ].map(([lx, lz]) => [d.x + lx! * cos + lz! * sin, d.z - lx! * sin + lz! * cos])
-  const xs = corners.map((c) => c[0])
-  const zs = corners.map((c) => c[1])
-  return { id: `desk-${d.id}`, x1: Math.min(...xs), z1: Math.min(...zs), x2: Math.max(...xs), z2: Math.max(...zs) }
+  return deskFootprint(d, d.id)
 }
 
 /**
@@ -270,3 +268,15 @@ export const OBSTACLES: Obstacle[] = [
   { id: 'lesehan', x1: 14.9, z1: -7.5, x2: 18.3, z2: -4.9 },
   { id: 'papan-edu', x1: 8.2, z1: -14.78, x2: 11.8, z2: -14.62 },
 ]
+
+/**
+ * Hand the static geometry to the roster planner: a new agent is placed against
+ * the same walls, furniture and walkways the hand-drawn office uses.
+ */
+const NAV_SEGMENTS: Edge[] = NAV_EDGES.flatMap(([a, b]) => {
+  const na = NAV.find((n) => n.id === a)
+  const nb = NAV.find((n) => n.id === b)
+  return na && nb ? [{ a: [na.x, na.z] as [number, number], b: [nb.x, nb.z] as [number, number] }] : []
+})
+setFloorContext(WALLS, NAV_SEGMENTS)
+setFurniture(OBSTACLES.filter((o) => !o.id.startsWith('desk-')))

@@ -12,7 +12,8 @@ import (
 	"officeapi/internal/api"
 	"officeapi/internal/config"
 	"officeapi/internal/fixture"
-	"officeapi/internal/loader"
+	"officeapi/internal/roster"
+	"officeapi/internal/source"
 )
 
 const nowF = 1800000000.0
@@ -20,9 +21,11 @@ const nowF = 1800000000.0
 func newTestServer(t *testing.T, home *fixture.Home, profiles ...string) *httptest.Server {
 	t.Helper()
 	cfg := config.Config{Home: home.Dir, Port: 8131, Addr: "127.0.0.1",
-		Profiles: profiles, GatewayPath: home.Dir + "/gateway_state.json"}
+		Profiles: profiles, GatewayPath: home.Dir + "/gateway_state.json",
+		Source: "local", TZ: "Asia/Jakarta", Title: "Agent Office"}
 	logger := log.New(io.Discard, "", 0)
-	srv := httptest.NewServer(api.NewServer(cfg, loader.New(cfg, logger), logger).Handler())
+	res := roster.Resolver{Profiles: profiles}
+	srv := httptest.NewServer(api.NewServer(cfg, source.NewLocal(cfg, logger), res, logger).Handler())
 	t.Cleanup(srv.Close)
 	return srv
 }

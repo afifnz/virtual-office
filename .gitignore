@@ -3,6 +3,7 @@ node_modules/
 # build output
 frontend/dist/
 backend/office-api
+backend/bin/
 backend/*.test
 # local artefacts
 verify/*.png

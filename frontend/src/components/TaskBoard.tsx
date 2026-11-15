@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AGENT_BY_ID, agentMeta } from '../lib/agents'
+import { agentMeta } from '../lib/roster'
 import type { StatusPayload, Task } from '../lib/types'
 import { relTime } from '../lib/format'
 
@@ -30,7 +30,7 @@ export function TaskBoard({
   const grouped = useMemo(() => {
     const out: Record<string, Task[]> = { running: [], review: [], blocked: [], done: [] }
     for (const t of tasks) {
-      const meta = AGENT_BY_ID[t.owner]
+      const meta = t.owner ? agentMeta(t.owner) : null
       if (team !== 'semua' && meta?.team !== team) continue
       const isReviewer = t.owner === 'reviewer' || t.owner === 'edu-reviewer'
       const col =
