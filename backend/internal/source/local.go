@@ -3,7 +3,6 @@ package source
 import (
 	"context"
 	"log"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -38,7 +37,8 @@ func NewLocal(cfg config.Config, logger *log.Logger) Source {
 
 func (s *local) Kind() string { return "local" }
 
-func (s *local) Home() string { return filepath.Clean(s.cfg.Home) }
+// Home is published by /api/health, so the user's home dir is shown as "~".
+func (s *local) Home() string { return config.ShownHome(s.cfg.Home) }
 
 func (s *local) Snapshot(_ context.Context, now time.Time) (derive.Snapshot, error) {
 	// Per-profile errors are handled inside the loader: one unreadable state.db
