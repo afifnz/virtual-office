@@ -192,6 +192,24 @@ Script memakai `flock`, jadi aman walau cron tumpang tindih. Kalau `/var/www/off
 milik root, script memakai `sudo -n` dan butuh aturan NOPASSWD untuk `rsync` — lebih baik
 jalankan `chown` di atas sekali saja.
 
+### Header Caddy (cache + keamanan)
+
+Produksi sempat mengirim HTML **tanpa** `Cache-Control`, sehingga browser menyajikan bundle lama
+setelah deploy — gejalanya "sudah deploy tapi masih tampil versi lama". Perbaikannya idempoten
+dan otomatis rollback:
+
+```bash
+bash deploy/apply-caddy-headers.sh --dry-run   # lihat rencana
+bash deploy/apply-caddy-headers.sh             # pasang (butuh sudo)
+```
+
+Skrip menyisipkan header keamanan + `@assets immutable` / `@shell no-cache` ke site block
+`office.afifnurzein.my.id` saja, memvalidasi dengan `caddy validate`, reload, lalu memverifikasi
+header benar-benar muncul dari luar; kalau salah satu langkah gagal, Caddyfile dikembalikan
+dari backup dan Caddy di-reload lagi. `deploy/Caddyfile.block` adalah rujukan lengkapnya —
+pastikan target proxy `8130` dan root `/var/www/office`, bukan nilai lama `8131` /
+`/var/www/office-v2`.
+
 **Rollback** (satu generasi ke belakang, dari backup `.prev` yang dibuat saat deploy):
 
 ```bash
