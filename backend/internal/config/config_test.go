@@ -62,8 +62,13 @@ func TestLoadEveryDocumentedEnvVar(t *testing.T) {
 	t.Setenv("BIND", "0.0.0.0")
 	t.Setenv("OFFICE_SOURCE", "local")
 	t.Setenv("OFFICE_ROSTER", "/tmp/roster.yaml")
+	t.Setenv("OFFICE_ROSTER_JSON", `{"agents":[{"id":"dev","name":"Bima"}]}`)
 	t.Setenv("OFFICE_TITLE", "Kantor Uji")
 	t.Setenv("OFFICE_TZ", "Europe/Amsterdam")
+	t.Setenv("GATEWAY_FILE", "/tmp/gateway_state.json")
+	t.Setenv("WEB_DIR", "/srv/web")
+	t.Setenv("LOG_REQUESTS", "1")
+	t.Setenv("PROFILES", "default,dev")
 
 	cfg, err := Load()
 	if err != nil {
@@ -75,8 +80,23 @@ func TestLoadEveryDocumentedEnvVar(t *testing.T) {
 	if cfg.RosterPath != "/tmp/roster.yaml" {
 		t.Fatalf("roster path = %q", cfg.RosterPath)
 	}
+	if cfg.RosterJSON != `{"agents":[{"id":"dev","name":"Bima"}]}` {
+		t.Fatalf("roster json = %q", cfg.RosterJSON)
+	}
 	if cfg.Title != "Kantor Uji" || cfg.TZ != "Europe/Amsterdam" {
 		t.Fatalf("title/tz = %q/%q", cfg.Title, cfg.TZ)
+	}
+	if cfg.GatewayPath != "/tmp/gateway_state.json" {
+		t.Fatalf("gateway = %q", cfg.GatewayPath)
+	}
+	if cfg.WebDir != "/srv/web" {
+		t.Fatalf("web dir = %q", cfg.WebDir)
+	}
+	if !cfg.LogRequests {
+		t.Fatal("LOG_REQUESTS=1 did not reach the config")
+	}
+	if strings.Join(cfg.Profiles, ",") != "default,dev" {
+		t.Fatalf("profiles = %v", cfg.Profiles)
 	}
 	loc, err := LocationOf(cfg.TZ)
 	if err != nil {

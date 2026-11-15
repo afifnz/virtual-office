@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"officeapi/internal/roster"
+
 	// Embed the IANA timezone database so OFFICE_TZ works in a scratch/alpine
 	// image that ships no /usr/share/zoneinfo.
 	_ "time/tzdata"
@@ -82,18 +84,20 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("OFFICE_SOURCE=%q tidak dikenal (pakai local atau remote)", src)
 	}
 
-	remote := strings.TrimRight(strings.TrimSpace(os.Getenv("REMOTE_API_URL")), "/")
+	remote := strings.TrimSpace(os.Getenv("REMOTE_API_URL"))
 	if src == "remote" {
 		if remote == "" {
 			return Config{}, fmt.Errorf("OFFICE_SOURCE=remote butuh REMOTE_API_URL")
 		}
-		u, err := url.Parse(remote)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return Config{}, fmt.Errorf("REMOTE_API_URL=%q bukan URL absolut (contoh: https://office.example.com)", remote)
+		u, err := ValidateBaseURL(remote)
+		if err != nil {
+			return Config{}, err
 		}
-		if u.Scheme != "http" && u.Scheme != "https" {
-			return Config{}, fmt.Errorf("REMOTE_API_URL=%q harus http atau https", remote)
-		}
+		remote = u
+	} else {
+		// Local mode never opens a socket; an unused REMOTE_API_URL must not
+		// stop the office from starting.
+		remote = ""
 	}
 
 	port := DefaultPort
@@ -128,21 +132,24 @@ func Load() (Config, error) {
 		gateway = filepath.Join(home, "gateway_state.json")
 	}
 
-	profiles := DefaultProfiles
-	if raw := os.Getenv("PROFILES"); strings.TrimSpace(raw) != "" {
+	var profiles []string
+	if src == "remote" {
+		// A remote office reports its own roster through /api/config. PROFILES is
+		// ignored on purpose: it would name desks that do not exist upstream.
 		profiles = nil
-		for _, p := range strings.Split(raw, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				profiles = append(profiles, p)
+	} else {
+		profiles = DefaultProfiles
+		if raw := strings.TrimSpace(os.Getenv("PROFILES")); raw != "" {
+			profiles = nil
+			for _, p := range strings.Split(raw, ",") {
+				if p = strings.TrimSpace(p); p != "" {
+					if err := roster.ValidateID(p); err != nil {
+						return Config{}, fmt.Errorf("PROFILES: %w", err)
+					}
+					profiles = append(profiles, p)
+				}
 			}
 		}
-	}
-	if src == "remote" {
-		// A remote office reports its own profiles; do not touch this filesystem.
-		if strings.TrimSpace(os.Getenv("PROFILES")) == "" {
-			profiles = nil
-		}
-	} else {
 		profiles = withDiscovered(profiles, home)
 	}
 
@@ -164,6 +171,46 @@ func Load() (Config, error) {
 	}, nil
 }
 
+// ValidateBaseURL accepts an absolute http(s) base URL and returns it without a
+// trailing slash. It is the single validator shared by config.Load and
+// source.NewRemote, so both reject exactly the same inputs.
+func ValidateBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("URL kosong")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("URL=%q bukan URL absolut (contoh: https://office.example.com)", raw)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("URL=%q harus http atau https", raw)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("URL=%q tidak boleh memuat query atau fragment", raw)
+	}
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// RedactURL returns the URL with the userinfo section removed. Credentials in
+// REMOTE_API_URL (basic auth, or a bare token as the username) must never reach
+// a response body or a log line; only the HTTP client sees the raw value.
+func RedactURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		// Unparseable: do not echo it, it may well be a credential.
+		return "<url tidak valid>"
+	}
+	if u.User != nil {
+		u.User = nil
+	}
+	return strings.TrimRight(u.String(), "/")
+}
+
 // LocationOf resolves an IANA timezone name, defaulting to Asia/Jakarta.
 func LocationOf(tz string) (*time.Location, error) {
 	tz = strings.TrimSpace(tz)
@@ -181,6 +228,8 @@ func LocationOf(tz string) (*time.Location, error) {
 }
 
 // withDiscovered appends profile folders that exist on disk but are not listed.
+// A folder whose name is not a valid roster id is skipped: the name becomes a
+// path segment and a DSN later, so `../../etc` must never get that far.
 func withDiscovered(base []string, home string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(base)+4)
@@ -201,7 +250,7 @@ func withDiscovered(base []string, home string) []string {
 			continue
 		}
 		name := e.Name()
-		if seen[name] {
+		if seen[name] || !roster.ValidID(name) {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(home, "profiles", name, "state.db")); err != nil {

@@ -52,6 +52,27 @@ func ParseYAML(raw []byte) (*Document, error) {
 		body := strings.TrimSpace(line)
 
 		if indent == 0 {
+			// A list item may sit at column 0 under a key (`agents:\n- id: dev`),
+			// which is what every hand-written YAML file actually looks like.
+			if section != "" && (strings.HasPrefix(body, "- ") || body == "-") {
+				rest := strings.TrimSpace(strings.TrimPrefix(body, "-"))
+				itemIdx++
+				haveItem = true
+				switch section {
+				case "agents":
+					d.Agents = append(d.Agents, Entry{})
+					d.Roster = nil
+				case "teams":
+					d.Teams = append(d.Teams, Team{})
+				}
+				if rest == "" {
+					continue
+				}
+				if err := assignItem(d, section, itemIdx, rest, n+1); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			key, val, ok := splitKV(body)
 			if !ok {
 				return nil, fmt.Errorf("baris %d: harap `kunci: nilai`, dapat %q", n+1, body)
@@ -68,10 +89,23 @@ func ParseYAML(raw []byte) (*Document, error) {
 			default:
 				return nil, fmt.Errorf("baris %d: kunci %q tidak dikenal (title, tz, agents, teams)", n+1, key)
 			}
-			if val != "" && (key == "agents" || key == "teams" || key == "roster") {
-				return nil, fmt.Errorf("baris %d: %s harus berupa daftar", n+1, key)
-			}
 			itemIdx, haveItem = -1, false
+			if key == "title" || key == "tz" {
+				// A scalar key ends any list: a stray `- id:` after it is an error,
+				// not another agent.
+				section = ""
+			}
+			// `agents: []` (and `teams: []`) is the flow form of an empty list.
+			if key == "agents" || key == "teams" || key == "roster" {
+				switch val {
+				case "":
+					// block list follows
+				case "[]", "[ ]":
+					// explicitly empty
+				default:
+					return nil, fmt.Errorf("baris %d: %s harus berupa daftar (pakai `%s:` lalu `- id: …`, atau `%s: []`)", n+1, key, key, key)
+				}
+			}
 			continue
 		}
 

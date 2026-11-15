@@ -3,14 +3,23 @@
 #   OFFICE_ROSTER=./deploy/roster.example.yaml ./office-api
 #
 # Semua field opsional. Profil yang tidak disebut tetap muncul di kantor dengan
-# nama = id profil dan peran generik ("Agen"). Format JSON dengan bentuk yang
-# sama juga diterima (.json), dan isi /api/config bisa langsung dipakai ulang
-# sebagai file roster karena kunci "roster" diterima selain "agents".
+# nama/peran bawaan (lihat DefaultAgents), atau nama = id dan peran "Agen" untuk
+# profil yang tidak dikenal. Format JSON dengan bentuk yang sama juga diterima
+# (.json), dan isi /api/config bisa langsung dipakai ulang sebagai file roster
+# karena kunci "roster" diterima selain "agents".
+#
+# Daftar boleh di kolom 0 (`- id: dev`) atau diindentasi; `agents: []` berarti
+# daftar kosong. Id wajib ^[a-zA-Z0-9_-]+$.
+#
+# Tim = id ruangan yang digambar frontend: lobby, dev, edu. `pendopo` masih
+# diterima sebagai alias `lobby`.
+#
+# tz di sini menang atas OFFICE_TZ dan dipakai loader untuk batas hari.
 title: Agent Office
 tz: Asia/Jakarta
 
 teams:
-  - id: pendopo
+  - id: lobby
     label: Pendopo
   - id: dev
     label: Ruang Tim Dev
@@ -21,7 +30,7 @@ agents:
   - id: default
     name: Galuh
     role: Asisten Pribadi
-    team: pendopo
+    team: lobby
   - id: dev
     name: Bima
     role: Lead Dev

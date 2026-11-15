@@ -74,11 +74,11 @@ func TestConfigEndpoint(t *testing.T) {
 	if byID["dev"]["name"] != "Bima" || byID["dev"]["role"] != "Lead Dev" || byID["dev"]["team"] != "dev" {
 		t.Fatalf("dev = %v", byID["dev"])
 	}
-	// a profile with no override still gets a usable desk
-	if byID["default"]["name"] != "default" || byID["default"]["role"] != roster.GenericRole {
+	// a profile with no override still gets the seed name/role/team
+	if byID["default"]["name"] != "Galuh" || byID["default"]["role"] != "ASISTEN UTAMA" {
 		t.Fatalf("default = %v", byID["default"])
 	}
-	if byID["default"]["team"] != "pendopo" {
+	if byID["default"]["team"] != "lobby" {
 		t.Fatalf("default team = %v", byID["default"]["team"])
 	}
 

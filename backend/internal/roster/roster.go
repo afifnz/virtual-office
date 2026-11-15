@@ -1,28 +1,92 @@
 // Package roster turns the profiles found on disk into the office roster:
 // the desks the frontend draws, with a display name, a role and a team.
 //
-// Everything has a working default — a profile with no override is shown under
-// its own id with a generic role — so a fresh Hermes home needs no config file
-// at all. Names, roles and teams can be layered in from a JSON/YAML file
-// (OFFICE_ROSTER) or an inline JSON document (OFFICE_ROSTER_JSON).
+// The default roster is the one the frontend ships (frontend/src/lib/agents.ts):
+// Galuh in the lobby, Bima/Raka/Laras/Dimas/Yoga/Sari in the dev room,
+// Ayu/Nisa/Yohan/Hadi in the edu room. A profile with no seed entry is shown
+// under its own id with the generic role "Agen". Names, roles and teams can be
+// layered in from a JSON/YAML file (OFFICE_ROSTER) or an inline JSON document
+// (OFFICE_ROSTER_JSON).
 package roster
 
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
 
-// GenericRole is used for a profile that has no override.
+// GenericRole is used for a profile that has no seed entry and no override.
 const GenericRole = "Agen"
 
+// Team ids. They are the room ids the frontend draws (frontend/src/lib/rooms.ts),
+// so a desk's team is directly a room key — no mapping table in between.
+const (
+	TeamLobby = "lobby"
+	TeamDev   = "dev"
+	TeamEdu   = "edu"
+)
+
 // DefaultTeams is the label set used when a roster file does not name teams.
-// The ids match the rooms the frontend draws.
+// `pendopo` is accepted as an alias for `lobby` in overrides (see NormalizeTeam).
 var DefaultTeams = []Team{
-	{ID: "pendopo", Label: "Pendopo"},
-	{ID: "dev", Label: "Ruang Tim Dev"},
-	{ID: "edu", Label: "Ruang Tim Edu"},
+	{ID: TeamLobby, Label: "Pendopo"},
+	{ID: TeamDev, Label: "Tim Dev"},
+	{ID: TeamEdu, Label: "Tim Edu"},
+}
+
+// DefaultAgents is the seed roster: the display names and roles the frontend
+// ships, so /api/config and the scene agree on every desk. A profile found on
+// disk inherits its entry from here; an override still wins field by field.
+var DefaultAgents = []Entry{
+	{ID: "default", Name: "Galuh", Role: "ASISTEN UTAMA", Team: TeamLobby},
+	{ID: "dev", Name: "Bima", Role: "SDLC LEAD", Team: TeamDev},
+	{ID: "planner", Name: "Raka", Role: "ANALIS & ARSITEK", Team: TeamDev},
+	{ID: "uiux", Name: "Laras", Role: "UI/UX DESIGNER", Team: TeamDev},
+	{ID: "coder", Name: "Dimas", Role: "IMPLEMENTER", Team: TeamDev},
+	{ID: "reviewer", Name: "Yoga", Role: "CODE REVIEW", Team: TeamDev},
+	{ID: "tester", Name: "Sari", Role: "QA", Team: TeamDev},
+	{ID: "edu", Name: "Ayu", Role: "EDU LEAD", Team: TeamEdu},
+	{ID: "edu-designer", Name: "Nisa", Role: "DESAIN INSTRUKSIONAL", Team: TeamEdu},
+	{ID: "edu-writer", Name: "Yohan", Role: "PENULIS MATERI", Team: TeamEdu},
+	{ID: "edu-reviewer", Name: "Hadi", Role: "QA MATERI", Team: TeamEdu},
+}
+
+var seedByID = func() map[string]Entry {
+	m := make(map[string]Entry, len(DefaultAgents))
+	for _, e := range DefaultAgents {
+		m[e.ID] = e
+	}
+	return m
+}()
+
+// idPattern is the only shape a desk id may have. The id becomes a directory
+// name under $HERMES_HOME/profiles and part of a SQLite DSN, so anything that
+// could escape that directory (`../..`, a slash, a NUL) is rejected up front.
+var idPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// ValidID reports whether s is a safe desk id.
+func ValidID(s string) bool { return idPattern.MatchString(s) }
+
+// ValidateID returns a descriptive error for an unsafe desk id.
+func ValidateID(s string) error {
+	if s == "" {
+		return fmt.Errorf("id roster kosong")
+	}
+	if !ValidID(s) {
+		return fmt.Errorf("id roster %q tidak valid: hanya huruf, angka, '-' dan '_' (^[a-zA-Z0-9_-]+$)", s)
+	}
+	return nil
+}
+
+// NormalizeTeam maps the legacy room name to the id the frontend uses.
+func NormalizeTeam(team string) string {
+	team = strings.TrimSpace(team)
+	if strings.EqualFold(team, "pendopo") {
+		return TeamLobby
+	}
+	return team
 }
 
 // Entry is one desk.
@@ -61,6 +125,28 @@ func (d *Document) Entries() []Entry {
 	return d.Roster
 }
 
+// Validate rejects a document that could not be resolved safely.
+func (d *Document) Validate() error {
+	if d == nil {
+		return nil
+	}
+	for i, e := range d.Entries() {
+		if err := ValidateID(strings.TrimSpace(e.ID)); err != nil {
+			return fmt.Errorf("agents[%d]: %w", i, err)
+		}
+	}
+	for i, t := range d.Teams {
+		id := NormalizeTeam(t.ID)
+		if id == "" {
+			return fmt.Errorf("teams[%d]: id kosong", i)
+		}
+		if !ValidID(id) {
+			return fmt.Errorf("teams[%d]: id %q tidak valid (^[a-zA-Z0-9_-]+$)", i, t.ID)
+		}
+	}
+	return nil
+}
+
 // Set is a resolved roster.
 type Set struct {
 	Title   string
@@ -85,33 +171,44 @@ type Resolver struct {
 	Layers   []*Document
 }
 
+// slot tracks which fields an override has already decided, so the seed entry
+// (or the profile id) only fills the gaps.
+type slot struct {
+	entry                     Entry
+	nameSet, roleSet, teamSet bool
+}
+
 // Resolve applies the layers. extra documents are appended after the
 // configured layers, so they rank below them (used to inherit the roster of a
 // remote office without overriding a local file).
 func (r Resolver) Resolve(extra ...*Document) Set {
-	byID := map[string]int{}
-	set := Set{Entries: []Entry{}}
+	slots := map[string]*slot{}
+	order := make([]string, 0, len(r.Profiles))
 
-	add := func(e Entry) int {
-		if i, ok := byID[e.ID]; ok {
-			return i
+	ensure := func(id string) *slot {
+		if s, ok := slots[id]; ok {
+			return s
 		}
-		byID[e.ID] = len(set.Entries)
-		set.Entries = append(set.Entries, Entry{ID: e.ID})
-		return len(set.Entries) - 1
+		e := Entry{ID: id, Name: id, Role: GenericRole, Team: defaultTeam(id)}
+		if seed, ok := seedByID[id]; ok {
+			e = seed
+		}
+		s := &slot{entry: e}
+		slots[id] = s
+		order = append(order, id)
+		return s
 	}
 
-	// 1. base desks: every profile gets one, named after itself.
+	// 1. base desks: every profile gets one, seeded from DefaultAgents.
 	for _, p := range r.Profiles {
 		p = strings.TrimSpace(p)
-		if p == "" {
+		if p == "" || !ValidID(p) {
 			continue
 		}
-		i := add(Entry{ID: p})
-		set.Entries[i] = Entry{ID: p, Name: p, Role: GenericRole, Team: defaultTeam(p)}
+		ensure(p)
 	}
 
-	// 2. overrides, highest precedence first; first writer wins per field.
+	set := Set{}
 	all := make([]*Document, 0, len(r.Layers)+len(extra))
 	all = append(all, r.Layers...)
 	all = append(all, extra...)
@@ -127,55 +224,53 @@ func (r Resolver) Resolve(extra ...*Document) Set {
 		}
 		for _, in := range doc.Entries() {
 			id := strings.TrimSpace(in.ID)
-			if id == "" {
+			if id == "" || !ValidID(id) {
 				continue
 			}
-			i := add(Entry{ID: id})
-			cur := set.Entries[i]
-			if cur.Name == "" || cur.Name == id {
+			s := ensure(id)
+			if !s.nameSet {
 				if n := strings.TrimSpace(in.Name); n != "" {
-					cur.Name = n
+					s.entry.Name, s.nameSet = n, true
 				}
 			}
-			if (cur.Role == "" || cur.Role == GenericRole) && strings.TrimSpace(in.Role) != "" {
-				cur.Role = strings.TrimSpace(in.Role)
+			if !s.roleSet {
+				if role := strings.TrimSpace(in.Role); role != "" {
+					s.entry.Role, s.roleSet = role, true
+				}
 			}
-			if strings.TrimSpace(in.Team) != "" && (cur.Team == "" || cur.Team == defaultTeam(id)) {
-				cur.Team = strings.TrimSpace(in.Team)
+			if !s.teamSet {
+				if team := NormalizeTeam(in.Team); team != "" {
+					s.entry.Team, s.teamSet = team, true
+				}
 			}
-			if cur.Name == "" {
-				cur.Name = id
-			}
-			if cur.Role == "" {
-				cur.Role = GenericRole
-			}
-			if cur.Team == "" {
-				cur.Team = defaultTeam(id)
-			}
-			set.Entries[i] = cur
 		}
 	}
 
-	for i, e := range set.Entries {
+	for _, id := range order {
+		e := slots[id].entry
 		if e.Name == "" {
-			set.Entries[i].Name = e.ID
+			e.Name = e.ID
 		}
 		if e.Role == "" {
-			set.Entries[i].Role = GenericRole
+			e.Role = GenericRole
 		}
 		if e.Team == "" {
-			set.Entries[i].Team = defaultTeam(e.ID)
+			e.Team = defaultTeam(e.ID)
 		}
+		set.Entries = append(set.Entries, e)
+	}
+	if set.Entries == nil {
+		set.Entries = []Entry{}
 	}
 
-	// 3. teams: labels from the highest layer that names them, else defaults.
+	// 2. teams: labels from the highest layer that names them, else defaults.
 	labels := map[string]string{}
 	for i := len(all) - 1; i >= 0; i-- { // lowest precedence first, higher overwrites
 		if all[i] == nil {
 			continue
 		}
 		for _, t := range all[i].Teams {
-			id := strings.TrimSpace(t.ID)
+			id := NormalizeTeam(t.ID)
 			if id == "" {
 				continue
 			}
@@ -203,17 +298,17 @@ func (r Resolver) Resolve(extra ...*Document) Set {
 	return set
 }
 
-// defaultTeam maps a profile id to a room. `default` sits in the pendopo, the
+// defaultTeam maps a profile id to a room. `default` sits in the lobby, the
 // edu-* family in the edu room, everything else in the dev room.
 func defaultTeam(id string) string {
 	low := strings.ToLower(id)
 	switch {
-	case low == "default" || low == "pendopo":
-		return "pendopo"
+	case low == "default" || low == "lobby" || low == "pendopo":
+		return TeamLobby
 	case low == "edu" || strings.HasPrefix(low, "edu-"):
-		return "edu"
+		return TeamEdu
 	default:
-		return "dev"
+		return TeamDev
 	}
 }
 

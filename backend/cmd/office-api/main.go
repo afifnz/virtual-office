@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,6 +52,14 @@ func main() {
 			os.Exit(2)
 		}
 	}
+	// An id becomes a directory name under HERMES_HOME/profiles and part of a
+	// SQLite DSN, so reject anything that is not ^[a-zA-Z0-9_-]+$ before use.
+	for name, doc := range map[string]*roster.Document{"OFFICE_ROSTER": fileDoc, "OFFICE_ROSTER_JSON": inlineDoc} {
+		if err := doc.Validate(); err != nil {
+			logger.Printf("error %s=%q", name, err.Error())
+			os.Exit(2)
+		}
+	}
 	override := roster.Merge(inlineDoc, fileDoc)
 
 	res := roster.Resolver{Profiles: cfg.Profiles}
@@ -63,6 +72,17 @@ func main() {
 	// an override but missing from PROFILES still gets an offline agent.
 	if !cfg.IsRemote() {
 		cfg.Profiles = set.IDs()
+	}
+
+	// A tz in the roster is more specific than OFFICE_TZ, so it must reach the
+	// loader — otherwise the day boundary and hourly buckets silently keep the
+	// old zone. An unknown zone is a configuration error, not a fallback.
+	if tz := strings.TrimSpace(set.TZ); tz != "" {
+		if _, err := config.LocationOf(tz); err != nil {
+			logger.Printf("error roster tz=%q", tz)
+			os.Exit(2)
+		}
+		cfg.TZ = tz
 	}
 
 	src, err := source.New(cfg, logger)

@@ -8,30 +8,116 @@ import (
 )
 
 func TestResolveDefaultsFromProfiles(t *testing.T) {
-	set := Resolver{Profiles: []string{"default", "dev", "edu-writer"}}.Resolve()
-	if len(set.Entries) != 3 {
+	set := Resolver{Profiles: []string{"default", "dev", "edu-writer", "zzz-baru"}}.Resolve()
+	if len(set.Entries) != 4 {
 		t.Fatalf("entries = %d", len(set.Entries))
 	}
-	want := map[string]string{"default": "pendopo", "dev": "dev", "edu-writer": "edu"}
+	// A profile with a seed entry inherits the name/role/team the frontend ships;
+	// an unknown profile falls back to its id, the generic role and the dev room.
+	want := map[string]Entry{
+		"default":    {ID: "default", Name: "Galuh", Role: "ASISTEN UTAMA", Team: "lobby"},
+		"dev":        {ID: "dev", Name: "Bima", Role: "SDLC LEAD", Team: "dev"},
+		"edu-writer": {ID: "edu-writer", Name: "Yohan", Role: "PENULIS MATERI", Team: "edu"},
+		"zzz-baru":   {ID: "zzz-baru", Name: "zzz-baru", Role: GenericRole, Team: "dev"},
+	}
 	for _, e := range set.Entries {
-		if e.Name != e.ID {
-			t.Fatalf("%s: name = %q, want the id", e.ID, e.Name)
-		}
-		if e.Role != GenericRole {
-			t.Fatalf("%s: role = %q, want %q", e.ID, e.Role, GenericRole)
-		}
-		if e.Team != want[e.ID] {
-			t.Fatalf("%s: team = %q, want %q", e.ID, e.Team, want[e.ID])
+		if e != want[e.ID] {
+			t.Fatalf("%s = %+v, want %+v", e.ID, e, want[e.ID])
 		}
 	}
 	if len(set.Teams) != 3 {
 		t.Fatalf("teams = %v", set.Teams)
 	}
+	labels := map[string]string{}
 	for _, tm := range set.Teams {
 		if tm.Label == "" {
 			t.Fatalf("team %q has no label", tm.ID)
 		}
+		labels[tm.ID] = tm.Label
 	}
+	if labels["lobby"] != "Pendopo" || labels["dev"] != "Tim Dev" || labels["edu"] != "Tim Edu" {
+		t.Fatalf("team labels = %v", labels)
+	}
+}
+
+// The default roster must be the one the frontend draws: same ids, names, roles
+// and room ids. This parses frontend/src/lib/agents.ts so the two cannot drift.
+func TestDefaultAgentsMatchFrontend(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "frontend", "src", "lib", "agents.ts")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("frontend source not available: %v", err)
+	}
+	front := parseFrontendAgents(t, string(raw))
+	if len(front) == 0 {
+		t.Fatal("parsed 0 agents from agents.ts")
+	}
+	if len(front) != len(DefaultAgents) {
+		t.Fatalf("frontend has %d agents, DefaultAgents has %d", len(front), len(DefaultAgents))
+	}
+	for _, want := range DefaultAgents {
+		got, ok := front[want.ID]
+		if !ok {
+			t.Fatalf("frontend is missing agent %q", want.ID)
+		}
+		if got != want {
+			t.Fatalf("%s: frontend %+v, DefaultAgents %+v", want.ID, got, want)
+		}
+	}
+}
+
+// parseFrontendAgents reads the AGENTS array with a tiny line scanner: enough
+// for `id/name/role/team` inside each object, without a TS parser.
+func parseFrontendAgents(t *testing.T, src string) map[string]Entry {
+	t.Helper()
+	// Only the AGENTS array: the `interface AgentMeta` block and the fallback
+	// object in agentMeta() also contain id/name/role/team lines.
+	start := strings.Index(src, "export const AGENTS")
+	if start < 0 {
+		return nil
+	}
+	src = src[start:]
+	if end := strings.Index(src, "\n]"); end > 0 {
+		src = src[:end]
+	}
+	out := map[string]Entry{}
+	var cur Entry
+	flush := func() {
+		if cur.ID != "" {
+			out[cur.ID] = cur
+		}
+		cur = Entry{}
+	}
+	field := func(line, key string) string {
+		marker := key + ":"
+		if !strings.HasPrefix(line, marker) {
+			return ""
+		}
+		rest := strings.TrimSpace(line[len(marker):])
+		rest = strings.TrimSuffix(rest, ",")
+		return strings.Trim(rest, "'\"")
+	}
+	for _, line := range strings.Split(src, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "{" {
+			flush()
+			continue
+		}
+		if v := field(trimmed, "id"); v != "" {
+			cur.ID = v
+		}
+		if v := field(trimmed, "name"); v != "" {
+			cur.Name = v
+		}
+		if v := field(trimmed, "role"); v != "" {
+			cur.Role = v
+		}
+		if v := field(trimmed, "team"); v != "" {
+			cur.Team = NormalizeTeam(v)
+		}
+	}
+	flush()
+	return out
 }
 
 func TestResolveOverrideWins(t *testing.T) {
@@ -53,8 +139,9 @@ func TestResolveOverrideWins(t *testing.T) {
 	if byID["edu"].Team != "edu" {
 		t.Fatalf("edu team = %q", byID["edu"].Team)
 	}
-	// a desk can be added without a profile of its own
-	if byID["tamu"].Team != "pendopo" {
+	// a desk can be added without a profile of its own; the legacy room name
+	// `pendopo` is normalised to the id the frontend draws
+	if byID["tamu"].Team != "lobby" {
 		t.Fatalf("extra desk = %+v", byID["tamu"])
 	}
 	if got := strings.Join(set.IDs(), ","); got != "default,dev,edu,tamu" {
@@ -164,8 +251,8 @@ agents:
 	if byID["dev"].Role != "Lead Dev" || byID["default"].Name != "Galuh" {
 		t.Fatalf("resolved = %+v", set.Entries)
 	}
-	// coder is not in the file: generic defaults still apply
-	if byID["coder"].Name != "coder" || byID["coder"].Role != GenericRole {
+	// coder is not in the file: the seed entry from DefaultAgents still applies
+	if byID["coder"].Name != "Dimas" || byID["coder"].Role != "IMPLEMENTER" {
 		t.Fatalf("coder = %+v", byID["coder"])
 	}
 }
