@@ -85,18 +85,22 @@ export function buildFace(look: Look, l: FaceLandmarks): { group: THREE.Group; l
     ball.position.set(cx, l.eyeY, l.eyeZ - eyeR * 0.30)
     ball.scale.set(1.0, 0.9, 0.55)
     g.add(ball)
+    // iris and pupil caps grow along local +Y and are turned to +Z below, so
+    // the ball's (x, y, z) squash maps to the cap's (x, z, y). Copying the
+    // ball scale verbatim pushed the iris out of the socket and flattened it.
+    const capScale = new THREE.Vector3(ball.scale.x, ball.scale.z, ball.scale.y)
 
     // iris and pupil are spherical caps on the eyeball, so they follow its
     // curvature instead of hovering in front of it
     const irisMesh = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 1.004, 22, 10, 0, Math.PI * 2, 0, 0.62), iris)
     irisMesh.position.copy(ball.position)
-    irisMesh.scale.copy(ball.scale)
+    irisMesh.scale.copy(capScale)
     irisMesh.rotation.x = Math.PI / 2
     g.add(irisMesh)
 
     const pupilMesh = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 1.008, 18, 8, 0, Math.PI * 2, 0, 0.3), pupil)
     pupilMesh.position.copy(ball.position)
-    pupilMesh.scale.copy(ball.scale)
+    pupilMesh.scale.copy(capScale)
     pupilMesh.rotation.x = Math.PI / 2
     g.add(pupilMesh)
 
