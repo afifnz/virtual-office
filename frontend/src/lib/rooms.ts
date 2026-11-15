@@ -93,8 +93,8 @@ export interface Spot {
 
 export const SPOTS: Record<string, Spot> = {
   lobby: { id: 'lobby', label: 'Pendopo', pos: [1.6, 1.95, 13.0], target: [-6.8, 0.95, 9.2], fov: 55 },
-  dev: { id: 'dev', label: 'Tim Dev', pos: [-10.0, 4.6, 1.4], target: [-10.0, 0.35, -9.0], fov: 58 },
-  edu: { id: 'edu', label: 'Tim Edu', pos: [10.0, 4.6, 1.4], target: [10.0, 0.35, -9.0], fov: 58 },
+  dev: { id: 'dev', label: 'Tim Dev', pos: [-10.0, 4.6, 1.4], target: [-10.0, 0.35, -7.0], fov: 58 },
+  edu: { id: 'edu', label: 'Tim Edu', pos: [10.0, 4.6, 1.4], target: [10.0, 0.35, -7.0], fov: 58 },
   tampak: { id: 'tampak', label: 'Tampak', pos: [0, 22, 28], target: [0, 0, -1], fov: 42 },
 }
 
@@ -150,10 +150,10 @@ export const NAV: NavNode[] = [
   { id: 'dev-open-w', x: -17.3, z: -2.4 },
   { id: 'dev-open-e', x: -2.4, z: -2.4 },
   { id: 'dev-gam', x: -16.6, z: -5.2 },
-  { id: 'dev-mid-w', x: -17.3, z: -8.4 },
-  { id: 'dev-mid1', x: -12.25, z: -8.4 },
-  { id: 'dev-mid2', x: -7.75, z: -8.4 },
-  { id: 'dev-mid-e', x: -2.4, z: -8.4 },
+  { id: 'dev-mid-w', x: -17.3, z: -6.4 },
+  { id: 'dev-mid1', x: -12.25, z: -6.4 },
+  { id: 'dev-mid2', x: -7.75, z: -6.4 },
+  { id: 'dev-mid-e', x: -2.4, z: -6.4 },
   { id: 'dev-back-w', x: -16.2, z: -12.4 },
   { id: 'dev-back1', x: -12.25, z: -12.4 },
   { id: 'dev-back-c', x: -10.0, z: -12.4 },
@@ -164,9 +164,9 @@ export const NAV: NavNode[] = [
   { id: 'edu-front', x: 10.0, z: -2.6 },
   { id: 'edu-open-w', x: 3.2, z: -2.4 },
   { id: 'edu-open-e', x: 14.0, z: -2.4 },
-  { id: 'edu-mid-w', x: 3.5, z: -8.4 },
-  { id: 'edu-mid-c', x: 10.0, z: -8.4 },
-  { id: 'edu-mid-e', x: 14.0, z: -8.4 },
+  { id: 'edu-mid-w', x: 3.5, z: -6.4 },
+  { id: 'edu-mid-c', x: 10.0, z: -6.4 },
+  { id: 'edu-mid-e', x: 14.0, z: -6.4 },
   { id: 'edu-back-w', x: 3.5, z: -12.4 },
   { id: 'edu-back-c', x: 10.0, z: -12.4 },
   { id: 'edu-back-e', x: 15.5, z: -12.4 },
