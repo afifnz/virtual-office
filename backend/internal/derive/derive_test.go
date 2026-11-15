@@ -369,8 +369,22 @@ func TestJSONShapeMatchesLegacyContract(t *testing.T) {
 			t.Fatalf("top-level key %q missing", k)
 		}
 	}
-	if len(top) != 6 {
-		t.Fatalf("top-level keys = %d, want exactly 6: %v", len(top), keys(top))
+	// The contract is additive: the six legacy keys plus the database health
+	// block. Anything else is a new field nobody agreed on.
+	allowed := map[string]bool{
+		"now": true, "gateway": true, "agents": true, "feed": true,
+		"tasks": true, "comms": true,
+		"dbs_checked": true, "dbs_ok": true, "dbs_err": true, "dbs_failed": true,
+	}
+	for _, k := range keys(top) {
+		if !allowed[k] {
+			t.Fatalf("unexpected top-level key %q", k)
+		}
+	}
+	for _, k := range []string{"dbs_checked", "dbs_ok", "dbs_err"} {
+		if _, ok := top[k]; !ok {
+			t.Fatalf("db health key %q missing", k)
+		}
 	}
 
 	var agents []map[string]json.RawMessage

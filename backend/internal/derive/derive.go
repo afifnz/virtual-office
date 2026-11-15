@@ -125,6 +125,14 @@ type Snapshot struct {
 	Feed    []FeedEvent `json:"feed"`
 	Tasks   []Task      `json:"tasks"`
 	Comms   []Comm      `json:"comms"`
+
+	// Database health. A loader that could not open a single state.db must be
+	// visible in the payload, not just in a log line, so a client can tell
+	// "empty office" from "office cannot read its data".
+	DBsChecked int      `json:"dbs_checked"`
+	DBsOK      int      `json:"dbs_ok"`
+	DBsErr     int      `json:"dbs_err"`
+	DBsFailed  []string `json:"dbs_failed,omitempty"`
 }
 
 // ProfileData is everything loaded from one profile's state.db.
@@ -145,6 +153,12 @@ type Dataset struct {
 	// Location is the timezone the office day boundary and hourly buckets
 	// follow (OFFICE_TZ). nil means the historical default, WIB.
 	Location *time.Location
+
+	// Database health, straight from the loader.
+	DBsChecked int
+	DBsOK      int
+	DBsErr     int
+	DBsFailed  []string
 }
 
 type sessionWork struct {
@@ -196,6 +210,11 @@ func Build(ds Dataset) Snapshot {
 		Feed:    feed,
 		Tasks:   tasks,
 		Comms:   comms,
+
+		DBsChecked: ds.DBsChecked,
+		DBsOK:      ds.DBsOK,
+		DBsErr:     ds.DBsErr,
+		DBsFailed:  ds.DBsFailed,
 	}
 }
 
@@ -305,7 +324,7 @@ func routedProfile(parent *sessionWork, idx int) string {
 }
 
 func buildAgents(ds Dataset, works []*sessionWork, byID map[string]*sessionWork, now float64) []Agent {
-	dayStart := dayStartFor(now, ds.Location)
+	dayStart, dayEnd := dayWindow(now, ds.Location)
 	byAgent := map[string][]*sessionWork{}
 	for _, w := range works {
 		byAgent[w.owner] = append(byAgent[w.owner], w)
@@ -338,12 +357,12 @@ func buildAgents(ds Dataset, works []*sessionWork, byID map[string]*sessionWork,
 
 	agents := make([]Agent, 0, len(ids))
 	for _, id := range ids {
-		agents = append(agents, buildAgent(id, byAgent[id], now, dayStart))
+		agents = append(agents, buildAgent(id, byAgent[id], now, dayStart, dayEnd))
 	}
 	return agents
 }
 
-func buildAgent(id string, ws []*sessionWork, now, dayStart float64) Agent {
+func buildAgent(id string, ws []*sessionWork, now, dayStart, dayEnd float64) Agent {
 	a := Agent{ID: id, Status: "offline", Today: Today{Hourly: make([]int, HourlyBuckets)}}
 	if len(ws) == 0 {
 		return a
@@ -355,11 +374,11 @@ func buildAgent(id string, ws []*sessionWork, now, dayStart float64) Agent {
 	for _, w := range ws {
 		a.Total.Sessions++
 		a.Total.Messages += len(w.msgs)
-		if w.sess.Started >= dayStart {
+		if w.sess.Started >= dayStart && w.sess.Started < dayEnd {
 			a.Today.Sessions++
 		}
 		for _, m := range w.msgs {
-			if m.TS >= dayStart && m.TS < dayStart+86400 {
+			if m.TS >= dayStart && m.TS < dayEnd {
 				a.Today.Messages++
 				if len(m.Tools) > 0 || m.Role == "tool" {
 					a.Today.ToolCalls++
@@ -369,9 +388,12 @@ func buildAgent(id string, ws []*sessionWork, now, dayStart float64) Agent {
 				if slot < 0 {
 					slot = 0
 				}
-				if slot < HourlyBuckets {
-					a.Today.Hourly[slot]++
+				// A DST day is 23 or 25 hours long; the last hour folds into the
+				// final bucket rather than growing the array past 24.
+				if slot >= HourlyBuckets {
+					slot = HourlyBuckets - 1
 				}
+				a.Today.Hourly[slot]++
 			}
 			if m.TS > lastTS {
 				lastTS = m.TS
@@ -734,14 +756,26 @@ func buildComms(works []*sessionWork, byID map[string]*sessionWork, now float64)
 // existed. A nil Dataset.Location keeps that behaviour.
 var defaultLocation = time.FixedZone("WIB", wibOffset)
 
-// dayStartFor returns the unix time of local midnight in loc.
-func dayStartFor(now float64, loc *time.Location) float64 {
+// dayWindow returns the unix time of local midnight in loc and of the next
+// local midnight. The window is not always 24 h: on a DST changeover day it is
+// 23 or 25 hours, so "today" must be bounded by the next midnight rather than
+// by start + 86400.
+func dayWindow(now float64, loc *time.Location) (float64, float64) {
 	if loc == nil {
 		loc = defaultLocation
 	}
 	t := time.Unix(int64(now), 0).In(loc)
 	y, m, d := t.Date()
-	return float64(time.Date(y, m, d, 0, 0, 0, 0, loc).Unix())
+	start := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	// `d+1` is normalised by time.Date, so month and year roll over correctly.
+	end := time.Date(y, m, d+1, 0, 0, 0, 0, loc)
+	return float64(start.Unix()), float64(end.Unix())
+}
+
+// dayStartFor is kept for callers that only need the lower bound.
+func dayStartFor(now float64, loc *time.Location) float64 {
+	start, _ := dayWindow(now, loc)
+	return start
 }
 
 func shortID(id string) string {

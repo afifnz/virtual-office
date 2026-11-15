@@ -503,11 +503,35 @@ func HasDB(path string) bool {
 }
 
 // DefaultProfileDB returns the DB path for a profile under a Hermes home.
+//
+// The profile name becomes a path segment and part of the SQLite DSN, so an
+// unsafe name (`../../etc`) must not reach filepath.Join. Callers already
+// validate roster ids; this is the belt to that braces, and returns "" so a
+// lookup simply finds no file.
 func DefaultProfileDB(home, profile string) string {
 	if profile == "" || profile == "default" {
 		return filepath.Join(home, "state.db")
 	}
+	if !validProfileName(profile) {
+		return ""
+	}
 	return filepath.Join(home, "profiles", profile, "state.db")
+}
+
+// validProfileName mirrors roster.ValidID without importing roster (store is a
+// leaf package).
+func validProfileName(s string) bool {
+	if s == "" || len(s) > 128 || s == "." || s == ".." {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // SanitizeToken strips anything that could forge a log line.

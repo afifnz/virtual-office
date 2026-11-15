@@ -23,6 +23,7 @@ type Source interface {
 	// Kind is "local" or "remote"; it is published in /api/config and /api/health.
 	Kind() string
 	// Home describes where the data lives (a directory, or the upstream URL).
+	// It must never contain credentials: a remote URL is published redacted.
 	Home() string
 	// Snapshot returns the current office state.
 	Snapshot(ctx context.Context, now time.Time) (derive.Snapshot, error)
@@ -32,6 +33,26 @@ type Source interface {
 // roster/title/timezone. Optional: /api/config falls back to the local roster.
 type Upstream interface {
 	UpstreamConfig(ctx context.Context) (*roster.Document, error)
+}
+
+// DBStatus is a database health probe result. Available=false means the source
+// has no local databases to look at (remote federation), not that they are OK.
+type DBStatus struct {
+	Available bool
+	Checked   int
+	OK        int
+	Err       int
+	Failed    []string
+}
+
+// Degraded is true when databases exist and none of them could be opened.
+func (d DBStatus) Degraded() bool { return d.Available && d.Checked > 0 && d.OK == 0 && d.Err > 0 }
+
+// Health is implemented by sources that read local databases and can report
+// whether they are openable. /api/health uses it; a source without it reports
+// no database block at all.
+type Health interface {
+	DBStatus(ctx context.Context) DBStatus
 }
 
 // New picks the implementation named by cfg.Source.

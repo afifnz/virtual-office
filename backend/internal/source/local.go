@@ -29,6 +29,13 @@ func (s *local) Home() string { return filepath.Clean(s.cfg.Home) }
 
 func (s *local) Snapshot(_ context.Context, now time.Time) (derive.Snapshot, error) {
 	// Per-profile errors are handled inside the loader: one unreadable state.db
-	// never fails the whole snapshot.
+	// never fails the whole snapshot. The counts travel in the payload.
 	return s.l.Snapshot(now), nil
+}
+
+// DBStatus opens and closes each profile database so /api/health can tell
+// "no desks yet" from "cannot read a single desk".
+func (s *local) DBStatus(context.Context) DBStatus {
+	h := s.l.Probe()
+	return DBStatus{Available: true, Checked: h.Checked, OK: h.OK, Err: h.Err, Failed: h.Failed}
 }

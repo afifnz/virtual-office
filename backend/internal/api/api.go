@@ -5,12 +5,17 @@
 package api
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"officeapi/internal/config"
@@ -19,7 +24,7 @@ import (
 )
 
 // Version of the office API.
-const Version = "2.2.0"
+const Version = "2.3.0"
 
 // Build metadata, overridden at build time with -ldflags "-X officeapi/internal/api.BuildCommit=...".
 var (
@@ -37,6 +42,8 @@ type Server struct {
 	res     roster.Resolver
 	log     *log.Logger
 	started time.Time
+
+	gz gzipCache
 }
 
 // NewServer builds the API server. res is used for /api/config; the source
@@ -51,6 +58,7 @@ func NewServer(cfg config.Config, src source.Source, res roster.Resolver, logger
 		res:     res,
 		log:     logger,
 		started: time.Now(),
+		gz:      gzipCache{entries: map[string]gzipEntry{}},
 	}
 }
 
@@ -112,27 +120,66 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "sumber data tidak bisa dibaca: "+err.Error())
 		return
 	}
+	// Every database exists and none of them opened: an empty room here would be
+	// a lie. Answer 503 so the client shows its error state instead.
+	if degraded(snap.DBsChecked, snap.DBsOK, snap.DBsErr) {
+		s.log.Printf("warn snapshot_degraded dbs_checked=%d dbs_err=%d failed=%v",
+			snap.DBsChecked, snap.DBsErr, snap.DBsFailed)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":       "semua state.db gagal dibuka (" + strconv.Itoa(snap.DBsErr) + "): " + strings.Join(snap.DBsFailed, ", "),
+			"degraded":    true,
+			"dbs_checked": snap.DBsChecked,
+			"dbs_ok":      snap.DBsOK,
+			"dbs_err":     snap.DBsErr,
+			"dbs_failed":  snap.DBsFailed,
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, snap)
 }
+
+// degraded is the shared rule: databases were found, and not one opened.
+func degraded(checked, ok, errs int) bool { return checked > 0 && ok == 0 && errs > 0 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// Desks come from the resolved roster, so a federated office reports the
 	// upstream's desks rather than 0.
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"service":    "virtual-office-api",
-		"stack":      StackID,
-		"version":    Version,
-		"commit":     BuildCommit,
-		"build_time": BuildTime,
-		"now":        float64(time.Now().UnixNano()) / 1e9,
-		"uptime_s":   int(time.Since(s.started).Seconds()),
-		"source":     s.src.Kind(),
-		"home":       s.src.Home(),
-		"profiles":   len(s.rosterSet(r).IDs()),
-		"bind":       s.cfg.ListenAddr(),
-		"tz":         s.cfg.TZ,
-	})
+	db := source.DBStatus{}
+	if h, ok := s.src.(source.Health); ok {
+		db = h.DBStatus(r.Context())
+	}
+	code := http.StatusOK
+	isDegraded := db.Degraded()
+	if isDegraded {
+		code = http.StatusServiceUnavailable
+	}
+	body := map[string]any{
+		"ok":            !isDegraded,
+		"degraded":      isDegraded,
+		"service":       "virtual-office-api",
+		"stack":         StackID,
+		"version":       Version,
+		"commit":        BuildCommit,
+		"build_time":    BuildTime,
+		"now":           float64(time.Now().UnixNano()) / 1e9,
+		"uptime_s":      int(time.Since(s.started).Seconds()),
+		"source":        s.src.Kind(),
+		"home":          s.src.Home(),
+		"profiles":      len(s.rosterSet(r).IDs()),
+		"bind":          s.cfg.ListenAddr(),
+		"tz":            s.cfg.TZ,
+		"dbs_available": db.Available,
+		"dbs_checked":   db.Checked,
+		"dbs_ok":        db.OK,
+		"dbs_err":       db.Err,
+	}
+	if len(db.Failed) > 0 {
+		body["dbs_failed"] = db.Failed
+	}
+	if isDegraded {
+		s.log.Printf("warn health_degraded dbs_err=%d failed=%v", db.Err, db.Failed)
+	}
+	writeJSON(w, code, body)
 }
 
 func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
@@ -176,8 +223,10 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	s.serveStatic(w, r)
 }
 
-// serveStatic serves a file from WEB_DIR, falling back to index.html so client
-// routes (and ?face=… deep links) work on a hard refresh.
+// serveStatic serves a file from WEB_DIR. A missing *file* is a 404: returning
+// index.html for a missing /assets/app.js would make the browser parse HTML as
+// JavaScript. Only a navigation request (Accept: text/html) falls back to
+// index.html, so client routes and ?face=… deep links survive a hard refresh.
 func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 	root := filepath.Clean(s.cfg.WebDir)
 	rel := filepath.Clean("/" + r.URL.Path)
@@ -186,21 +235,136 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	full := filepath.Join(root, rel)
-	if !strings.HasPrefix(full, root) {
+	if full != root && !strings.HasPrefix(full, root+string(os.PathSeparator)) {
 		writeError(w, http.StatusNotFound, "endpoint tidak ada: "+r.URL.Path)
 		return
 	}
 	if st, err := os.Stat(full); err == nil && !st.IsDir() {
-		http.ServeFile(w, r, full)
+		s.serveFile(w, r, full, st)
+		return
+	}
+	if isAssetPath(r.URL.Path) || !acceptsHTML(r) {
+		writeError(w, http.StatusNotFound, "berkas tidak ada: "+r.URL.Path)
 		return
 	}
 	index := filepath.Join(root, "index.html")
-	if _, err := os.Stat(index); err != nil {
+	st, err := os.Stat(index)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "frontend belum dibangun: "+index)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	http.ServeFile(w, r, index)
+	s.serveFile(w, r, index, st)
+}
+
+// isAssetPath reports whether the request is for a build artefact rather than a
+// client-side route. A route never has a file extension.
+func isAssetPath(p string) bool {
+	return strings.HasPrefix(p, "/assets/") || filepath.Ext(p) != ""
+}
+
+func acceptsHTML(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	return accept == "" || strings.Contains(accept, "text/html") || strings.Contains(accept, "application/xhtml")
+}
+
+// serveFile writes one file with a cache policy and, when useful, gzip.
+//
+// /assets/* names carry a content hash, so they are immutable for a year; every
+// other file (index.html) must be revalidated or a deploy would never reach a
+// returning visitor.
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, full string, st os.FileInfo) {
+	ctype := mime.TypeByExtension(filepath.Ext(full))
+	if ctype == "" {
+		ctype = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ctype)
+	if strings.HasPrefix(r.URL.Path, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	if compressible(ctype) {
+		w.Header().Add("Vary", "Accept-Encoding")
+		if acceptsGzip(r) {
+			if data, err := s.gz.read(full, st); err == nil {
+				w.Header().Set("Content-Encoding", "gzip")
+				w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+				if r.Method == http.MethodHead {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(data)
+				return
+			}
+		}
+	}
+	http.ServeFile(w, r, full)
+}
+
+func compressible(ctype string) bool {
+	switch {
+	case strings.HasPrefix(ctype, "text/"):
+		return true
+	case strings.Contains(ctype, "javascript"), strings.Contains(ctype, "json"),
+		strings.Contains(ctype, "svg"), strings.Contains(ctype, "xml"),
+		strings.Contains(ctype, "wasm"):
+		return true
+	}
+	return false
+}
+
+func acceptsGzip(r *http.Request) bool {
+	for _, enc := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		if strings.TrimSpace(strings.SplitN(enc, ";", 2)[0]) == "gzip" {
+			return true
+		}
+	}
+	return false
+}
+
+// gzipCache keeps the compressed bytes for a file until its mtime or size
+// changes, so the 1 MB JS bundle is compressed once per deploy, not per request.
+type gzipEntry struct {
+	mod  time.Time
+	size int64
+	data []byte
+}
+
+type gzipCache struct {
+	mu      sync.Mutex
+	entries map[string]gzipEntry
+}
+
+func (c *gzipCache) read(path string, st os.FileInfo) ([]byte, error) {
+	c.mu.Lock()
+	if e, ok := c.entries[path]; ok && e.size == st.Size() && e.mod.Equal(st.ModTime()) {
+		c.mu.Unlock()
+		return e.data, nil
+	}
+	c.mu.Unlock()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	if _, err := zw.Write(raw); err != nil {
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	data := buf.Bytes()
+
+	c.mu.Lock()
+	if c.entries == nil {
+		c.entries = map[string]gzipEntry{}
+	}
+	c.entries[path] = gzipEntry{mod: st.ModTime(), size: st.Size(), data: data}
+	c.mu.Unlock()
+	return data, nil
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
