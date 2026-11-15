@@ -176,9 +176,11 @@ export function CameraRig({
       if (!spot) return
       pos = new THREE.Vector3(...spot.pos)
       target = new THREE.Vector3(...spot.target)
-      // the whole building must fit a portrait phone: back off along the view line
+      // the whole building must fit a portrait phone: back off along the view line.
+      // 1.35 keeps both eaves >= 11 px inside a 360 px screen (the view is off-centre,
+      // so the right eave is the tight one); 1.0 cropped ~35 px off each side.
       if (command.spot === 'luar' && pCam.aspect < 1) {
-        const k = Math.sqrt(Math.min(1 / pCam.aspect, 2.2))
+        const k = 1.35 * Math.sqrt(Math.min(1 / pCam.aspect, 2.2))
         pos = target.clone().add(pos.clone().sub(target).multiplyScalar(k))
       }
     }
