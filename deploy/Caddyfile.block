@@ -45,9 +45,12 @@ office.afifnurzein.my.id {
 	# --- Cache ------------------------------------------------------------
 	# Aset ber-hash: immutable. Shell HTML: no-cache, supaya deploy langsung
 	# terlihat tanpa hard reload (dulu sempat menyajikan bundle lama berjam-jam).
+	# `not path /assets/* /api/*` (bukan `path / /index.html`) karena deep-link
+	# SPA seperti /foo juga disajikan index.html lewat try_files dan harus
+	# no-cache. /api/* dikecualikan: handler Go sudah mengirim `no-store`.
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
-	@shell path / /index.html
+	@shell not path /assets/* /api/*
 	header @shell Cache-Control "no-cache"
 
 	log {
