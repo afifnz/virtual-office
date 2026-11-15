@@ -134,8 +134,26 @@ Catatan:
 
 ## Deploy
 
-Dua jalur: otomatis (rilis GitHub → host) dan manual. Keduanya idempoten dan selalu
-membuat backup `.prev` sebelum menimpa apa pun.
+Dua jalur: otomatis (rilis GitHub → host) dan manual. Keduanya idempoten dan memperlakukan
+binary + statis sebagai satu kesatuan: kalau verifikasi gagal, keduanya dikembalikan dari
+backup `.prev`. Backup itu dibuat **kalau memang ada versi sebelumnya** — pada instalasi
+pertama tidak ada yang bisa dibackup, jadi kegagalan verifikasi berakhir dengan unit
+**dimatikan** dan artefak yang gagal dibuang, bukan menyajikan versi yang belum terbukti.
+
+**Prasyarat sekali saja di host.** CD memakai unit systemd *user*, jadi unit harus hidup
+tanpa login:
+
+```bash
+sudo loginctl enable-linger "$USER"                        # unit user tetap hidup setelah logout
+sudo chown -R "$USER":www-data /var/www /var/www/office    # /var/www ikut: .prev dibuat di sampingnya
+sudo chmod -R 755 /var/www /var/www/office
+systemctl --user enable --now virtual-office-api
+```
+
+`/var/www` (bukan hanya `/var/www/office`) perlu bisa ditulis karena `office.prev` dan
+`office.tmp-rollback` dibuat/dihapus di direktori induknya. Kalau tetap milik root, skrip
+memakai `sudo -n`; tanpa NOPASSWD ia berhenti dengan pesan yang menyebut perintah `chown`
+di atas, bukan `Permission denied` mentah.
 
 **Otomatis (disarankan).** `.github/workflows/publish.yml` membangun binary + bundle pada
 setiap push ke `main` dan menerbitkannya sebagai GitHub Release `deploy-<sha7>`. Di host,
@@ -145,17 +163,28 @@ cron tiap 5 menit menjalankan:
 cd ~/workspace/virtual-office && ./deploy/deploy-from-release.sh   # --dry-run untuk cek
 ```
 
-Script membandingkan `commit` di `/api/health` dengan rilis terakhir, lalu unduh → verifikasi
-SHA256 → backup `.prev` → pasang → verifikasi commit aktif; gagal = rollback otomatis.
-Pasang cron:
+Script membaca `commit` dari `/api/health` (200 normal maupun 503 degraded), membandingkannya
+dengan rilis terakhir, lalu: unduh → verifikasi SHA256 → backup `.prev` → stop unit → pasang
+binary → start → sync statis → **membuktikan** commit baru aktif *dan* `index.html` yang
+disajikan `$SITE_URL` sama persis dengan yang baru dipasang. Gagal di titik mana pun =
+rollback otomatis (binary dan statis). Host yang menjalankan commit lebih baru dari rilis
+terakhir — mis. hotfix manual — dilewati dengan peringatan, tidak diturunkan.
 
 ```bash
 ( crontab -l 2>/dev/null; echo "*/5 * * * * cd \$HOME/workspace/virtual-office && ./deploy/deploy-from-release.sh >> \$HOME/.cache/office-deploy.log 2>&1" ) | crontab -
 ```
 
-**Manual.** Build dulu di commit yang akan dikirim (`deploy/build.sh`), lalu di host:
+Env yang sering dipakai: `SITE_URL` (default `https://office.afifnurzein.my.id/`; harus
+menyajikan isi `/var/www/office` — kalau API juga menyajikan SPA, `http://127.0.0.1:8130/`
+bisa dipakai), `DEPLOY_PIN=<sha7>` untuk menahan host pada satu rilis, dan `--dry-run`.
+
+**Manual.** Build dulu di commit yang akan dikirim, lalu di host:
 
 ```bash
+# di sandbox/repo: binary langsung ke deploy/office-api (commit ikut tertanam)
+deploy/build.sh --out deploy/office-api
+
+# di host:
 systemctl --user stop virtual-office-api \
 && install -m 0755 ~/workspace/virtual-office/deploy/office-api ~/.local/bin/office-api \
 && systemctl --user start virtual-office-api \
@@ -163,11 +192,17 @@ systemctl --user stop virtual-office-api \
 && curl -s http://127.0.0.1:8130/api/health
 ```
 
+`deploy/build.sh` tanpa `--out` menulis ke `backend/bin/office-api`; pakai `--out` supaya
+jalur di atas dan artefak rilis menunjuk berkas yang sama.
+
 **Caddy** (cache + header keamanan): `bash deploy/apply-caddy-headers.sh` — menyisipkan
 `@assets immutable` / `@shell no-cache` dan header keamanan ke site block, dengan
-`caddy validate` + rollback otomatis. Rujukan lengkap: `deploy/Caddyfile.block`.
+`caddy validate` + rollback otomatis. Rujukan lengkap blok situs (proxy ke `8130`, root
+`/var/www/office`): `deploy/Caddyfile.block`.
 
 **Rollback**: `systemctl --user stop virtual-office-api && install -m 0755 ~/.local/bin/office-api.prev ~/.local/bin/office-api && systemctl --user start virtual-office-api && sudo rsync -a --delete /var/www/office.prev/ /var/www/office/`.
+Rollback hanya mungkin kalau `.prev` ada; pada instalasi pertama keduanya belum ada, jadi
+satu-satunya jalan adalah memasang ulang rilis secara manual.
 
 ## API
 
