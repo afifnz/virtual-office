@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"officeapi/internal/config"
@@ -11,16 +12,28 @@ import (
 	"officeapi/internal/loader"
 )
 
+// SnapshotTTL is how long a built snapshot is reused. /api/status is public and
+// every open tab polls it every 4 s; without this each request re-reads every
+// state.db, so viewers (or a curl loop) multiply database reads.
+const SnapshotTTL = 2 * time.Second
+
 // local reads the Hermes home on this machine. All filesystem knowledge lives
 // in loader/store; this type only adapts it to Source.
 type local struct {
 	cfg config.Config
 	l   *loader.Loader
+
+	// mu is held while a snapshot is built, so concurrent requests wait for
+	// one read instead of queueing their own.
+	mu     sync.Mutex
+	snap   derive.Snapshot
+	snapAt time.Time
+	clock  func() time.Time
 }
 
 // NewLocal builds the filesystem-backed source.
 func NewLocal(cfg config.Config, logger *log.Logger) Source {
-	return &local{cfg: cfg, l: loader.New(cfg, logger)}
+	return &local{cfg: cfg, l: loader.New(cfg, logger), clock: time.Now}
 }
 
 func (s *local) Kind() string { return "local" }
@@ -30,7 +43,15 @@ func (s *local) Home() string { return filepath.Clean(s.cfg.Home) }
 func (s *local) Snapshot(_ context.Context, now time.Time) (derive.Snapshot, error) {
 	// Per-profile errors are handled inside the loader: one unreadable state.db
 	// never fails the whole snapshot. The counts travel in the payload.
-	return s.l.Snapshot(now), nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.clock()
+	if !s.snapAt.IsZero() && t.Sub(s.snapAt) < SnapshotTTL {
+		return s.snap, nil
+	}
+	s.snap = s.l.Snapshot(now)
+	s.snapAt = t
+	return s.snap, nil
 }
 
 // DBStatus opens and closes each profile database so /api/health can tell

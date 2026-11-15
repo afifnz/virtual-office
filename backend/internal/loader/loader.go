@@ -134,8 +134,10 @@ func (l *Loader) Snapshot(now time.Time) derive.Snapshot {
 		DBsErr:     bad,
 		DBsFailed:  failed,
 	})
-	l.log.Printf("info snapshot agents=%d feed=%d tasks=%d comms=%d dbs_ok=%d dbs_err=%d",
-		len(snap.Agents), len(snap.Feed), len(snap.Tasks), len(snap.Comms), ok, bad)
+	if l.cfg.LogRequests {
+		l.log.Printf("info snapshot agents=%d feed=%d tasks=%d comms=%d dbs_ok=%d dbs_err=%d",
+			len(snap.Agents), len(snap.Feed), len(snap.Tasks), len(snap.Comms), ok, bad)
+	}
 	return snap
 }
 
