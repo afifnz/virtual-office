@@ -449,10 +449,30 @@ export async function loadConfig(): Promise<OfficeConfig | null> {
   }
 }
 
-/** Boot: apply the config (or the seed) and set the document title. */
+/**
+ * The bundled roster as an OfficeConfig. Used when /api/config cannot be
+ * reached at all: the office must still render the eleven seeded desks
+ * instead of an empty room (an API outage is not an empty office).
+ */
+export function seedConfig(): OfficeConfig {
+  return {
+    title: DEFAULT_TITLE,
+    tz: DEFAULT_TZ,
+    source: 'seed',
+    profiles: AGENTS.map((a) => a.id),
+    roster: AGENTS.map((a) => ({ id: a.id, name: a.name, role: a.role, team: a.team })),
+    layout: { floor: { ...DEFAULT_FLOOR } },
+    teams: (Object.keys(TEAMS) as Array<keyof typeof TEAMS>).map((id) => ({ id, label: TEAMS[id].label })),
+  }
+}
+
+/** Boot: apply the config, or the seed when the API is unreachable. */
 export async function bootOffice(): Promise<void> {
   const cfg = await loadConfig()
-  if (cfg) applyConfig(cfg)
+  applyConfig(cfg ?? seedConfig())
+  if (!cfg && typeof console !== 'undefined') {
+    console.warn('[office] /api/config unreachable — rendering the bundled seed roster')
+  }
   if (typeof document !== 'undefined') {
     document.title = officeTitle()
   }
