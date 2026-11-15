@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
-import { FLOOR, WALL_H, WALL_T, WALLS, type WallSeg } from '../lib/rooms'
+import { DOORS, FLOOR, WALL_H, WALL_T, WALLS, type WallSeg } from '../lib/rooms'
 import { floorTexture, plasterTexture, rugTexture } from '../lib/textures'
 import { labelTexture } from '../lib/label'
 
@@ -43,8 +43,8 @@ export function Room() {
         <planeGeometry args={[FLOOR.w, FLOOR.d]} />
         <meshStandardMaterial map={floor} roughness={0.9} metalness={0.02} />
       </mesh>
-      {/* pendopo rug */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-2.2, 0.012, 9.2]}>
+      {/* pendopo rug under the reception island */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-7.0, 0.012, 9.4]}>
         <planeGeometry args={[7.4, 4.8]} />
         <meshStandardMaterial map={rug} roughness={0.95} />
       </mesh>
@@ -72,44 +72,40 @@ export function Room() {
         )
       })}
 
-      {/* door frames */}
-      {[
-        { x: 0, z: 16, horizontal: true },
-        { x: -8, z: 4, horizontal: true },
-        { x: 8, z: 4, horizontal: true },
-        { x: 0, z: 0, horizontal: false },
-      ].map((d, i) => {
-        const w = 4.4
+      {/* door frames — one per DOORS entry, width matches the wall gap */}
+      {DOORS.map((d, i) => {
+        const horizontal = d.rot === 0
+        const w = d.w
         return (
           <group key={i} position={[d.x, 0, d.z]}>
             {[-1, 1].map((s) => (
-              <mesh key={s} position={d.horizontal ? [s * (w / 2), 1.35, 0] : [0, 1.35, s * (w / 2)]}>
-                <boxGeometry args={d.horizontal ? [0.22, 2.7, 0.36] : [0.36, 2.7, 0.22]} />
+              <mesh key={s} position={horizontal ? [s * (w / 2), 1.35, 0] : [0, 1.35, s * (w / 2)]}>
+                <boxGeometry args={horizontal ? [0.22, 2.7, 0.36] : [0.36, 2.7, 0.22]} />
                 <meshStandardMaterial color="#5f422c" roughness={0.72} />
               </mesh>
             ))}
             <mesh position={[0, 2.72, 0]}>
-              <boxGeometry args={d.horizontal ? [w + 0.5, 0.22, 0.36] : [0.36, 0.22, w + 0.5]} />
+              <boxGeometry args={horizontal ? [w + 0.5, 0.22, 0.36] : [0.36, 0.22, w + 0.5]} />
               <meshStandardMaterial color="#4d3625" roughness={0.72} />
             </mesh>
           </group>
         )
       })}
 
-      {/* room signs on the back walls */}
-      <sprite position={[-16.5, 2.55, -15.78]} scale={[3.4, 3.4 / signs.dev.aspect, 1]}>
+      {/* room signs, above the boards on the back walls and beside the entrance */}
+      <sprite position={[-10, 2.95, -14.78]} scale={[3.4, 3.4 / signs.dev.aspect, 1]}>
         <spriteMaterial map={signs.dev.tex} transparent depthWrite={false} />
       </sprite>
-      <sprite position={[17, 2.55, -15.78]} scale={[3.4, 3.4 / signs.edu.aspect, 1]}>
+      <sprite position={[10, 2.95, -14.78]} scale={[3.4, 3.4 / signs.edu.aspect, 1]}>
         <spriteMaterial map={signs.edu.tex} transparent depthWrite={false} />
       </sprite>
-      <sprite position={[-22, 2.5, 15.78]} scale={[3.0, 3.0 / signs.lobby.aspect, 1]}>
+      <sprite position={[6.2, 2.55, 14.78]} scale={[3.0, 3.0 / signs.lobby.aspect, 1]}>
         <spriteMaterial map={signs.lobby.tex} transparent depthWrite={false} />
       </sprite>
 
       {/* no roof: the overview camera looks into the rooms like a dollhouse */}
 
-      {/* hanging lamps */}
+      {/* hanging lamps, one per desk row / cluster centre */}
       {LAMPS.map(([x, z], i) => (
         <group key={i} position={[x, 0, z]}>
           <mesh position={[0, WALL_H - 0.42, 0]}>
@@ -128,7 +124,7 @@ export function Room() {
         </group>
       ))}
 
-      {/* plants along the walls */}
+      {/* plants in the corners, clear of every walking line */}
       {PLANTS.map(([x, z], i) => (
         <Plant key={i} x={x} z={z} />
       ))}
@@ -136,22 +132,23 @@ export function Room() {
   )
 }
 
+/** One pendant per desk cluster (its exact centroid) plus the pendopo zones. */
 const LAMPS: Array<[number, number]> = [
-  [-6, 9],
-  [10, 9],
-  [-16, -1],
-  [-16, -9],
-  [17, -1],
-  [17, -9],
+  [-7.0, 9.2],
+  [0, 12.8],
+  [-18.6, 8.0],
+  [18.6, 8.8],
+  [-10.0, -8.4],
+  [10.0, -8.4],
 ]
 
 const PLANTS: Array<[number, number]> = [
-  [-28.5, 14.5],
-  [28.5, 14.5],
-  [-28.5, -14.5],
-  [28.5, -14.5],
-  [-2.6, 6.6],
-  [2.4, -3.4],
+  [-19.2, 14.2],
+  [19.2, 14.2],
+  [-19.2, -14.2],
+  [19.2, -14.2],
+  [-2.2, 3.9],
+  [2.2, 3.9],
 ]
 
 function Plant({ x, z }: { x: number; z: number }) {

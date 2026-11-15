@@ -52,7 +52,7 @@ export function floorTexture(): THREE.CanvasTexture {
   floorTex = new THREE.CanvasTexture(c)
   floorTex.wrapS = THREE.RepeatWrapping
   floorTex.wrapT = THREE.RepeatWrapping
-  floorTex.repeat.set(16, 9)
+  floorTex.repeat.set(11, 8)
   floorTex.colorSpace = THREE.SRGBColorSpace
   floorTex.anisotropy = 8
   return floorTex

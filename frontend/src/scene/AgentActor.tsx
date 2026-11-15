@@ -264,12 +264,13 @@ function onward(meta: AgentMeta, to: Pt): Pt[] {
   return [[exit[0], exit[1]!], ...navPath(a.id, b.id), to]
 }
 
-/** current position → nav graph → seat */
+/** current position → nav graph → seat, so the walk ends in the chair */
 function homeward(meta: AgentMeta, from: Pt): Pt[] {
   const exit = DESK_EXIT[meta.id] ?? [seatPoint(meta)[0], seatPoint(meta)[1] + 1.3]
   const a = nearestNode(from[0], from[1])
   const b = nearestNode(exit[0], exit[1]!)
-  return [...navPath(a.id, b.id), [exit[0], exit[1]!]]
+  const seat = seatPoint(meta)
+  return [...navPath(a.id, b.id), [exit[0], exit[1]!], [seat[0], seat[1]]]
 }
 
 function dampAngle(current: number, target: number, lambda: number, dt: number): number {

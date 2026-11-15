@@ -40,7 +40,7 @@ export function Office({ status, command, moveIntent, onNear, onMove, onPick, dp
     <Canvas
       dpr={dpr}
       gl={{ antialias: true, powerPreference: 'high-performance', alpha: true }}
-      camera={{ fov: 55, near: 0.08, far: 140, position: [2.5, 2.3, 14.2] }}
+      camera={{ fov: 55, near: 0.08, far: 140, position: [1.6, 1.95, 13.0] }}
       onPointerMissed={() => onPick('')}
       onCreated={({ gl, scene, camera }) => {
         // diagnostics hooks used by verify/*.py and the perf probe
@@ -54,7 +54,7 @@ export function Office({ status, command, moveIntent, onNear, onMove, onPick, dp
         w.__officeRenderer = gl
       }}
     >
-      <fog attach="fog" args={['#241a13', 34, 92]} />
+      <fog attach="fog" args={['#241a13', 30, 85]} />
       <ambientLight intensity={0.62} color="#fff1dc" />
       <hemisphereLight args={['#ffe9c9', '#3a2b21', 0.75]} />
       <directionalLight position={[14, 20, 12]} intensity={1.15} color="#fff4e0" />

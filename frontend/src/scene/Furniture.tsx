@@ -17,15 +17,15 @@ export function Furniture({ agents }: { agents: Agent[] }) {
       <Gamelan />
       <ServerRack />
       <TaskBoard
-        x={-16.5}
-        z={-15.55}
+        x={-10.0}
+        z={-14.7}
         title="SPRINT TIM DEV"
         accent="#82aac8"
         agents={agents.filter((a) => agentMeta(a.id).team === 'dev')}
       />
       <TaskBoard
-        x={17}
-        z={-15.55}
+        x={10.0}
+        z={-14.7}
         title="PAPAN ADDIE"
         accent="#deb860"
         agents={agents.filter((a) => agentMeta(a.id).team === 'edu')}
@@ -34,7 +34,7 @@ export function Furniture({ agents }: { agents: Agent[] }) {
       <Lesehan />
       <Cat />
       <Entrance />
-      <Rug shadows={[[-6, 8.6], [10, 9.4]]} />
+      <Rug shadows={[[-7.0, 9.2], [18.4, 8.8]]} />
     </group>
   )
 }
@@ -63,7 +63,7 @@ function Reception() {
     px: 44,
   })
   return (
-    <group position={[-10.4, 0, 6.6]}>
+    <group position={[-7.0, 0, 12.0]}>
       <mesh position={[0, 0.52, 0]}>
         <boxGeometry args={[2.6, 1.04, 0.62]} />
         <meshStandardMaterial color="#7c5638" roughness={0.72} />
@@ -94,7 +94,7 @@ function Reception() {
 
 function Lounge() {
   return (
-    <group position={[9.2, 0, 10.4]}>
+    <group position={[19.4, 0, 8.8]} rotation={[0, Math.PI / 2, 0]}>
       {/* sofa */}
       <group position={[0, 0, 0]}>
         <mesh position={[0, 0.24, 0]}>
@@ -180,7 +180,7 @@ function KopiCorner() {
     px: 40,
   })
   return (
-    <group position={[-13.4, 0, 5.0]}>
+    <group position={[-19.3, 0, 8.0]} rotation={[0, Math.PI / 2, 0]}>
       <mesh position={[0, 0.52, 0]}>
         <boxGeometry args={[2.8, 1.04, 0.6]} />
         <meshStandardMaterial color="#6f4c32" roughness={0.75} />
@@ -248,7 +248,7 @@ function KopiCorner() {
 
 function Gamelan() {
   return (
-    <group position={[-24.6, 0, -4.4]}>
+    <group position={[-19.1, 0, -5.6]} rotation={[0, Math.PI / 2, 0]}>
       {/* gong frame */}
       <group position={[0, 0, -0.6]}>
         {[-0.9, 0.9].map((x) => (
@@ -307,7 +307,7 @@ function ServerRack() {
     })
   })
   return (
-    <group position={[-7.4, 0, -14.7]}>
+    <group position={[-17.2, 0, -14.4]}>
       <mesh position={[0, 1.0, 0]}>
         <boxGeometry args={[1.1, 2.0, 0.8]} />
         <meshStandardMaterial color="#2b2b2e" roughness={0.6} metalness={0.35} />
@@ -387,7 +387,7 @@ function Bookshelf() {
     '#3f6b64', '#8c5a6b', '#4a5a3c', '#a06a3c', '#4b4b6b', '#6b4a3a',
   ]
   return (
-    <group position={[25.4, 0, -14.6]} rotation={[0, -Math.PI / 2, 0]}>
+    <group position={[19.5, 0, -11.0]} rotation={[0, -Math.PI / 2, 0]}>
       <mesh position={[0, 1.1, 0]}>
         <boxGeometry args={[2.6, 2.2, 0.42]} />
         <meshStandardMaterial color="#6b4a30" roughness={0.78} />
@@ -412,7 +412,7 @@ function Bookshelf() {
 
 function Lesehan() {
   return (
-    <group position={[23.6, 0, -10.2]}>
+    <group position={[16.6, 0, -6.2]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]}>
         <planeGeometry args={[3.4, 2.6]} />
         <meshStandardMaterial color="#b99b6a" roughness={0.95} />
@@ -456,7 +456,7 @@ function Cat() {
     if (head.current) head.current.rotation.y = Math.sin(t * 0.7) * 0.3
   })
   return (
-    <group position={[3.6, 0, 11.6]} rotation={[0, -0.5, 0]}>
+    <group position={[3.6, 0, 12.6]} rotation={[0, -0.5, 0]}>
       <mesh position={[0, 0.16, 0]} scale={[1, 0.9, 1.5]}>
         <sphereGeometry args={[0.19, 14, 12]} />
         <meshStandardMaterial color="#d68a3f" roughness={0.95} />
@@ -489,7 +489,7 @@ function Cat() {
 
 function Entrance() {
   return (
-    <group position={[0, 0, 16.6]}>
+    <group position={[0, 0, 15.6]}>
       <mesh position={[0, 0.09, 0]}>
         <boxGeometry args={[5.6, 0.18, 1.8]} />
         <meshStandardMaterial color="#9a8f7c" roughness={0.95} />
