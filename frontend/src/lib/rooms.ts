@@ -92,7 +92,7 @@ export interface Spot {
 }
 
 export const SPOTS: Record<string, Spot> = {
-  lobby: { id: 'lobby', label: 'Pendopo', pos: [1.6, 1.95, 13.0], target: [-6.8, 0.95, 9.2], fov: 55 },
+  lobby: { id: 'lobby', label: 'Pendopo', pos: [-9.6, 2.3, 14.3], target: [-6.0, 0.9, 10.3], fov: 55 },
   dev: { id: 'dev', label: 'Tim Dev', pos: [-10.0, 4.6, 1.4], target: [-10.0, 0.35, -7.0], fov: 58 },
   edu: { id: 'edu', label: 'Tim Edu', pos: [10.0, 4.6, 1.4], target: [10.0, 0.35, -7.0], fov: 58 },
   tampak: { id: 'tampak', label: 'Tampak', pos: [0, 22, 28], target: [0, 0, -1], fov: 42 },
@@ -113,7 +113,9 @@ export const POIS: Poi[] = [
   { id: 'kopi', name: 'warung kopi', pos: [-17.5, 8.0], act: 'sip', team: 'lobby' },
   { id: 'jendela', name: 'jendela', pos: [-15.0, 14.2], act: 'gaze', team: 'lobby' },
   { id: 'kucing', name: 'kucing oren', pos: [3.6, 11.7], act: 'pet', team: 'lobby' },
-  { id: 'resepsionis', name: 'meja resepsionis', pos: [-7.0, 13.3], act: 'chat', team: 'lobby' },
+  { id: 'resepsionis', name: 'meja resepsionis', pos: [-2.7, 10.8], act: 'chat', team: 'lobby' },
+  { id: 'rapat', name: 'meja rapat', pos: [8.0, 10.2], act: 'chat', team: 'lobby' },
+  { id: 'meja-kopi', name: 'meja kopi', pos: [-15.5, 6.3], act: 'sip', team: 'lobby' },
   { id: 'gamelan', name: 'gamelan', pos: [-17.2, -5.6], act: 'gamelan', team: 'dev' },
   { id: 'server', name: 'rak server', pos: [-17.2, -13.2], act: 'check', team: 'dev' },
   { id: 'papan', name: 'papan sprint', pos: [-10.0, -13.7], act: 'read', team: 'dev' },
@@ -255,7 +257,9 @@ function deskObstacle(d: DeskSpot): Obstacle {
 export const OBSTACLES: Obstacle[] = [
   ...DESKS.map(deskObstacle),
   // pendopo — big pieces hug the walls
-  { id: 'resepsionis', x1: -8.3, z1: 11.69, x2: -5.7, z2: 12.31 },
+  { id: 'resepsionis', x1: -4.27, z1: 9.42, x2: -3.53, z2: 12.18 },
+  { id: 'meja-rapat', x1: 6.4, z1: 10.9, x2: 9.6, z2: 13.1 },
+  { id: 'meja-kopi', x1: -16.5, z1: 4.75, x2: -14.5, z2: 5.65 },
   { id: 'kopi', x1: -19.6, z1: 6.6, x2: -18.03, z2: 9.4 },
   { id: 'sofa', x1: 17.44, z1: 6.24, x2: 19.85, z2: 11.36 },
   { id: 'kucing', x1: 3.36, z1: 12.36, x2: 3.84, z2: 12.84 },

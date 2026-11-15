@@ -50,7 +50,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#e2ab88', hair: '#2b2320', style: 'long', shirt: '#efe6d6', pants: '#4a3a52',
       accent: '#d4805c', hijab: '#b3797e', skirt: true, build: 0.9, tall: 1.0, female: true,
     },
-    desk: { x: -7.0, z: 9.2, rot: Math.PI },
+    desk: { x: -6.8, z: 10.6, rot: Math.PI },
   },
   {
     id: 'dev',

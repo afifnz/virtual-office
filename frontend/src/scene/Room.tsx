@@ -43,9 +43,9 @@ export function Room() {
         <planeGeometry args={[FLOOR.w, FLOOR.d]} />
         <meshStandardMaterial map={floor} roughness={0.9} metalness={0.02} />
       </mesh>
-      {/* pendopo rug under the reception island */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-7.0, 0.012, 9.4]}>
-        <planeGeometry args={[7.4, 4.8]} />
+      {/* pendopo rug under the reception corner: Galuh's desk and the counter */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-5.2, 0.012, 10.8]}>
+        <planeGeometry args={[6.8, 4.6]} />
         <meshStandardMaterial map={rug} roughness={0.95} />
       </mesh>
 
@@ -134,8 +134,8 @@ export function Room() {
 
 /** One pendant per desk cluster (its exact centroid) plus the pendopo zones. */
 const LAMPS: Array<[number, number]> = [
-  [-7.0, 9.2],
-  [0, 12.8],
+  [-5.4, 10.7],
+  [8.0, 12.0],
   [-18.6, 8.0],
   [18.6, 8.8],
   [-10.0, -6.4],
