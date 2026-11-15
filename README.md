@@ -19,10 +19,16 @@ verify/    skrip screenshot Playwright + hasil PNG
 | **Ruang Tim Dev** (kiri belakang) | Bima `dev`, Raka `planner`, Laras `uiux`, Dimas `coder`, Yoga `reviewer`, Sari `tester` |
 | **Ruang Tim Edu** (kanan belakang) | Ayu `edu`, Nisa `edu-designer`, Yohan `edu-writer`, Hadi `edu-reviewer` |
 
-`id` agen = nama profil Hermes. Nama tampilan & peran bawaan ada di
-`frontend/src/lib/agents.ts`; server juga menerbitkan roster yang sama di
-`GET /api/config` (bisa dioverride lewat `OFFICE_ROSTER`, lihat
-[Roster dinamis](#roster-dinamis)).
+`id` agen = nama profil Hermes. Roster bawaan (id, nama, peran, tim) ada di
+**dua** tempat yang dijaga tetap sama: `backend/internal/roster.DefaultAgents`
+dan `frontend/src/lib/agents.ts`. Sebuah test Go mem-parse file TS itu dan
+gagal kalau keduanya berbeda (`TestDefaultAgentsMatchFrontend`).
+
+Saat runtime, `GET /api/config` adalah sumber kebenarannya: frontend mengambil
+judul, zona waktu, daftar tim dan roster dari sana sebelum render pertama.
+Roster bisa dioverride lewat `OFFICE_ROSTER`/`OFFICE_ROSTER_JSON` (lihat
+[Roster dinamis](#roster-dinamis)), dan agen baru yang tidak punya meja
+digambar otomatis — tanpa mengubah kode.
 
 ## Quick start
 
@@ -160,12 +166,25 @@ Read-only, tanpa auth, bind `127.0.0.1` saja (Caddy yang mempublikasikan).
 
 | Endpoint | Isi |
 |---|---|
-| `GET /api/health` | `{ok, version, now, uptime_s, source, home, profiles, bind, tz}` |
-| `GET /api/config` | `{title, tz, source, hermes_home, profiles, roster[], layout, teams[]}` |
-| `GET /api/status` | `{now, gateway, agents[], feed[], tasks[], comms[]}` |
+| `GET /api/health` | `{ok, degraded, version, now, uptime_s, source, home, profiles, bind, tz, dbs_available, dbs_checked, dbs_ok, dbs_err, dbs_failed[]}` |
+| `GET /api/config` | `{title, tz, source, hermes_home, remote_api_url, profiles, roster[], layout{floor,grid,aisle}, teams[]}` |
+| `GET /api/status` | `{now, gateway, agents[], feed[], tasks[], comms[], dbs_checked, dbs_ok, dbs_err, dbs_failed[]}` |
 | `GET /api/agents/{id}` | satu objek agen, `404` kalau tidak ada |
 
-Bentuk JSON identik dengan API lama, jadi reverse proxy/frontend lain tetap cocok.
+Bentuk JSON identik dengan API lama (kunci baru hanya ditambahkan), jadi reverse
+proxy/frontend lain tetap cocok.
+
+**Kesehatan basis data.** `/api/health` membuka setiap `state.db` (tanpa membaca
+baris) dan melaporkan `dbs_ok`/`dbs_err`. Kalau ada DB tapi **tidak satu pun**
+bisa dibuka, jawabannya `503` dengan `ok:false, degraded:true` — bukan kantor
+kosong yang terlihat sehat. `/api/status` melakukan hal yang sama (`503` +
+`degraded:true`), dan selalu membawa `dbs_ok`/`dbs_err` supaya kerusakan
+sebagian tetap kelihatan. `HERMES_HOME` kosong (belum ada DB) tetap sehat.
+
+**Kredensial.** `REMOTE_API_URL` boleh memuat basic-auth (`https://user:pass@host`).
+Nilai mentahnya hanya dipakai HTTP client; semua yang keluar — `remote_api_url`
+di `/api/config`, `home` di `/api/health`, body `502`, dan log — memakai URL
+tanpa userinfo.
 
 ```jsonc
 {
@@ -218,11 +237,11 @@ Semua lewat environment variable; tidak ada path user yang di-hardcode.
 | `BIND` | `127.0.0.1` | alamat bind (`0.0.0.0` di Docker) |
 | `OFFICE_SOURCE` | `local` | `local` = baca `state.db` di mesin ini; `remote` = ambil dari instance lain lewat HTTP, tanpa akses filesystem |
 | `REMOTE_API_URL` | — | wajib untuk `OFFICE_SOURCE=remote`, mis. `https://office.example.com` |
-| `OFFICE_ROSTER` | — | path file roster JSON/YAML (nama, peran, tim). Lihat `deploy/roster.example.yaml` |
+| `OFFICE_ROSTER` | — | path file roster JSON/YAML (nama, peran, tim). Lihat `deploy/roster.example.yaml`. Id wajib `^[a-zA-Z0-9_-]+$` |
 | `OFFICE_ROSTER_JSON` | — | roster inline JSON; menang atas `OFFICE_ROSTER` |
 | `OFFICE_TITLE` | `Agent Office` | judul kantor (dipakai frontend dari `/api/config`) |
-| `OFFICE_TZ` | `Asia/Jakarta` | zona waktu untuk batas hari & bucket per jam |
-| `PROFILES` | 11 profil bawaan | daftar profil dipisah koma (mengganti default; mode `remote` tidak memakai ini) |
+| `OFFICE_TZ` | `Asia/Jakarta` | zona waktu untuk batas hari & bucket per jam (dan jam di UI). Nilai `tz` di file roster menang atas ini; zona tak dikenal = gagal start (`exit 2`) |
+| `PROFILES` | 11 profil bawaan | daftar profil dipisah koma (mengganti default). **Diabaikan sepenuhnya di mode `remote`** — roster datang dari upstream `/api/config` |
 | `GATEWAY_FILE` | `$HERMES_HOME/gateway_state.json` | status gateway |
 | `WEB_DIR` | — | folder `dist` frontend; kalau diisi, API juga menyajikan SPA (dipakai image Docker) |
 | `LOG_REQUESTS` | `0` | log tiap request ke stderr |
@@ -243,20 +262,54 @@ tanpa mengubah kode.
   "source": "local",
   "hermes_home": "/hermes",
   "profiles": ["default", "dev", "coder"],
-  "roster": [{ "id": "dev", "name": "Bima", "role": "Lead Dev", "team": "dev" }],
-  "layout": { "floor": { "w": 40, "d": 30 } },
-  "teams": [{ "id": "dev", "label": "Ruang Tim Dev" }]
+  "roster": [{ "id": "dev", "name": "Bima", "role": "SDLC LEAD", "team": "dev" }],
+  "layout": {
+    "floor": { "w": 40, "d": 30 },
+    "grid": { "dx": 4.5, "dz": 4.0 },
+    "aisle": 1.6
+  },
+  "teams": [{ "id": "dev", "label": "Tim Dev" }]
 }
 ```
 
-Roster diturunkan dari profil yang ditemukan: id profil jadi `id`, namanya
-default = id, peran default `Agen`, tim ditebak dari nama (`default` → pendopo,
-`edu*` → edu, sisanya dev). Override berlapis, prioritas dari atas:
-`OFFICE_ROSTER_JSON` → file `OFFICE_ROSTER` → roster instance upstream (mode
-`remote`) → default. Desain lengkapnya ada di `deploy/roster.example.yaml`;
-file YAML-nya subset sederhana (daftar `- id:` + `name/role/team`), JSON dengan
-bentuk sama juga diterima, dan keluaran `/api/config` bisa langsung dipakai
-ulang sebagai file roster.
+**Tim memakai id ruangan yang digambar frontend: `lobby`, `dev`, `edu`.**
+`pendopo` masih diterima di file roster sebagai alias `lobby`.
+
+Roster diturunkan dari profil yang ditemukan. Profil yang ada di roster bawaan
+(`DefaultAgents`, 11 profil) memakai nama/peran/tim aslinya — Galuh, Bima, dst.
+Profil lain dapat `name = id`, peran `Agen`, dan tim ditebak dari nama
+(`default`/`lobby` → `lobby`, `edu*` → `edu`, sisanya `dev`). Override berlapis,
+prioritas dari atas: `OFFICE_ROSTER_JSON` → file `OFFICE_ROSTER` → roster
+instance upstream (mode `remote`) → roster bawaan. Override bersifat per-field:
+menyebut `name` saja tidak menghapus peran/tim bawaan.
+
+`tz` di roster (atau di upstream) menang atas `OFFICE_TZ` dan dipakai loader
+untuk batas hari — jadi zona yang salah tidak lagi diabaikan diam-diam. Zona
+yang tidak dikenal membuat proses berhenti dengan `exit 2`.
+
+Desain lengkapnya ada di `deploy/roster.example.yaml`. File YAML-nya subset
+sederhana: daftar `- id:` (boleh di kolom 0, boleh diindentasi) plus
+`name/role/team`, `agents: []` untuk daftar kosong, dan `#` komentar. JSON
+dengan bentuk sama juga diterima, dan keluaran `/api/config` bisa langsung
+dipakai ulang sebagai file roster.
+
+Id roster wajib `^[a-zA-Z0-9_-]+$`. Id menjadi nama folder di
+`$HERMES_HOME/profiles/` dan bagian dari DSN SQLite, jadi `../../tmp/leak`
+ditolak saat load (`exit 2`), bukan dipakai sebagai path.
+
+#### Agen baru tanpa meja
+
+Frontend tidak butuh meja yang digambar tangan. Untuk setiap agen di roster
+yang tidak ada di `agents.ts`:
+
+- **Meja** ditempatkan otomatis pada lattice **4.5 × 4.0** yang sama dengan meja
+  lain, di blok bebas terdekat dari timnya, dengan sirkulasi **≥ 1.6** ke
+  dinding, furnitur, meja lain, dan jalur jalan (`lib/layout.ts`).
+- **Tampilan** (`look`) dihasilkan deterministik dari hash FNV-1a id-nya, memakai
+  palet warna yang sudah ada — id yang sama selalu menghasilkan orang yang sama,
+  tanpa file konfigurasi.
+- Agen lama tidak berubah sama sekali: meja dan tampilannya tetap yang
+  digambar tangan (dijaga `verify/roster_check.ts`).
 
 ### Federasi (`OFFICE_SOURCE=remote`)
 
@@ -275,12 +328,39 @@ kantor kosong yang menyesatkan. Status agen tetap dibaca dari `state.db` di
 instance pemilik data: API Hermes sendiri (`/v1/chat/completions`, `/v1/models`,
 …) tidak punya endpoint status sesi, jadi tidak bisa dijadikan sumber langsung.
 
+`PROFILES` diabaikan di mode ini: daftar meja datang dari upstream, bukan dari
+env lokal. Instance lama yang belum punya `/api/config` tetap bisa dipakai —
+roster jatuh kembali ke `agents` di `/api/status`, dengan nama/peran bawaan dari
+`DefaultAgents` (jadi `dev` tetap tampil sebagai Bima). Upstream yang lebih tua
+dari versi ini karena itu tidak perlu di-upgrade lebih dulu.
+
 ## Verifikasi
 
 ```bash
-cd backend  && go vet ./... && go test ./...          # 68 test, semua lulus
+cd backend  && go vet ./... && go test ./...          # 110 test, semua lulus
 cd frontend && npx tsc --noEmit && npm run build      # dist/ (1,04 MB, 289 kB gzip)
 python3 verify/shoot.py                               # screenshot + cek layout
+```
+
+Pemeriksaan roster & tata letak (tanpa browser):
+
+```bash
+frontend/node_modules/.bin/esbuild verify/layout_check.ts --bundle \
+  --format=esm --platform=node --outfile=/tmp/layout_check.mjs && node /tmp/layout_check.mjs
+frontend/node_modules/.bin/esbuild verify/roster_check.ts --bundle \
+  --format=esm --platform=node --outfile=/tmp/roster_check.mjs && node /tmp/roster_check.mjs
+```
+
+`layout_check` membuktikan grid 4.5 × 4.0, sirkulasi ≥ 1.6, dan nav graph bebas
+furnitur. `roster_check` membuktikan `/api/config` menggerakkan kantor: meja
+lama tidak bergeser, agen baru dapat meja di lattice dengan sirkulasi ≥ 1.6,
+penempatannya deterministik, dan `look` stabil per id.
+
+Uji end-to-end terhadap binary sungguhan (roster override, tz tak dikenal,
+URL ber-kredensial, DB gagal dibuka, aset hilang, federasi ke instance lama):
+
+```bash
+bash verify/e2e_review.sh      # 51 pemeriksaan, butuh binary di /workspace/.gotmp/bin
 ```
 
 Hasil terakhir: `go vet` bersih, `go test` ok di api/derive/store, `tsc --noEmit`

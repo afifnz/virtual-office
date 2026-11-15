@@ -25,11 +25,13 @@ services:
       OFFICE_SOURCE: ${OFFICE_SOURCE:-local}
       OFFICE_TITLE: ${OFFICE_TITLE:-Agent Office}
       OFFICE_TZ: ${OFFICE_TZ:-Asia/Jakarta}
-      # Optional roster override (JSON or YAML), see deploy/roster.example.yaml:
-      # OFFICE_ROSTER: /config/roster.yaml
+      # Optional roster override (JSON or YAML), see deploy/roster.example.yaml.
+      # Both are passed through from your shell; empty means "no override".
+      OFFICE_ROSTER: ${OFFICE_ROSTER:-}
+      OFFICE_ROSTER_JSON: ${OFFICE_ROSTER_JSON:-}
       # Federation: point this office at another one, no local state.db needed.
-      # OFFICE_SOURCE: remote
-      # REMOTE_API_URL: https://office.example.com
+      # The URL is only ever read by the HTTP client; it is published redacted.
+      REMOTE_API_URL: ${REMOTE_API_URL:-}
     volumes:
       # ~/.hermes on the host, mounted read-only. Compose expands $HOME; if you
       # prefer, replace the whole value with an absolute path or use
