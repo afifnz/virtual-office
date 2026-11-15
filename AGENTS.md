@@ -115,6 +115,10 @@ bash verify/e2e_review.sh          # 51 pemeriksaan end-to-end terhadap binary s
 - Perubahan **layout/avatar/scene**: sertakan screenshot (desktop 1280×800 + mobile 390×844)
   **dan** verdict `vision_analyze`. Klaim "lebih rapi/lebih cantik" tanpa gambar tidak diterima.
 - Perubahan **API**: sertakan `curl` nyata (health, config, status) sebelum/sesudah.
+- **CI** (`.github/workflows/ci.yml`) menjalankan job `backend` (gofmt, vet, test), `frontend`
+  (tsc, build), dan `e2e` di setiap PR. Branch protection `main` **mewajibkan ketiganya hijau**;
+  PR merah tidak bisa di-merge — perbaiki, jangan diakali. Cek: `gh pr checks <n>`. CI hijau
+  tidak menggantikan screenshot untuk perubahan visual.
 - Perubahan **UI**: cek juga bahwa dengan API mati kantor tetap menampilkan roster offline
   (fallback seed), bukan ruangan kosong.
 
@@ -177,6 +181,18 @@ Atau: `bash ~/.hermes/scripts/deploy-virtual-office.sh --rollback`.
 `/api/health` → `commit` harus sama dengan `git log -1`, `dbs_err: 0`, `degraded: false`;
 `/api/config` hidup; bundle `/assets/index-*.js` berganti; header `X-Office-Commit` cocok.
 
+**Build sebelum deploy** — skrip deploy tidak mem-build. Dari sandbox, di commit yang akan dikirim:
+
+```bash
+C=$(git rev-parse --short=7 HEAD); T=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cd backend && CGO_ENABLED=0 GOTMPDIR=/workspace/.gotmp TMPDIR=/workspace/.gotmp go build -trimpath \
+  -ldflags "-s -w -X officeapi/internal/api.BuildCommit=$C -X officeapi/internal/api.BuildTime=$T" \
+  -o ../deploy/office-api ./cmd/office-api
+cd ../frontend && npm ci && npm run build
+```
+
+Tanpa `-X …BuildCommit`, `/api/health` melapor `commit: "dev"` dan deploy tidak bisa dibuktikan.
+
 ---
 
 ## 8. Jebakan yang sudah menggigit (baca sebelum menyalahkan kode)
@@ -190,6 +206,9 @@ Atau: `bash ~/.hermes/scripts/deploy-virtual-office.sh --rollback`.
 | `gateway.state = unknown` | kunci aslinya `gateway_state`, versinya `code_version` | sudah ditangani loader; jangan "perbaiki" dengan `state`/`version` |
 | Scene hitam di screenshot headless | WebGL di software rasterizer | `--use-gl=swiftshader --enable-unsafe-swiftshader`, viewport kecil, tunggu ~5 s |
 | `ModuleNotFoundError` saat `go run` | dijalankan dari direktori salah | jalankan dari `backend/`, pakai `./cmd/office-api` |
+| `/api/status` "telat" ≤2 s, `now` sama di beberapa request | snapshot sengaja di-cache 2 s (`SnapshotTTL`, `source/local.go`) agar penonton tidak melipatgandakan pembacaan `state.db` | normal; jangan dihapus. `/api/health` tidak di-cache |
+| Journal tidak lagi berisi `info snapshot` | log itu kini di belakang `LOG_REQUESTS=1` | set `LOG_REQUESTS=1` saat debug |
+| `hermes_home`/`home` tampil `~/.hermes` | `config.ShownHome` menyembunyikan nama akun di endpoint publik | disengaja; jangan "perbaiki" jadi path penuh |
 | Avatar tenggelam/melayang | bone kaki pack Quaternius menempel ke `Body` | pose diselesaikan di `human.ts` terhadap kursi + lantai; jangan set sudut manual |
 
 ---
