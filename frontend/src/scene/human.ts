@@ -304,6 +304,26 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     if (BONE_LOOKUP.has(key)) bones[key] = b
   })
 
+  /**
+   * A wider frame. Inflating the skin thickens a limb but leaves the shoulder
+   * and hip joints where the pack put them, so the figure only gets deeper, not
+   * broader. Nudging the two top joints of each limb outwards widens the
+   * shoulder line and the stance; the pose solver aims from the joints, so the
+   * hands still land on the keys and the feet on the floor.
+   */
+  const spread = (bone: THREE.Bone | undefined, dx: number) => {
+    const parent = bone?.parent
+    if (!bone || !parent) return
+    parent.updateWorldMatrix(true, false)
+    const at = bone.getWorldPosition(new THREE.Vector3())
+    at.x += dx
+    bone.position.copy(parent.worldToLocal(at))
+  }
+  spread(bones[BONES.armL], SHOULDER_SPREAD)
+  spread(bones[BONES.armR], -SHOULDER_SPREAD)
+  spread(bones[BONES.thighL], HIP_SPREAD)
+  spread(bones[BONES.thighR], -HIP_SPREAD)
+
   root.updateMatrixWorld(true)
   const box = new THREE.Box3().setFromObject(root)
   const height = box.max.y - box.min.y
@@ -467,6 +487,8 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
   const ws = new THREE.Vector3()
   for (const mesh of packMeshes) {
     mesh.geometry = smoothGeometry(mesh.geometry)
+    // then give the body its volume, before the outline is grown from the normals
+    if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) mesh.geometry = fullerGeometry(mesh as THREE.SkinnedMesh)
     const old = mesh.material as THREE.Material
     mesh.material = toToon(old)
     if (mesh.material !== old) old.dispose()
@@ -492,6 +514,107 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     metrics,
   }
 }
+
+/**
+ * How much fuller each bone's flesh is than the pack's own (1 = untouched).
+ * The packs are authored as skinny mannequins: at dashboard distance the
+ * shoulders read narrower than the hijab and the forearms are sticks. Adding
+ * volume to the *skin* rather than to the bones keeps every joint where the
+ * pose solver put it — hands still land on the keys, feet still on the floor.
+ */
+const VOLUME: ReadonlyArray<readonly [RegExp, number]> = [
+  [/^hips$/i, 1.24],
+  [/^abdomen$/i, 1.23],
+  [/^torso$/i, 1.23],
+  [/^chest$/i, 1.23],
+  [/^shoulder[lr]$/i, 1.3],
+  [/^upperarm[lr]$/i, 1.3],
+  [/^lowerarm[lr]$/i, 1.24],
+  [/^upperleg[lr]$/i, 1.22],
+  [/^lowerleg[lr]$/i, 1.22],
+  [/^foot[lr]$/i, 1.1],
+]
+
+function volumeFor(bone: string): number {
+  const name = normBone(bone)
+  for (const [re, k] of VOLUME) if (re.test(name)) return k
+  return 1
+}
+
+const fullerCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>()
+
+/**
+ * Push every vertex away from the bone it is weighted to, perpendicular to
+ * that bone's own axis. A limb gets thicker around its bone, the torso gets
+ * wider and deeper, and no bone gets longer: vertex offsets along the bone are
+ * left alone, so rig lengths, the seated IK and the floor contact are all
+ * unaffected. Weights are blended per vertex, so joints stay smooth.
+ *
+ * The result is cached per source geometry: every clone of a pack shares its
+ * geometry, and boneInverses (the bind pose) are identical for all of them.
+ */
+function fullerGeometry(mesh: THREE.SkinnedMesh): THREE.BufferGeometry {
+  const src = mesh.geometry
+  const hit = fullerCache.get(src)
+  if (hit) return hit
+  const g = src.clone()
+  const skel = mesh.skeleton
+  const pos = g.getAttribute('position') as THREE.BufferAttribute | undefined
+  const si = g.getAttribute('skinIndex') as THREE.BufferAttribute | undefined
+  const sw = g.getAttribute('skinWeight') as THREE.BufferAttribute | undefined
+  if (!pos || !si || !sw || !skel) return src
+
+  const n = skel.bones.length
+  const pivot: THREE.Vector3[] = []
+  const axis: THREE.Vector3[] = []
+  const k: number[] = []
+  const bind = new THREE.Matrix4()
+  const q = new THREE.Quaternion()
+  for (let i = 0; i < n; i++) {
+    // boneInverses are the inverse bind matrices, so inverting them gives the
+    // bone's own place in the geometry's bind space
+    bind.copy(skel.boneInverses[i]!).invert()
+    pivot.push(new THREE.Vector3().setFromMatrixPosition(bind))
+    q.setFromRotationMatrix(bind)
+    axis.push(new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize())
+    k.push(volumeFor(skel.bones[i]!.name))
+  }
+
+  const v = new THREE.Vector3()
+  const out = new THREE.Vector3()
+  const o = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i)
+    let wsum = 0
+    out.set(0, 0, 0)
+    for (let j = 0; j < 4; j++) {
+      const w = sw.getComponent(i, j)
+      if (w <= 0) continue
+      const b = si.getComponent(i, j)
+      const kk = k[b] ?? 1
+      // the part of the offset that runs along the bone is kept as it is;
+      // the rest grows by kk around the bone
+      o.copy(v).sub(pivot[b]!)
+      const par = o.dot(axis[b]!)
+      o.addScaledVector(axis[b]!, -par).multiplyScalar(kk).addScaledVector(axis[b]!, par)
+      out.addScaledVector(o, w).addScaledVector(pivot[b]!, w)
+      wsum += w
+    }
+    if (wsum > 0) out.divideScalar(wsum)
+    else out.copy(v)
+    pos.setXYZ(i, out.x, out.y, out.z)
+  }
+  pos.needsUpdate = true
+  g.computeVertexNormals()
+  g.computeBoundingSphere()
+  fullerCache.set(src, g)
+  return g
+}
+
+/** How far the shoulder joints move outwards, in model metres. */
+const SHOULDER_SPREAD = 0.013
+/** ... and the hip joints, so the stance is not a pair of sticks. */
+const HIP_SPREAD = 0.007
 
 /** Props the pack ships on its characters that an office has no use for. */
 const WEAPON = /pistol|gun|rifle|sword|knife|weapon/i

@@ -275,9 +275,7 @@ function blushTexture(): THREE.CanvasTexture {
  * ------------------------------------------------------------------ */
 
 /** how far the cloth floats off the skull */
-const CLOTH = 0.0105
-/** how far it dives behind the face inside the window */
-const CLOTH_IN = 0.018
+const CLOTH = 0.0125
 
 interface Ring {
   y: number
@@ -295,7 +293,9 @@ interface Ring {
 function hijabRings(h: HeadShape, f: Features): Ring[] {
   const rings: Ring[] = []
   const phiJaw = Math.acos(THREE.MathUtils.clamp(-0.62, -1, 1))
-  const N = 34
+  // enough rows that the window edge (which curves in theta) resolves into a
+  // clean line instead of a stair-step of alternating vertices
+  const N = 56
   for (let i = 0; i <= N; i++) {
     const phi = (i / N) * phiJaw
     const p = skullPoint(h, 0, phi, new THREE.Vector3())
@@ -306,9 +306,10 @@ function hijabRings(h: HeadShape, f: Features): Ring[] {
       rx: h.rx * s * tp.x + CLOTH,
       rz: h.rz * s * tp.z + CLOTH,
       cz: h.cz,
-      // a little fullness over the skull: zero at the crown, growing toward
-      // the jaw, so the crown is taut but the sides are not a helmet
-      fold: 0.021 * Math.sin(Math.min(Math.PI, phi * 1.02)) ** 1.15,
+      // gathers: none at the crown (the cloth is pulled taut there), then a
+      // few broad folds down the sides of the head. The old profile ramped to
+      // a single number for the whole cap, which left the skull a smooth shell.
+      fold: 0.0025 + 0.0075 * THREE.MathUtils.smoothstep(phi, 0.20, 0.95) ** 1.2,
       tone: 0,
     })
   }
@@ -318,15 +319,15 @@ function hijabRings(h: HeadShape, f: Features): Ring[] {
   // reading as a giraffe neck
   const neck: Array<[number, number, number, number, number]> = [
     // y, rx, rz, cz offset, fold
-    [-0.074, 0.056, 0.063, 0.004, 0.0],
+    [-0.074, 0.056, 0.063, 0.004, 0.006],
     [-0.090, 0.062, 0.068, 0.004, 0.008],
-    [-0.112, 0.070, 0.074, 0.003, 0.016],
-    [-0.140, 0.080, 0.080, 0.001, 0.026],
-    [-0.170, 0.094, 0.088, -0.002, 0.036],
-    [-0.200, 0.112, 0.098, -0.005, 0.046],
-    [-0.228, 0.132, 0.108, -0.008, 0.054],
-    [-0.250, 0.148, 0.117, -0.010, 0.060],
-    [-0.264, 0.157, 0.123, -0.010, 0.064],
+    [-0.112, 0.070, 0.074, 0.003, 0.010],
+    [-0.140, 0.080, 0.080, 0.001, 0.012],
+    [-0.170, 0.094, 0.088, -0.002, 0.013],
+    [-0.200, 0.112, 0.098, -0.005, 0.014],
+    [-0.228, 0.132, 0.108, -0.008, 0.015],
+    [-0.250, 0.148, 0.117, -0.010, 0.016],
+    [-0.268, 0.158, 0.124, -0.011, 0.016],
   ]
   for (const [dy, rx, rz, dz, fold] of neck) {
     rings.push({ y: h.cy + dy, rx, rz, cz: h.cz + dz, fold, tone: 1 })
@@ -335,20 +336,37 @@ function hijabRings(h: HeadShape, f: Features): Ring[] {
   return rings
 }
 
-/** soft vertical folds: ridges catch the light, valleys sit in shadow */
-function foldAt(theta: number, amp: number): number {
-  if (amp <= 0) return 0
-  return amp * (0.62 * Math.cos(7 * theta + 0.35) + 0.38 * Math.cos(11 * theta + 1.15))
+/**
+ * The cloth's relief in metres. Three things live here, all of them sums of
+ * broad gaussians and low harmonics so the result stays soft:
+ *  - gathers pulled down from the crown (they exist at the crown too, which is
+ *    what stops the top of the head reading as a moulded dome);
+ *  - one deeper fold on the left, the way a scarf is tucked over one shoulder;
+ *  - two long folds running down the front of the drape.
+ */
+function clothFold(theta: number, dy: number, droop: number, amp: number): number {
+  // `amp` is in metres: a couple of millimetres over the skull, a centimetre
+  // and a half where the cloth hangs. Radii are untouched, so the head keeps
+  // its shape and only the surface breathes.
+  const gather = 0.55 * Math.cos(3 * theta + 0.7 + dy * 2.2) + 0.45 * Math.cos(5 * theta + 2.3 - dy * 1.5)
+  const asym = 0.45 * Math.cos(2 * theta - 0.85) * (0.35 + 0.65 * droop)
+  const G = (d: number, s: number) => Math.exp(-(d * d) / (2 * s * s))
+  // two long folds over the chest, either side of the centre
+  const chest = -0.95 * (G(theta - 0.62, 0.22) + G(theta + 0.62, 0.22)) * droop ** 1.5
+  return THREE.MathUtils.clamp(amp * (gather + asym + chest), -0.018, 0.018)
 }
 
 /**
  * Where the face window sits, as a signed distance in metres: positive
- * inside. The window is widest at the cheekbones, has a flat top edge across
- * the forehead and closes under the chin.
+ * inside. The window is widest at the cheekbones, its top edge arches over the
+ * brow and it closes under the chin.
  */
 function windowDist(h: HeadShape, f: Features, theta: number, y: number): number {
-  const yTop = f.browY + 0.021 - 0.0080 * Math.cos(theta)
-  const yBot = f.chinY + 0.004
+  // The cloth edge follows a hairline: it rides up over the middle of the
+  // forehead and dips at the temples, which is what gives the head a brow
+  // instead of a helmet brim.
+  const yTop = f.browY + 0.014 + 0.0070 * Math.cos(theta) * Math.abs(Math.cos(theta))
+  const yBot = f.chinY + 0.013
   const t = (yTop - y) / (yTop - yBot) // 0 at the top edge, 1 at the chin
   if (t < 0 || t > 1) {
     return -Math.min(Math.abs(t), Math.abs(t - 1)) * (yTop - yBot) - 0.0005
@@ -361,49 +379,97 @@ function windowDist(h: HeadShape, f: Features, theta: number, y: number): number
   return Math.min(dSide, dTop, 0.05)
 }
 
-function buildCloth(h: HeadShape, f: Features, base: THREE.Color, deep: THREE.Color) {
+function buildCloth(h: HeadShape, f: Features, base: THREE.Color, deep: THREE.Color): {
+  cloth: THREE.BufferGeometry
+  hem: THREE.Vector3[]
+  rim: THREE.Vector3[]
+  deep: THREE.Color
+} {
   const rings = hijabRings(h, f)
-  const SEG = 96
+  const SEG = 128
   const rows = rings.length
   const pos: number[] = []
   const col: number[] = []
   const idx: number[] = []
   const p = new THREE.Vector3()
   const n = new THREE.Vector3()
+  const colInside: number[] = []
+  const colPos: number[] = []
+  const hem: THREE.Vector3[] = []
+  const _tmpCloth = new THREE.Vector3()
+  // the point where the cloth crosses the skin, one per column: the rolled
+  // edge of the opening is built from these
+  const rim: THREE.Vector3[] = []
 
   for (let r = 0; r < rows; r++) {
     const ring = rings[r]!
-    const hem = r >= rows - 1
+    const last = r >= rows - 1
+    // 0 at the crown, 1 at the hem: gathers grow as the cloth hangs
+    const droop = THREE.MathUtils.clamp((h.cy + 0.02 - ring.y) / 0.28, 0, 1)
     for (let s = 0; s <= SEG; s++) {
       const theta = (s / SEG) * Math.PI * 2
-      const fold = foldAt(theta + (ring.y - h.cy) * 3.1, ring.fold)
-      const rx = ring.rx * (1 + fold)
-      const rz = ring.rz * (1 + fold)
-      const x = h.cx + Math.sin(theta) * rx
-      const z = ring.cz + Math.cos(theta) * rz
+      const x = h.cx + Math.sin(theta) * ring.rx
+      const z = ring.cz + Math.cos(theta) * ring.rz
       let y = ring.y
-      if (hem) y -= 0.010 * (0.5 + 0.5 * Math.cos(7 * theta + 0.35))
+      // the hem is not a level circle: one side hangs lower, the way a scarf
+      // tucked over a shoulder does
+      if (last) {
+        y -= 0.022 * (0.5 + 0.5 * Math.cos(2 * theta - 0.7))
+        y -= 0.010 * (0.5 + 0.5 * Math.cos(3 * theta + 1.4))
+        y -= 0.006 * (0.5 + 0.5 * Math.cos(6 * theta + 0.3))
+      }
 
-      // face window: the cloth dives behind the face inside the opening
+      // face window: inside the opening the cloth does not shrink radially
+      // (that left a skin gap under the chin and a flap over the brow) — it
+      // dives straight behind the face surface, so the rim is exactly where the
+      // two surfaces cross and nothing can float in front of the eyes.
       const d = windowDist(h, f, Math.atan2(x - h.cx, z - ring.cz), y)
-      const inside = THREE.MathUtils.smoothstep(d, -0.0030, 0.0030)
-      const shrink = Math.min(CLOTH_IN, rx * 0.62, rz * 0.62)
-      const off = CLOTH + (-CLOTH - shrink - CLOTH) * 0
-      const scale = (rx - inside * shrink) / rx
-      const scaleZ = (rz - inside * shrink) / rz
-      p.set(h.cx + (x - h.cx) * scale, y, ring.cz + (z - ring.cz) * scaleZ)
+      const inside = THREE.MathUtils.smoothstep(d, -0.0060, 0.0060)
+      p.set(x, y, z)
+      if (inside > 0) {
+        // dive radially: the cloth slides *under the skull surface* along the
+        // same direction, so it cannot fall behind the skin at the sides of the
+        // opening (a z-only dive did, and the jaw came out through the cloth)
+        const ux = x - h.cx
+        const uy = y - h.cy
+        const uz = z - h.cz
+        const len = Math.hypot(ux, uy, uz)
+        if (len > 1e-5) {
+          const nx = ux / len
+          const ny = uy / len
+          const nz = uz / len
+          const ry = y > h.cy ? h.ryUp : h.ryDown
+          // radius of the head's ellipsoid in this direction
+          const rr = 1 / Math.sqrt((nx / h.rx) ** 2 + (ny / ry) ** 2 + (nz / h.rz) ** 2)
+          const under = Math.max(0.004, rr - 0.008)
+          p.set(h.cx + nx * under, h.cy + ny * under, h.cz + nz * under)
+          p.lerpVectors(_tmpCloth.set(x, y, z), p, inside)
+        }
+      }
 
+      // gathers push the cloth out along its own normal, and they are held flat
+      // where the cloth meets the face, so the rim stays a clean seam; a normal
+      // fold (unlike a radius one) also survives at the crown, which is what
+      // stops the top of the head reading as a moulded dome
+      // over the crown the cloth may only swell outwards: a groove there would
+      // dip below the skull's own pole and let a spot of skin poke through
+      const raw = clothFold(theta, y - h.cy, droop, ring.fold)
+      const fold = (y > h.cy ? Math.max(0, raw) : raw) * (1 - inside)
+      skullNormal(h, p, n)
+      p.addScaledVector(n, fold)
+      if (last) hem.push(p.clone())
+      colInside.push(inside)
+      colPos.push(p.x, p.y, p.z)
       pos.push(p.x, p.y, p.z)
 
-      // tone: the cap is lighter, the drape deeper; ridges catch light
+      // tone: the cap is lighter, the drape deeper; ridges catch light and the
+      // valleys between them sit in shadow, which is what reads as cloth
       const tone = base.clone().lerp(deep, ring.tone * 0.55)
-      const ridge = ring.fold > 0 ? fold / ring.fold : 0
-      const lipShade = 1 - 0.42 * inside * (1 - inside) * 4
-      const occl = 1 - 0.10 * THREE.MathUtils.clamp((h.cy - 0.055 - y) / 0.20, 0, 1)
-      const k = occl * (1 + 0.17 * ridge) * lipShade
+      const ridge = ring.fold > 0 ? THREE.MathUtils.clamp(fold / (ring.fold * 1.4), -1, 1) : 0
+      const lipShade = 1 - 0.26 * inside * (1 - inside) * 4
+      const occl = 1 - 0.14 * THREE.MathUtils.clamp((h.cy - 0.055 - y) / 0.20, 0, 1)
+      const k = occl * (1 + 0.26 * ridge) * lipShade
       col.push(tone.r * k, tone.g * k, tone.b * k)
-      void off
-      void n
     }
   }
   const stride = SEG + 1
@@ -435,7 +501,31 @@ function buildCloth(h: HeadShape, f: Features, base: THREE.Color, deep: THREE.Co
       nor.setXYZ(b, nx / l, ny / l, nz / l)
     }
   }
-  return cloth
+  // the rim: for every column, walk down from the crown to the first vertex the
+  // window swallows and interpolate the crossing. Those points are the top edge
+  // of the opening; a thin tube along them gives the cloth a visible thickness
+  // instead of a painted-on boundary. Columns are visited from the nape so the
+  // arc over the brow comes out as one contiguous run.
+  const left: THREE.Vector3[] = []
+  for (let k = 0; k < SEG; k++) {
+    const s2 = (SEG / 2 + k) % SEG
+    for (let r = 1; r < rows; r++) {
+      const v0 = colInside[(r - 1) * stride + s2]!
+      const v1 = colInside[r * stride + s2]!
+      if (v1 <= 0.5) continue
+      const t = v0 >= 0.5 ? 0 : (0.5 - v0) / Math.max(1e-6, v1 - v0)
+      const a = ((r - 1) * stride + s2) * 3
+      const b = (r * stride + s2) * 3
+      left.push(new THREE.Vector3(
+        colPos[a]! + (colPos[b]! - colPos[a]!) * t,
+        colPos[a + 1]! + (colPos[b + 1]! - colPos[a + 1]!) * t,
+        colPos[a + 2]! + (colPos[b + 2]! - colPos[a + 2]!) * t,
+      ))
+      break
+    }
+  }
+  if (left.length > 6) rim.push(...left)
+  return { cloth, hem, rim, deep }
 }
 
 /* ------------------------------------------------------------------ *
@@ -478,12 +568,16 @@ export function buildHijabHead(look: Look, l: FaceLandmarks): StylizedHead {
     }
     skullGeo.computeVertexNormals()
   }
-  group.add(new THREE.Mesh(skullGeo, skin))
+  const skullMesh = new THREE.Mesh(skullGeo, skin)
+  skullMesh.name = 'galuhSkull'
+  group.add(skullMesh)
 
   /* ---- neck stub: never a hole under the jaw -------------------- */
   {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.040, 0.048, 0.12, 20, 1, true), skin)
-    m.position.set(h.cx, f.chinY - 0.030, h.cz - 0.014)
+    // narrow at the top: a wide stub surfaces at the jaw line as a skin lobe
+    // that pokes out over the hijab edge
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.029, 0.044, 0.12, 20, 1, true), skin)
+    m.position.set(h.cx, f.chinY - 0.040, h.cz - 0.014)
     group.add(m)
   }
 
@@ -684,49 +778,88 @@ export function buildHijabHead(look: Look, l: FaceLandmarks): StylizedHead {
   }
   group.add(new THREE.Mesh(mergeParts(browParts), browMat))
 
-  /* ---- lips ---------------------------------------------------- */
+  /* ---- lips ----------------------------------------------------
+   * The lips are a patch laid ON the face surface, not two volumes stuck in
+   * front of it: every vertex is placed at faceZ(x, y) plus at most 1.6 mm, so
+   * from the side the mouth can never break the profile, and the two halves are
+   * generated from the same |u| profile, so they are symmetric by construction.
+   * The shape is a painter's mouth: thin upper lip with a soft cupid's bow, a
+   * fuller lower lip, and a hairline crease where they meet.
+   */
   const lipMat = new THREE.MeshStandardMaterial({
-    color: '#b06a68',
-    roughness: 0.40,
+    color: '#b3605f',
+    roughness: 0.46,
     metalness: 0,
-    emissive: new THREE.Color('#b06a68').multiplyScalar(0.10),
+    side: THREE.DoubleSide,
+    emissive: new THREE.Color('#b3605f').multiplyScalar(0.08),
     emissiveIntensity: 1,
   })
-  const mouthMat = new THREE.MeshStandardMaterial({ color: '#7a3835', roughness: 0.6, side: THREE.DoubleSide })
-  const lipParts: Array<{ g: THREE.BufferGeometry; m: THREE.Matrix4 }> = []
-  const mouthW = h.rx * 0.275
-  const lipZ = faceZ(h, f, h.cx, f.mouthY) - 0.0022
-  for (const s of [-1, 1] as const) {
-    lipParts.push({
-      g: new THREE.SphereGeometry(1, 20, 14),
-      m: new THREE.Matrix4().compose(
-        new THREE.Vector3(h.cx + s * mouthW * 0.40, f.mouthY + 0.0024, lipZ + 0.0024),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, s * 0.18)),
-        new THREE.Vector3(mouthW * 0.56, 0.0042, 0.0040),
-      ),
-    })
-  }
-  lipParts.push({
-    g: new THREE.SphereGeometry(1, 24, 16),
-    m: new THREE.Matrix4().compose(
-      new THREE.Vector3(h.cx, f.mouthY - 0.0050, lipZ + 0.0020),
-      new THREE.Quaternion(),
-      new THREE.Vector3(mouthW * 0.76, 0.0052, 0.0044),
-    ),
+  const creaseMat = new THREE.MeshStandardMaterial({
+    color: '#9b4a44',
+    roughness: 0.65,
+    metalness: 0,
+    side: THREE.DoubleSide,
+    // the crease lies 0.2 mm above lips that start at 0 mm: without the offset
+    // the two patches fight over the same depth and speckle
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
   })
-  group.add(new THREE.Mesh(mergeParts(lipParts), lipMat))
+  const mouthW = h.rx * 0.30
+  // the line between the lips: a shallow smile, its corners a hair higher
+  const lineY = (u: number) => f.mouthY - 0.0012 * (1 - u * u)
+  // both lips taper to nothing at the corners, so there is no visible edge
+  const taper = (u: number, p: number) => Math.pow(Math.max(0, 1 - u * u), p)
+  const upperH = (u: number) => (0.0048 - 0.0009 * Math.exp(-(u * u) / 0.018)) * taper(u, 0.60)
+  const lowerH = (u: number) => 0.0076 * taper(u, 0.72)
 
-  const mouthPts: THREE.Vector3[] = []
-  const mouthWid: number[] = []
-  for (let i = 0; i <= 14; i++) {
-    const t = i / 14
-    const a = (t - 0.5) * 2
-    const x = h.cx + a * mouthW * 0.80
-    const y = f.mouthY - 0.0014 + Math.pow(Math.abs(a), 2.1) * 0.0038
-    mouthPts.push(new THREE.Vector3(x, y, faceZ(h, f, x, y) + 0.0032))
-    mouthWid.push(0.0018 * (1 - 0.3 * Math.abs(a)))
+  /** a band of the face between two height profiles, lifted a hair off the skin */
+  const faceBand = (
+    y0: (u: number) => number,
+    y1: (u: number) => number,
+    lift: number,
+    rows: number,
+  ): THREE.BufferGeometry => {
+    const cols = 28
+    const pos: number[] = []
+    const idx: number[] = []
+    for (let iy = 0; iy <= rows; iy++) {
+      const v = iy / rows
+      for (let ix = 0; ix <= cols; ix++) {
+        const u = (ix / cols) * 2 - 1
+        const x = h.cx + u * mouthW
+        const y = y0(u) + (y1(u) - y0(u)) * v
+        // the lift peaks in the middle of the band and dies at both edges
+        const d = lift * Math.sin(Math.PI * v) ** 0.85 * taper(u, 0.45)
+        pos.push(x, y, faceZ(h, f, x, y) + d)
+      }
+    }
+    for (let iy = 0; iy < rows; iy++) {
+      for (let ix = 0; ix < cols; ix++) {
+        const a = iy * (cols + 1) + ix
+        idx.push(a, a + 1, a + cols + 1, a + 1, a + cols + 2, a + cols + 1)
+      }
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    g.setIndex(idx)
+    g.computeVertexNormals()
+    return g
   }
-  group.add(new THREE.Mesh(ribbon(mouthPts, mouthWid, new THREE.Vector3(0, 1, 0)), mouthMat))
+
+  // lower lip first (bottom edge up to the line), then the upper (line up to
+  // its edge): both are built in rising y, so normals face the viewer
+  const lipLower = new THREE.Mesh(faceBand((u) => lineY(u) - lowerH(u), lineY, 0.0012, 6), lipMat)
+  lipLower.name = 'galuhLipsLower'
+  const lipUpper = new THREE.Mesh(faceBand(lineY, (u) => lineY(u) + upperH(u), 0.0008, 5), lipMat)
+  lipUpper.name = 'galuhLipsUpper'
+  // the crease: a darker hairline, flush with the skin under both lips
+  const crease = new THREE.Mesh(
+    faceBand((u) => lineY(u) - 0.00065, (u) => lineY(u) + 0.00065, 0.0002, 2),
+    creaseMat,
+  )
+  crease.name = 'galuhMouthLine'
+  group.add(lipLower, lipUpper, crease)
 
   /* ---- blush: a soft decal on each cheek ----------------------- */
   {
@@ -734,13 +867,13 @@ export function buildHijabHead(look: Look, l: FaceLandmarks): StylizedHead {
     map: blushTexture(),
     transparent: true,
     depthWrite: false,
-    opacity: 0.55,
+    opacity: 0.46,
     side: THREE.DoubleSide,
   })
   for (const s of [-1, 1] as const) {
-    const cxp = h.cx + s * 0.050
-    const cyp = f.mouthY + 0.018
-    const R = 0.030
+    const cxp = h.cx + s * 0.048
+    const cyp = f.mouthY + 0.013
+    const R = 0.024
     const N = 8
     const pos: number[] = []
     const uv: number[] = []
@@ -783,7 +916,30 @@ export function buildHijabHead(look: Look, l: FaceLandmarks): StylizedHead {
     emissive: new THREE.Color(base).multiplyScalar(0.05),
     emissiveIntensity: 1,
   })
-  group.add(new THREE.Mesh(buildCloth(h, f, base, deep), clothMat))
+  const built = buildCloth(h, f, base, deep)
+  group.add(new THREE.Mesh(built.cloth, clothMat))
+  // the edge of the opening, rolled like a hemmed seam: a thin tube fixes the
+  // boundary where the cloth crosses the skin and gives it real thickness
+  if (built.rim.length > 8) {
+    const edgeCurve = new THREE.CatmullRomCurve3(built.rim, false, 'centripetal')
+    const edgeMat = new THREE.MeshStandardMaterial({
+      color: base.clone().multiplyScalar(0.94),
+      roughness: 0.95,
+      metalness: 0,
+    })
+    group.add(new THREE.Mesh(new THREE.TubeGeometry(edgeCurve, built.rim.length * 2, 0.0020, 6, false), edgeMat))
+  }
+  if (built.hem.length > 3) {
+    const curve = new THREE.CatmullRomCurve3(built.hem, true, 'centripetal')
+    const hemMat = new THREE.MeshStandardMaterial({
+      color: built.deep,
+      roughness: 0.95,
+      metalness: 0,
+      emissive: built.deep.clone().multiplyScalar(0.04),
+      emissiveIntensity: 1,
+    })
+    group.add(new THREE.Mesh(new THREE.TubeGeometry(curve, built.hem.length, 0.0055, 6, true), hemMat))
+  }
 
   return {
     group,
@@ -820,8 +976,10 @@ export function buildSleeves(rig: Rig, color: string): THREE.Object3D[] {
   }
 
   for (const side of [-1, 1] as const) {
-    along(side < 0 ? BONES.armL : BONES.armR, rig.metrics.upperArm * 1.03, 0.050, 0.042)
-    along(side < 0 ? BONES.foreL : BONES.foreR, rig.metrics.foreArm * 1.05, 0.041, 0.031)
+    // the arm flesh underneath is up to 30% thicker (human.ts VOLUME), so the
+    // sleeve has to grow with it or the skin pokes through at the shoulder
+    along(side < 0 ? BONES.armL : BONES.armR, rig.metrics.upperArm * 1.03, 0.061, 0.051)
+    along(side < 0 ? BONES.foreL : BONES.foreR, rig.metrics.foreArm * 1.05, 0.050, 0.038)
 
     const elbow = rig.bones[side < 0 ? BONES.foreL : BONES.foreR]
     if (elbow) {
@@ -829,7 +987,7 @@ export function buildSleeves(rig: Rig, color: string): THREE.Object3D[] {
       const holder = new THREE.Group()
       holder.scale.setScalar(1 / s)
       elbow.add(holder)
-      const m = new THREE.Mesh(new THREE.SphereGeometry(0.042, 14, 10), mat)
+      const m = new THREE.Mesh(new THREE.SphereGeometry(0.052, 14, 10), mat)
       holder.add(m)
       meshes.push(holder)
     }

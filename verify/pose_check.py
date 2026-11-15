@@ -102,7 +102,9 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={"width": 1280, "height": 800})
     pg.on("pageerror", lambda e: print("PAGEERROR:", e))
     pg.goto(url, wait_until="load")
-    pg.wait_for_timeout(16000)
+    # 11 avatars + shader compile on a software rasteriser: 16 s flaked, 30 s
+    # is steady (AGENTS.md §8)
+    pg.wait_for_timeout(30000)
     rows = json.loads(pg.evaluate(PROBE))
     b.close()
 
