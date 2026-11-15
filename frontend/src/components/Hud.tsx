@@ -87,6 +87,14 @@ export function Hud({
               </button>
             )
           })}
+          <button
+            type="button"
+            className={`spot-btn ${spot === 'luar' ? 'is-active' : ''}`}
+            onClick={() => onSpot('luar')}
+            title="Tampak luar gedung"
+          >
+            Luar
+          </button>
         </nav>
 
         <div className="hud-actions">
