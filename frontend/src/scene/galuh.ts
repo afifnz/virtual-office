@@ -314,20 +314,28 @@ function hijabRings(h: HeadShape, f: Features): Ring[] {
     })
   }
 
-  // under the jaw the cloth does NOT hug the neck: it falls away from the
-  // jaw and widens onto the shoulders, which is what stops the silhouette
-  // reading as a giraffe neck
+  // Under the jaw the cloth does NOT hug the neck: it falls away from the jaw
+  // and widens onto the shoulders, which is what stops the silhouette reading
+  // as a giraffe neck. The first profile widened far too late — it was still
+  // 60-70 mm wide at y 1.48 (the jaw is 55 mm and the shoulder joints sit at
+  // +-140 mm around y 1.40), so 135 mm of narrow pink column hung between the
+  // chin and the shoulder line and read as one long neck. The flare now starts
+  // right under the jaw and reaches shoulder width by y 1.50, and the hem stops
+  // at the shoulder joint instead of 50 mm past it, so the cloth rests ON the
+  // shoulders. The cone stays a drape, not a collar: the radius only ever
+  // grows, and the per-ring fold amplitudes are untouched.
   const neck: Array<[number, number, number, number, number]> = [
     // y, rx, rz, cz offset, fold
-    [-0.074, 0.056, 0.063, 0.004, 0.006],
-    [-0.090, 0.062, 0.068, 0.004, 0.008],
-    [-0.112, 0.070, 0.074, 0.003, 0.010],
-    [-0.140, 0.080, 0.080, 0.001, 0.012],
-    [-0.170, 0.094, 0.088, -0.002, 0.013],
-    [-0.200, 0.112, 0.098, -0.005, 0.014],
-    [-0.228, 0.132, 0.108, -0.008, 0.015],
-    [-0.250, 0.148, 0.117, -0.010, 0.016],
-    [-0.268, 0.158, 0.124, -0.011, 0.016],
+    [-0.076, 0.055, 0.062, 0.004, 0.006],
+    [-0.089, 0.062, 0.068, 0.004, 0.008],
+    [-0.103, 0.076, 0.077, 0.003, 0.010],
+    [-0.119, 0.094, 0.087, 0.002, 0.012],
+    [-0.137, 0.113, 0.096, 0.001, 0.013],
+    [-0.157, 0.132, 0.104, -0.001, 0.014],
+    [-0.179, 0.149, 0.111, -0.003, 0.015],
+    [-0.203, 0.162, 0.117, -0.006, 0.016],
+    [-0.226, 0.180, 0.121, -0.008, 0.016],
+    [-0.252, 0.190, 0.124, -0.010, 0.016],
   ]
   for (const [dy, rx, rz, dz, fold] of neck) {
     rings.push({ y: h.cy + dy, rx, rz, cz: h.cz + dz, fold, tone: 1 })
@@ -404,8 +412,11 @@ function buildCloth(h: HeadShape, f: Features, base: THREE.Color, deep: THREE.Co
   for (let r = 0; r < rows; r++) {
     const ring = rings[r]!
     const last = r >= rows - 1
-    // 0 at the crown, 1 at the hem: gathers grow as the cloth hangs
-    const droop = THREE.MathUtils.clamp((h.cy + 0.02 - ring.y) / 0.28, 0, 1)
+    // 0 at the crown, 1 at the hem: gathers grow as the cloth hangs. The span
+    // is 0.24 rather than the old 0.28 because the hem now stops at the
+    // shoulder: normalising to the new drop keeps the existing fold depth
+    // instead of flattening the drape along with it.
+    const droop = THREE.MathUtils.clamp((h.cy + 0.02 - ring.y) / 0.24, 0, 1)
     for (let s = 0; s <= SEG; s++) {
       const theta = (s / SEG) * Math.PI * 2
       const x = h.cx + Math.sin(theta) * ring.rx
