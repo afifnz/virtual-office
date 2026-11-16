@@ -8,6 +8,10 @@ backend/*.test
 # local artefacts
 verify/*.png
 !verify/README.md
+# neck proof: only the compare sheets + iso are committed
+verify/neck/_*.png
+verify/neck/before-*.png
+verify/neck/after-*.png
 *.log
 .DS_Store
 
