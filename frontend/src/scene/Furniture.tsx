@@ -20,13 +20,6 @@ export function Furniture({ agents }: { agents: Agent[] }) {
       <ServerRack />
       <DevOpsCorner />
       <TaskBoard
-        x={-7.6}
-        z={-9.7}
-        title="SPRINT TIM DEV"
-        accent="#82aac8"
-        agents={agents.filter((a) => agentMeta(a.id).team === 'dev')}
-      />
-      <TaskBoard
         x={7.0}
         z={-9.7}
         title="PAPAN ADDIE"
@@ -36,8 +29,8 @@ export function Furniture({ agents }: { agents: Agent[] }) {
       <Bookshelf />
       <Lesehan />
       <Cat />
-      <Cabinet x={-12.6} z={0.9} accent="#82aac8" plate="BERKAS" />
-      <Cabinet x={12.0} z={0.9} accent="#deb860" plate="MATERI" />
+      <Cabinet x={-12.6} z={0.9} />
+      <Cabinet x={12.0} z={0.9} />
       <Entrance />
       <Rug shadows={[[-6.9, 6.4], [13.0, 5.4], [7.4, 6.6]]} />
     </group>
@@ -60,16 +53,8 @@ function Rug({ shadows }: { shadows: Array<[number, number]> }) {
 }
 
 function Reception() {
-  const plate = labelTexture({
-    text: 'RESEPSIONIS',
-    color: '#f6ecdb',
-    bg: 'rgba(46,31,23,0.9)',
-    border: '#d4805c',
-    px: 44,
-  })
   return (
-    // beside Ndoro Kakung's desk, its front turned to the entrance path (+x), so a
-    // visitor walking in sees the plate and nobody sits staring at its back
+    // beside Ndoro Kakung's desk, its front turned to the entrance path (+x)
     <group position={[-3.9, 0, 7.0]} rotation={[0, Math.PI / 2, 0]}>
       <mesh position={[0, 0.52, 0]}>
         <boxGeometry args={[2.6, 1.04, 0.62]} />
@@ -83,9 +68,6 @@ function Reception() {
         <boxGeometry args={[2.4, 0.7, 0.03]} />
         <meshStandardMaterial color="#8d6544" roughness={0.7} />
       </mesh>
-      <sprite position={[0, 1.28, 0.1]} scale={[0.9, 0.9 / plate.aspect, 1]}>
-        <spriteMaterial map={plate.tex} transparent depthWrite={false} />
-      </sprite>
       {/* vase */}
       <mesh position={[-1.0, 1.16, 0]}>
         <cylinderGeometry args={[0.07, 0.1, 0.2, 10]} />
@@ -284,13 +266,6 @@ function Lounge() {
 }
 
 function KopiCorner() {
-  const plate = labelTexture({
-    text: 'WARUNG KOPI',
-    color: '#f6ecdb',
-    bg: 'rgba(46,31,23,0.88)',
-    border: '#c08a52',
-    px: 40,
-  })
   return (
     <group position={[-13.5, 0, 5.4]} rotation={[0, Math.PI / 2, 0]}>
       <mesh position={[0, 0.52, 0]}>
@@ -301,9 +276,6 @@ function KopiCorner() {
         <boxGeometry args={[2.94, 0.06, 0.72]} />
         <meshStandardMaterial color="#b08a5c" roughness={0.6} />
       </mesh>
-      <sprite position={[0, 1.55, 0.05]} scale={[1.5, 1.5 / plate.aspect, 1]}>
-        <spriteMaterial map={plate.tex} transparent depthWrite={false} />
-      </sprite>
       {/* jars of kerupuk */}
       {[-0.9, -0.5, 0.9].map((x, i) => (
         <group key={x} position={[x, 1.1, 0]}>
@@ -389,19 +361,12 @@ function Gamelan() {
 }
 
 /**
- * Two-bay server rack in the dev room's back corner: dark steel, a vented door,
- * a column of blinking status LEDs and a plate above it — the devops desk sits
- * facing it, so the pair reads from the isometric camera as one corner.
+ * Two-bay server rack in the dev room's back corner: dark steel, a vented door
+ * and a column of blinking status LEDs — the devops desk sits facing it, so the
+ * pair reads from the isometric camera as one corner.
  */
 function ServerRack() {
   const leds = useRef<THREE.Group>(null)
-  const plate = labelTexture({
-    text: 'RAK SERVER',
-    color: '#f6ecdb',
-    bg: 'rgba(28,32,30,0.92)',
-    border: '#69b39b',
-    px: 44,
-  })
   useFrame((s) => {
     if (!leds.current) return
     const t = s.clock.elapsedTime
@@ -458,9 +423,6 @@ function ServerRack() {
         <cylinderGeometry args={[0.05, 0.05, 0.7, 8]} />
         <meshStandardMaterial color="#4a4d52" roughness={0.6} metalness={0.3} />
       </mesh>
-      <sprite position={[0, 2.86, 0.1]} scale={[1.5, 1.5 / plate.aspect, 1]}>
-        <spriteMaterial map={plate.tex} transparent depthWrite={false} />
-      </sprite>
     </group>
   )
 }
@@ -489,16 +451,8 @@ function DevOpsCorner() {
   )
 }
 
-/** A low teak filing cabinet with a labelled plate, for a corner that would
- *  otherwise be bare floor. */
-function Cabinet({ x, z, accent, plate }: { x: number; z: number; accent: string; plate: string }) {
-  const label = labelTexture({
-    text: plate,
-    color: '#f6ecdb',
-    bg: 'rgba(46,31,23,0.9)',
-    border: accent,
-    px: 40,
-  })
+/** A low teak filing cabinet, for a corner that would otherwise be bare floor. */
+function Cabinet({ x, z }: { x: number; z: number }) {
   return (
     <group position={[x, 0, z]}>
       <mesh position={[0, 0.44, 0]}>
@@ -515,9 +469,6 @@ function Cabinet({ x, z, accent, plate }: { x: number; z: number; accent: string
           <meshStandardMaterial color="#8a6142" roughness={0.7} />
         </mesh>
       ))}
-      <sprite position={[0, 1.18, 0.08]} scale={[0.8, 0.8 / label.aspect, 1]}>
-        <spriteMaterial map={label.tex} transparent depthWrite={false} />
-      </sprite>
     </group>
   )
 }

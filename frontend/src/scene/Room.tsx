@@ -33,8 +33,6 @@ export function Room() {
 
   const signs = {
     lobby: sign('PENDOPO', '#d4805c'),
-    dev: sign('RUANG TIM DEV', '#82aac8'),
-    edu: sign('RUANG TIM EDU', '#deb860'),
   }
 
   return (
@@ -93,13 +91,7 @@ export function Room() {
         )
       })}
 
-      {/* room signs, above the boards on the back walls and beside the entrance */}
-      <sprite position={[-7.6, 2.95, -9.78]} scale={[3.4, 3.4 / signs.dev.aspect, 1]}>
-        <spriteMaterial map={signs.dev.tex} transparent depthWrite={false} />
-      </sprite>
-      <sprite position={[7.0, 2.95, -9.78]} scale={[3.4, 3.4 / signs.edu.aspect, 1]}>
-        <spriteMaterial map={signs.edu.tex} transparent depthWrite={false} />
-      </sprite>
+      {/* the pendopo's name plate, beside the entrance */}
       <sprite position={[5.4, 2.55, 9.78]} scale={[3.0, 3.0 / signs.lobby.aspect, 1]}>
         <spriteMaterial map={signs.lobby.tex} transparent depthWrite={false} />
       </sprite>
