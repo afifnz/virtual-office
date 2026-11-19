@@ -68,18 +68,17 @@ export function useKPI(win: KpiWindowKey, enabled: boolean): KpiState {
 
     const clear = () => {
       if (timer.current !== null) {
-        globalThis.clearTimeout(timer.current)
+        globalThis.clearInterval(timer.current)
         timer.current = null
       }
     }
-    const schedule = () => {
-      clear()
-      timer.current = globalThis.setTimeout(() => tickRef.current(), REFRESH_MS)
-    }
 
-    // Fetch immediately, then once a minute while the panel stays open.
+    // Fetch immediately, then once a minute for as long as the panel stays
+    // open. An interval (not a single timeout) is what keeps a long-open panel
+    // fresh; the server cache makes the extra hits cheap.
     tick()
-    schedule()
+    clear()
+    timer.current = globalThis.setInterval(() => tickRef.current(), REFRESH_MS)
     return () => {
       alive.current = false
       clear()
