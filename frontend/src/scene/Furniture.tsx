@@ -32,7 +32,7 @@ export function Furniture({ agents }: { agents: Agent[] }) {
       <Cabinet x={-12.6} z={0.9} />
       <Cabinet x={12.0} z={0.9} />
       <Entrance />
-      <Rug shadows={[[-6.9, 6.4], [13.0, 5.4], [7.4, 6.6]]} />
+      <Rug shadows={[[13.0, 5.4], [7.4, 6.6]]} />
     </group>
   )
 }
@@ -54,7 +54,7 @@ function Rug({ shadows }: { shadows: Array<[number, number]> }) {
 
 function Reception() {
   return (
-    // beside Ndoro Kakung's desk, its front turned to the entrance path (+x)
+    // Ndoro Kakung's desk: he sits behind it, facing the entrance path (+x)
     <group position={[-3.9, 0, 7.0]} rotation={[0, Math.PI / 2, 0]}>
       <mesh position={[0, 0.52, 0]}>
         <boxGeometry args={[2.6, 1.04, 0.62]} />

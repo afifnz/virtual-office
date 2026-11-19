@@ -253,7 +253,7 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
     <>
       {/* desk, chair and lamp stay put */}
       <group position={[meta.desk.x, 0, meta.desk.z]} rotation={[0, meta.desk.rot, 0]}>
-        <Desk status={status} dim={status === 'offline'} />
+        {meta.deskFromFurniture ? null : <Desk status={status} dim={status === 'offline'} />}
         <group position={[0, 0, 0.42]}>
           <Chair dim={status === 'offline'} />
         </group>

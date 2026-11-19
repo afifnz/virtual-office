@@ -129,6 +129,24 @@ for (const [name, lead] of Object.entries(LEAD_DESKS)) {
   }
 }
 
+// ------------------------------------------------- reception desk (furniture)
+// The lobby has no desk mesh: Ndoro Kakung sits behind the reception counter,
+// whose footprint already stands in for his desk. Assert the placement instead
+// of measuring a second box on top of it.
+const counter = OBSTACLES.find((o) => o.id === 'resepsionis')
+const lobbyDesk = spotOf('default')
+if (!counter || !lobbyDesk) fail('meja resepsionis atau desk default tidak ada')
+else {
+  if (OBSTACLES.some((o) => o.id === 'desk-default')) fail('desk-default dobel dengan meja resepsionis')
+  const seatX = lobbyDesk.x + Math.sin(lobbyDesk.rot) * 0.42
+  const seatZ = lobbyDesk.z + Math.cos(lobbyDesk.rot) * 0.42
+  const cz = (counter.z1 + counter.z2) / 2
+  if (!near(lobbyDesk.rot, -Math.PI / 2)) fail(`default: rot ${lobbyDesk.rot.toFixed(2)}, harus -PI/2 (menghadap +x)`)
+  else if (seatX > counter.x1 - 0.2) fail(`default: kursi x ${seatX.toFixed(2)} menabrak meja resepsionis (${counter.x1})`)
+  else if (Math.abs(seatZ - cz) > 0.3) fail(`default: kursi z ${seatZ.toFixed(2)} tidak di tengah meja (${cz.toFixed(2)})`)
+  else ok(`default: Ndoro duduk di belakang meja resepsionis (kursi ${seatX.toFixed(2)},${seatZ.toFixed(2)}, rot ${lobbyDesk.rot.toFixed(2)})`)
+}
+
 // ------------------------------------------------------------ circulation
 const deskObs = OBSTACLES.filter((o) => o.id.startsWith('desk-'))
 let minClear = 99

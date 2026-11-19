@@ -32,6 +32,9 @@ export interface AgentMeta {
   desc: string
   look: Look
   desk: { x: number; z: number; rot: number }
+  /** The desk is a piece of furniture (the reception counter), not a desk mesh:
+   *  the actor draws only the chair and borrows the furniture's footprint. */
+  deskFromFurniture?: boolean
 }
 
 /**
@@ -47,6 +50,9 @@ export interface AgentMeta {
  * island: his desk stands on its short side, flush against the west face and
  * turned a quarter turn (rot -PI/2) so he faces his team. The devops desk
  * stands alone by the server rack.
+ *
+ * The lobby's one desk is the reception counter itself: Ndoro Kakung sits
+ * behind it (rot -PI/2 faces +x, the entrance path) and no desk mesh is drawn.
  */
 export const AGENTS: AgentMeta[] = [
   {
@@ -59,7 +65,9 @@ export const AGENTS: AgentMeta[] = [
       skin: '#d9a880', hair: '#241c18', style: 'crop', shirt: '#2f3d57', pants: '#2a2521',
       accent: '#b4553f', sculptedHead: true, mustache: true, build: 1.06, tall: 1.02,
     },
-    desk: { x: -6.9, z: 6.4, rot: Math.PI },
+    // behind the reception counter, facing +x: the entrance path
+    desk: { x: -4.3, z: 7.0, rot: -Math.PI / 2 },
+    deskFromFurniture: true,
   },
   {
     id: 'dev',

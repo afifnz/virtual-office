@@ -139,7 +139,7 @@ export interface Spot {
 }
 
 export const SPOTS: Record<string, Spot> = {
-  lobby: { id: 'lobby', label: 'Pendopo', pos: [-9.8, 2.4, 9.2], target: [-6.6, 0.9, 5.2], fov: 55 },
+  lobby: { id: 'lobby', label: 'Pendopo', pos: [-9.8, 2.4, 9.2], target: [-4.9, 1.0, 6.8], fov: 55 },
   dev: { id: 'dev', label: 'Tim Dev', pos: [-2.2, 5.6, 2.2], target: [-8.6, 0.3, -4.6], fov: 60 },
   edu: { id: 'edu', label: 'Tim Edu', pos: [12.4, 5.4, 2.6], target: [6.6, 0.3, -6.2], fov: 60 },
   tampak: { id: 'tampak', label: 'Tampak', pos: [0, 17, 18], target: [0, 0, -0.5], fov: 42 },
@@ -215,7 +215,7 @@ export const NAV: NavNode[] = [
   { id: 'lobby-e', x: 10.2, z: 3.5 },
   { id: 'lobby-wc', x: -12.3, z: 3.5 },
   { id: 'lobby-wm', x: -8.6, z: 3.5 },
-  { id: 'lobby-desk', x: -6.9, z: 4.6 },
+  { id: 'lobby-recep-back', x: -6.2, z: 7.2 },
   { id: 'lobby-recep', x: -2.2, z: 6.6 },
   { id: 'lobby-cat', x: 2.6, z: 6.6 },
   // dev room: front aisle (z -1.6), west aisle (x -12.42, behind the lead's
@@ -267,8 +267,8 @@ export const NAV_EDGES: Array<[string, string]> = [
   ['lobby-sc', 'lobby-se'],
   ['lobby-se', 'lobby-e'],
   ['lobby-e', 'lobby-ne'],
-  ['lobby-wm', 'lobby-desk'],
-  ['lobby-sw', 'lobby-desk'],
+  ['lobby-wm', 'lobby-recep-back'],
+  ['lobby-sw', 'lobby-recep-back'],
   ['lobby-c', 'lobby-recep'],
   ['lobby-sc', 'lobby-cat'],
   // into the team rooms
@@ -326,9 +326,14 @@ function deskObstacle(d: DeskSpot): Obstacle {
  * Everything on the floor a walker must not enter. Kept in one place so the
  * nav graph, the POIs and the layout check all agree with the scene.
  */
+const FURNITURE_DESKS = new Set(AGENTS.filter((a) => a.deskFromFurniture).map((a) => a.id))
+
 export const OBSTACLES: Obstacle[] = [
-  ...DESKS.map(deskObstacle),
+  // A desk that is a piece of furniture borrows that furniture's footprint
+  // instead of adding a second one on top of it.
+  ...DESKS.filter((d) => !FURNITURE_DESKS.has(d.id)).map(deskObstacle),
   // pendopo — big pieces hug the walls
+  // the reception counter is Ndoro Kakung's desk, not a separate obstacle
   { id: 'resepsionis', x1: -4.27, z1: 5.62, x2: -3.53, z2: 8.38 },
   { id: 'meja-rapat', x1: 5.8, z1: 5.5, x2: 9.0, z2: 7.7 },
   { id: 'meja-kopi', x1: -11.35, z1: 4.7, x2: -9.45, z2: 6.5 },

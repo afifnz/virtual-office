@@ -91,7 +91,13 @@ else ok('roster tz is applied to the client clock')
 
 // ------------------------------------- 3. grid, aisle and no overlap anywhere
 const all = rosterAgents()
-const allObstacles: Obstacle[] = [...WALL_OBSTACLES, ...OBSTACLES.filter((o) => !o.id.startsWith('desk-')), ...all.map((a) => deskObstacle(a.desk, a.id))]
+// A desk that is a piece of furniture borrows that furniture's footprint
+// (already in OBSTACLES), so no second box is added for it.
+const allObstacles: Obstacle[] = [
+  ...WALL_OBSTACLES,
+  ...OBSTACLES.filter((o) => !o.id.startsWith('desk-')),
+  ...all.filter((a) => !a.deskFromFurniture).map((a) => deskObstacle(a.desk, a.id)),
+]
 
 // Team desks sit in touching blocks (dev 3 x 2 + the lead's wing, edu 2 x 2):
 // inside a block the 1.6 aisle does not apply, everywhere else it does. Mirrors
@@ -102,7 +108,12 @@ const teammates = (id: string) => {
 }
 
 let minClear = 99
+let checked = 0
 for (const a of all) {
+  // his table is the reception counter: the counter's footprint is already in
+  // allObstacles, so measuring a desk box for him would double-count it
+  if (a.deskFromFurniture) continue
+  checked++
   const block = teammates(a.id)
   const clear = clearance({
     spot: a.desk,
@@ -114,7 +125,7 @@ for (const a of all) {
   minClear = Math.min(minClear, clear)
   if (clear < DEFAULT_GRID.aisle) fail(`${a.id}: aisle ${clear.toFixed(2)} < ${DEFAULT_GRID.aisle}`)
 }
-ok(`aisle: minimum ${minClear.toFixed(2)} for all ${all.length} desks`)
+ok(`aisle: minimum ${minClear.toFixed(2)} for ${checked} desks (+1 at the reception counter)`)
 
 // the hand-placed desks keep their blocks: dev 3 x 2, edu 2 x 2, tops touching
 const PITCH = 1.62
