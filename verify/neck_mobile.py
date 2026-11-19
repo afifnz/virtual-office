@@ -1,4 +1,4 @@
-"""Mobile 390x844 proof shot for the Galuh neck fix.
+"""Mobile 390x844 proof shot for the Ndoro Kakung neck fix.
 
     python3 neck_mobile.py before 5173
     python3 neck_mobile.py after  5188

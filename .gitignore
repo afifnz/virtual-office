@@ -19,5 +19,4 @@ deploy/office-api
 # local probe scripts
 _probe*.mjs
 verify/_probe.mjs
-verify/galuh_shot.py
 verify/layout_*.py

@@ -1,9 +1,9 @@
-"""Neck proof shots + model-space neck measurements for Galuh.
+"""Neck proof shots + model-space neck measurements for Ndoro Kakung.
 
     python3 neck_shot.py before 5173     # writes verify/neck/before-*.png + JSON
     python3 neck_shot.py after  5174
 
-Measures in model space (the unscaled pack space galuh.ts authors in), so the
+Measures in model space (the unscaled pack space ndoroKakung.ts authors in), so the
 numbers are comparable between builds regardless of camera:
   * chin->hem        : jaw bottom to the front hem of the drape (mm)
   * neck column      : jaw bottom to where the cloth first flares to shoulder
@@ -30,14 +30,14 @@ PROBE = r"""
 () => {
   const scene = window.__officeScene
   let head = null
-  scene.traverse(o => { if (o.name === 'galuhHead') head = o })
+  scene.traverse(o => { if (o.name === 'ndoroHead') head = o })
   if (!head) return null
   head.updateWorldMatrix(true, true)
   let skull = null, cloth = null
   head.traverse(o => {
     if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return
     if (o.material && o.material.vertexColors) cloth = o
-    if (o.name === 'galuhSkull') skull = o
+    if (o.name === 'ndoroSkull') skull = o
   })
   if (!skull || !cloth) return { err: 'missing mesh' }
   const sp = skull.geometry.attributes.position

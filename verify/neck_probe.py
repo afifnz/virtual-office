@@ -1,4 +1,4 @@
-"""Measure Galuh's neck + body shoulder in the head's model frame (mm).
+"""Measure Ndoro Kakung's neck + body shoulder in the head's model frame (mm).
 
     python3 neck_probe.py 5173
 """
@@ -15,7 +15,7 @@ PROBE = r"""
 () => {
   const scene = window.__officeScene
   let head = null
-  scene.traverse(o => { if (o.name === 'galuhHead') head = o })
+  scene.traverse(o => { if (o.name === 'ndoroHead') head = o })
   if (!head) return null
   head.updateWorldMatrix(true, true)
   const inv = head.matrixWorld.clone().invert()

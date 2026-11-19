@@ -1,4 +1,4 @@
-"""Before/after contact sheets for the Galuh neck fix.
+"""Before/after contact sheets for the Ndoro Kakung neck fix.
 
     python3 verify/neck_sheet.py
 
@@ -21,7 +21,7 @@ def pair(view):
     canvas.paste(b, (w + 8, LABEL))
     d = ImageDraw.Draw(canvas)
     d.text((8, 9), f"{view}  —  BEFORE (main c323899)", fill="#e8ded4")
-    d.text((w + 16, 9), "AFTER (fix/galuh-neck)", fill="#e8ded4")
+    d.text((w + 16, 9), "AFTER (fix/ndoro-neck)", fill="#e8ded4")
     canvas.save(f"{OUT}/compare-{view}.png", optimize=True)
     return canvas
 

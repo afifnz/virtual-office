@@ -1,4 +1,4 @@
-"""Numeric audit of the stylised mouth and the hijab cloth.
+"""Numeric audit of the stylised mouth and the hair shell.
 
 Answers two claims that a screenshot alone cannot settle:
 
@@ -8,8 +8,8 @@ Answers two claims that a screenshot alone cannot settle:
     vertex and the skull surface under it (in mm). A "stuck-on lump" shows up
     here as several millimetres; a flush mouth as ~1 mm.
 
-It also reports how far the top of the hijab clears the skull, which is the one
-way the cloth can fail: a groove at the crown would let skin poke through.
+It also reports how far the top of the hair clears the skull, which is the one
+way the shell can fail: a groove at the crown would let scalp poke through.
 
     python3 verify/mouth_check.py [url]
 
@@ -28,8 +28,8 @@ PROBE = """
   const scene = window.__officeScene;
   if (!scene) return JSON.stringify({ error: 'no scene' });
   let head = null;
-  scene.traverse((o) => { if (o.name === 'galuhHead') head = o; });
-  if (!head) return JSON.stringify({ error: 'no galuh head' });
+  scene.traverse((o) => { if (o.name === 'ndoroHead') head = o; });
+  if (!head) return JSON.stringify({ error: 'no ndoro head' });
   head.updateMatrixWorld(true);
 
   const verts = (mesh, local) => {
@@ -59,25 +59,25 @@ PROBE = """
     if (!o.isMesh) return;
     const n = o.name || '';
     const c = (o.material && o.material.color) ? o.material.color.getHexString() : '';
-    if (n.startsWith('galuhLips') || c === 'b3605f' || c === 'b06a68') lips.push(o);
+    if (n.startsWith('ndoroLips') || c === 'ab705b') lips.push(o);
   });
   let skull = null;
-  head.traverse((o) => { if (o.name === 'galuhSkull') skull = o; });
+  head.traverse((o) => { if (o.name === 'ndoroSkull') skull = o; });
   if (!skull) {
     // the skull is the skin-coloured mesh with the most vertices
     let best = 0;
     head.traverse((o) => {
       if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
       const c = (o.material && o.material.color) ? o.material.color.getHexString() : '';
-      if (c === 'e2ab88' && o.geometry.attributes.position.count > best) { best = o.geometry.attributes.position.count; skull = o; }
+      if (c === 'd9a880' && o.geometry.attributes.position.count > best) { best = o.geometry.attributes.position.count; skull = o; }
     });
   }
-  // the cloth: the vertex-coloured mesh with the most vertices
-  let cloth = null;
+  // the hair: the vertex-coloured mesh with the most vertices
+  let hair = null;
   head.traverse((o) => {
     if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
     if (!o.geometry.attributes.color) return;
-    if (!cloth || o.geometry.attributes.position.count > cloth.geometry.attributes.position.count) cloth = o;
+    if (!hair || o.geometry.attributes.position.count > hair.geometry.attributes.position.count) hair = o;
   });
 
   const res = {};
@@ -124,15 +124,15 @@ PROBE = """
       standoff_mean_mm: +(meanOut / Math.max(1, n) * 1000).toFixed(2),
     };
   }
-  if (cloth) {
-    const cs = verts(cloth, true);
+  if (hair) {
+    const cs = verts(hair, true);
     const b = box(cs);
     const sk = skull ? box(verts(skull, true)) : null;
-    res.cloth = {
+    res.hair = {
       verts: cs.length,
       height_mm: +((b.y1 - b.y0) * 1000).toFixed(1),
-      // the cloth must sit outside the skull: a negative number here means the
-      // head is poking through the top of the hijab
+      // the hair must sit outside the skull: a negative number here means the
+      // scalp is poking through the top of the hair
       crown_clearance_mm: sk ? +((b.y1 - sk.y1) * 1000).toFixed(1) : null,
     };
   }

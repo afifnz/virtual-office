@@ -98,7 +98,7 @@ def main():
         fp = fctx.new_page()
         fp.set_default_timeout(240000)
         fp.on("pageerror", lambda e: report["errors"].append(f"portrait PAGEERROR: {e}"))
-        fp.goto(BASE + "?face=galuh", wait_until="load")
+        fp.goto(BASE + "?face=ndoro-kakung", wait_until="load")
         fp.wait_for_timeout(12000)
         fp.add_style_tag(content=HIDE_UI)
         fp.wait_for_timeout(1500)

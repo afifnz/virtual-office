@@ -1,6 +1,6 @@
 """Frontal portrait evidence: tight face shot, then a centre crop with PIL.
 
-    python3 verify/portrait.py galuh [front]
+    python3 verify/portrait.py ndoro-kakung [front]
 
 `front` asks the rig for a straight-on shot (?front=1) so left/right symmetry
 can actually be judged; without it the portrait keeps the 28-degree 3/4 view.
@@ -18,7 +18,7 @@ from playwright.sync_api import sync_playwright
 CHROME = "/opt/playwright/chromium-1255/chrome-linux64/chrome"
 ARGS = ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--no-sandbox", "--disable-dev-shm-usage"]
 OUT = "/workspace/virtual-office/verify"
-who = sys.argv[1] if len(sys.argv) > 1 else "galuh"
+who = sys.argv[1] if len(sys.argv) > 1 else "ndoro-kakung"
 front = len(sys.argv) > 2 and sys.argv[2] == "front"
 query = f"?face={who}" + ("&front=1" if front else "")
 
