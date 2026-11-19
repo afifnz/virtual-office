@@ -1366,7 +1366,7 @@ ul {
   }
 
   .kpi-row {
-    grid-template-columns: 86px 1fr 46px;
+    grid-template-columns: 92px 1fr 46px;
   }
 
   .kpi-name {

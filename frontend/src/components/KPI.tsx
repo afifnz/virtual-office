@@ -73,9 +73,7 @@ export function KPI({ onClose, mobile }: { onClose: () => void; mobile: boolean 
   return (
     <section className={`kpi ${mobile ? 'is-full' : ''}`} aria-label="KPI per agen">
       <div className="panel-head">
-        <h2>
-          KPI per agen <small>{win === '7d' ? '7 hari' : '30 hari'}</small>
-        </h2>
+        <h2>KPI per agen</h2>
         <div className="tabs" role="tablist" aria-label="Jendela KPI">
           {WINDOWS.map((w) => (
             <button
