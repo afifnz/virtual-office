@@ -29,5 +29,19 @@ export default defineConfig({
     target: 'es2022',
     sourcemap: false,
     chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        // The room is the only thing that needs three.js. Keep the renderer and
+        // React in their own long-lived chunks so a UI change does not force a
+        // re-download of the 3D engine (and vice versa), and so the browser can
+        // fetch them in parallel with the app code.
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return
+          if (/node_modules\/(three|three-[^/]+)\//.test(id)) return 'three'
+          if (id.includes('node_modules/@react-three/')) return 'three'
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react'
+        },
+      },
+    },
   },
 })
