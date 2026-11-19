@@ -10,7 +10,8 @@ export interface Look {
   shirt: string
   pants: string
   accent: string
-  hijab?: string
+  /** use the hand-sculpted head (frontend/src/scene/ndoroKakung.ts) */
+  sculptedHead?: boolean
   skirt?: boolean
   glasses?: boolean
   headphones?: string
@@ -45,13 +46,13 @@ export interface AgentMeta {
 export const AGENTS: AgentMeta[] = [
   {
     id: 'default',
-    name: 'Galuh',
+    name: 'Ndoro Kakung',
     role: 'ASISTEN UTAMA',
     team: 'lobby',
     desc: 'Pintu masuk semua permintaan pengguna lewat Telegram dan chat. Urusan produktivitas: memori, cron, email, review mingguan.',
     look: {
-      skin: '#e2ab88', hair: '#2b2320', style: 'long', shirt: '#efe6d6', pants: '#4a3a52',
-      accent: '#d4805c', hijab: '#b3797e', skirt: true, build: 0.9, tall: 1.0, female: true,
+      skin: '#d9a880', hair: '#241c18', style: 'crop', shirt: '#2f3d57', pants: '#2a2521',
+      accent: '#b4553f', sculptedHead: true, mustache: true, build: 1.06, tall: 1.02,
     },
     desk: { x: -6.8, z: 10.6, rot: Math.PI },
   },
@@ -187,12 +188,16 @@ export const AGENT_BY_ID: Record<string, AgentMeta> = Object.fromEntries(
   AGENTS.map((a) => [a.id, a]),
 )
 
-/** Deep links accept either the profile id or the display name. */
+/** Deep links accept the profile id, the display name or its slug
+ *  ("Ndoro Kakung" -> ndoro-kakung), so `?face=` never needs an escaped space. */
 export function resolveAgentId(token: string): string | null {
   const t = token.trim().toLowerCase()
   if (!t) return null
   if (AGENT_BY_ID[t]) return t
-  const byName = AGENTS.find((a) => a.name.toLowerCase() === t)
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '')
+  const key = slug(t)
+  if (!key) return null
+  const byName = AGENTS.find((a) => slug(a.name) === key || slug(a.id) === key)
   return byName ? byName.id : null
 }
 

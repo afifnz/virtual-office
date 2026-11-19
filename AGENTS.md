@@ -47,7 +47,7 @@ backend/            Go 1.23, stdlib net/http, modernc.org/sqlite (tanpa cgo)
   internal/roster/  roster dinamis + parser YAML
   internal/api/     handler HTTP, header X-Office-*, static/SPA
 frontend/           React 18 + Vite + TS strict + @react-three/fiber
-  src/scene/        Office, Room, Desk, Furniture, Avatar, human, face, galuh
+  src/scene/        Office, Room, Desk, Furniture, Avatar, human, face, ndoroKakung
   src/lib/          rooms (koordinat), agents (seed look), roster (runtime), layout
   src/components/   HUD, Roster, Feed, TaskBoard, ProximityCard, DPad
   public/models/    GLB Quaternius (CC0) + LICENSE-quaternius.txt

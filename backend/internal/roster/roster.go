@@ -2,7 +2,7 @@
 // the desks the frontend draws, with a display name, a role and a team.
 //
 // The default roster is the one the frontend ships (frontend/src/lib/agents.ts):
-// Galuh in the lobby, Bima/Raka/Laras/Dimas/Yoga/Sari in the dev room,
+// Ndoro Kakung in the lobby, Bima/Raka/Laras/Dimas/Yoga/Sari in the dev room,
 // Ayu/Nisa/Yohan/Hadi in the edu room. A profile with no seed entry is shown
 // under its own id with the generic role "Agen". Names, roles and teams can be
 // layered in from a JSON/YAML file (OFFICE_ROSTER) or an inline JSON document
@@ -40,7 +40,7 @@ var DefaultTeams = []Team{
 // ships, so /api/config and the scene agree on every desk. A profile found on
 // disk inherits its entry from here; an override still wins field by field.
 var DefaultAgents = []Entry{
-	{ID: "default", Name: "Galuh", Role: "ASISTEN UTAMA", Team: TeamLobby},
+	{ID: "default", Name: "Ndoro Kakung", Role: "ASISTEN UTAMA", Team: TeamLobby},
 	{ID: "dev", Name: "Bima", Role: "SDLC LEAD", Team: TeamDev},
 	{ID: "planner", Name: "Raka", Role: "ANALIS & ARSITEK", Team: TeamDev},
 	{ID: "uiux", Name: "Laras", Role: "UI/UX DESIGNER", Team: TeamDev},

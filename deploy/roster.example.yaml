@@ -28,7 +28,7 @@ teams:
 
 agents:
   - id: default
-    name: Galuh
+    name: Ndoro Kakung
     role: Asisten Pribadi
     team: lobby
   - id: dev

@@ -27,12 +27,12 @@ run() { # run <log> <port> [env...] -- starts in background, returns pid
 }
 
 echo "=============================================================="
-echo "1. default roster matches the frontend seed (Galuh/Bima, lobby)"
+echo "1. default roster matches the frontend seed (Ndoro Kakung/Bima, lobby)"
 echo "=============================================================="
 pid=$(run "$OUT/1.log" 8211 HERMES_HOME=/tmp/hh)
 wait_up 8211
 cfg=$(curl -s localhost:8211/api/config)
-check "default id is Galuh / ASISTEN UTAMA / lobby" '"id":"default","name":"Galuh","role":"ASISTEN UTAMA","team":"lobby"' "$cfg"
+check "default id is Ndoro Kakung / ASISTEN UTAMA / lobby" '"id":"default","name":"Ndoro Kakung","role":"ASISTEN UTAMA","team":"lobby"' "$cfg"
 check "dev is Bima / SDLC LEAD" '"id":"dev","name":"Bima","role":"SDLC LEAD","team":"dev"' "$cfg"
 check "team ids are lobby/dev/edu" '"teams":[{"id":"lobby","label":"Pendopo"},{"id":"dev","label":"Tim Dev"},{"id":"edu","label":"Tim Edu"}]' "$cfg"
 check "layout publishes grid 4.5 x 4.0 and aisle 1.6" '"layout":{"floor":{"w":40,"d":30},"grid":{"dx":4.5,"dz":4},"aisle":1.6}' "$cfg"
@@ -51,7 +51,7 @@ cfg=$(curl -s localhost:8212/api/config)
 check "override agent appears" '"id":"resepsionis","name":"Wati","role":"RESEPSIONIS","team":"lobby"' "$cfg"
 check "roster tz wins over OFFICE_TZ" '"tz":"Asia/Makassar"' "$cfg"
 check "health reports the roster tz" '"tz":"Asia/Makassar"' "$(curl -s localhost:8212/api/health)"
-check "legacy agents keep their seed name" '"id":"default","name":"Galuh"' "$cfg"
+check "legacy agents keep their seed name" '"id":"default","name":"Ndoro Kakung"' "$cfg"
 kill "$pid" 2>/dev/null
 
 echo

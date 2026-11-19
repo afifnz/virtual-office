@@ -75,7 +75,7 @@ func TestConfigEndpoint(t *testing.T) {
 		t.Fatalf("dev = %v", byID["dev"])
 	}
 	// a profile with no override still gets the seed name/role/team
-	if byID["default"]["name"] != "Galuh" || byID["default"]["role"] != "ASISTEN UTAMA" {
+	if byID["default"]["name"] != "Ndoro Kakung" || byID["default"]["role"] != "ASISTEN UTAMA" {
 		t.Fatalf("default = %v", byID["default"])
 	}
 	if byID["default"]["team"] != "lobby" {

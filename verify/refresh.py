@@ -29,5 +29,5 @@ with sync_playwright() as p:
     m.close()
     b.close()
 
-subprocess.run(["cp", f"{OUT}/portrait-galuh-crop.png", f"{OUT}/desktop-1280-face-crop.png"], check=True)
+subprocess.run(["cp", f"{OUT}/portrait-ndoro-kakung-crop.png", f"{OUT}/desktop-1280-face-crop.png"], check=True)
 print("refreshed")

@@ -30,7 +30,7 @@ export const MODEL_URL: Record<HumanModel, string> = {
 
 /** Which body each agent wears. Keyed by the profile id in lib/agents.ts. */
 export const MODEL_FOR_AGENT: Record<string, HumanModel> = {
-  default: 'women-casual',
+  default: 'men-suit',
   dev: 'men-suit',
   planner: 'men-casual',
   uiux: 'women-formal',
@@ -105,7 +105,7 @@ const ROLES: Record<HumanModel, Record<string, Role>> = {
   },
 }
 
-/** Roles whose meshes are hair (hidden under a hijab). */
+/** Roles whose meshes are hair (hidden under the sculpted head). */
 const HAIR_ROLES: ReadonlySet<Role> = new Set(['hair'])
 
 function shade(hex: string, k: number): string {
@@ -207,7 +207,7 @@ export interface Rig {
   /** every pack mesh that lives above the collar: brows, eye quads, hair, skull */
   headMeshes: THREE.Mesh[]
   feet: FootRest[]
-  /** face measurements in model space, used by the face/hijab/glasses builders */
+  /** face measurements in model space, used by the face/head/glasses builders */
   landmarks: FaceLandmarks
   /** model space → head-bone space, captured at rest */
   headMountMatrix: THREE.Matrix4
@@ -404,7 +404,7 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
     noseZ: surfaceZ(noseY, 0.012, 0.008),
   }
 
-  // face/hijab/glasses are authored in model space and mounted on the head
+  // face/head/glasses are authored in model space and mounted on the head
   // bone through this fixed matrix, so they ride the animation exactly
   const head = bones[BONES.head]
   const headMountMatrix = new THREE.Matrix4()
@@ -414,7 +414,7 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
 
   // The pack's heads are a shade over a fifth of the body, which reads as a
   // mascot at dashboard distance. Shrink the head bone a little: the skull,
-  // the face overlay and the hijab all scale about the same joint, so the
+  // the face overlay and the hair all scale about the same joint, so the
   // neck seam stays put. Applied only after headMountMatrix is captured, so
   // the model-space mount inherits the new scale instead of cancelling it.
   if (head) head.scale.setScalar(HEAD_SCALE)
@@ -518,7 +518,7 @@ export function instantiate(source: THREE.Object3D, look: Look, model: HumanMode
 /**
  * How much fuller each bone's flesh is than the pack's own (1 = untouched).
  * The packs are authored as skinny mannequins: at dashboard distance the
- * shoulders read narrower than the hijab and the forearms are sticks. Adding
+ * shoulders read narrower than the head and the forearms are sticks. Adding
  * volume to the *skin* rather than to the bones keeps every joint where the
  * pose solver put it — hands still land on the keys, feet still on the floor.
  */
