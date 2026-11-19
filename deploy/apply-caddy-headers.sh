@@ -71,19 +71,28 @@ BLOCK=$(awk -v start="$START" '
 	NR > start && /^}[[:space:]]*$/ { exit }
 ' "$CADDYFILE")
 
-if ! grep -q 'reverse_proxy 127\.0\.0\.1:8130' <<<"$BLOCK"; then
+# --- 2. catat layout produksi — peringatan, bukan penghalang ---------------
+# Target proxy dan root bisa berbeda antar pemasangan (8130 vs 8131, office vs
+# office-v2). Yang penting header terpasang; perbedaan layout hanya dicatat.
+TARGET=$(grep -oE 'reverse_proxy[[:space:]]+[0-9.]+:[0-9]+' <<<"$BLOCK" | head -1 | sed -E 's/reverse_proxy[[:space:]]+//')
+if [[ -z "${TARGET:-}" ]]; then
 	say ""
-	say "PERINGATAN: site block ini tidak mem-proxy ke 127.0.0.1:8130."
-	say "Baris reverse_proxy yang ditemukan:"
+	say "PERINGATAN: site block ini tidak mem-proxy ke API sama sekali."
 	grep -n 'reverse_proxy' <<<"$BLOCK" || say "  (tidak ada)"
-	die "samakan dulu target API (lihat deploy/Caddyfile.block), lalu jalankan ulang"
+	die "tambahkan handle /api/* -> reverse_proxy dulu, baru pasang header"
+fi
+say "proxy API ditemukan : $TARGET"
+if [[ "$TARGET" != "127.0.0.1:8130" ]]; then
+	say "  catatan           : produksi memakai $TARGET (rujukan repo: 8130)."
+	say "                      Header tetap dipasang; samakan hanya bila memang perlu."
 fi
 
-if ! grep -q 'root \* /var/www/office$' <<<"$BLOCK"; then
-	say ""
-	say "PERINGATAN: root statis bukan /var/www/office."
-	grep -n 'root \*' <<<"$BLOCK" || say "  (tidak ada)"
-	die "samakan dulu root statis (lihat deploy/Caddyfile.block), lalu jalankan ulang"
+ROOT_DIR=$(grep -oE 'root[[:space:]]+\*[[:space:]]+[^[:space:]]+' <<<"$BLOCK" | head -1 | awk '{print $3}')
+if [[ -z "${ROOT_DIR:-}" ]]; then
+	say "PERINGATAN: site block tidak punya 'root *' — pastikan SPA memang disajikan di sini."
+else
+	say "root statis         : $ROOT_DIR"
+	[[ "$ROOT_DIR" != "/var/www/office" ]] && say "  catatan           : root produksi bukan /var/www/office."
 fi
 
 # --- 3. apa saja yang belum ada? -----------------------------------------
