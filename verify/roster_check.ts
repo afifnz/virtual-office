@@ -10,7 +10,7 @@
 import { AGENTS } from '../frontend/src/lib/agents'
 import { applyConfig, agentsFor, lookFor, officeTZ, resolveAgentId, rosterAgents } from '../frontend/src/lib/roster'
 import { DEFAULT_GRID, clearance, deskObstacle, segRectDist, type Obstacle } from '../frontend/src/lib/layout'
-import { BLOCK_GAP, CLUSTERS, FLOOR, NAV, NAV_EDGES, OBSTACLES, WALL_OBSTACLES, WALL_T, clusterOf } from '../frontend/src/lib/rooms'
+import { BLOCK_GAP, CLUSTERS, FLOOR, LEAD_DESKS, NAV, NAV_EDGES, OBSTACLES, WALL_OBSTACLES, WALL_T, blockMembers, clusterOf } from '../frontend/src/lib/rooms'
 
 let fails = 0
 const fail = (msg: string) => {
@@ -93,11 +93,12 @@ else ok('roster tz is applied to the client clock')
 const all = rosterAgents()
 const allObstacles: Obstacle[] = [...WALL_OBSTACLES, ...OBSTACLES.filter((o) => !o.id.startsWith('desk-')), ...all.map((a) => deskObstacle(a.desk, a.id))]
 
-// Team desks sit in touching blocks (dev 3 x 2, edu 2 x 2): inside a block the
-// 1.6 aisle does not apply, everywhere else it does. Mirrors layout_check.ts.
+// Team desks sit in touching blocks (dev 3 x 2 + the lead's wing, edu 2 x 2):
+// inside a block the 1.6 aisle does not apply, everywhere else it does. Mirrors
+// layout_check.ts.
 const teammates = (id: string) => {
   const name = clusterOf(id)
-  return name ? new Set(CLUSTERS[name]!) : new Set([id])
+  return name ? new Set(blockMembers(name)) : new Set([id])
 }
 
 let minClear = 99
@@ -154,6 +155,34 @@ for (const [name, ids] of Object.entries(CLUSTERS)) {
 }
 
 // the devops desk stands alone, beside the server rack (tested in layout_check.ts)
+
+// the dev lead stands on the block's short side, flush and facing his team
+for (const [name, lead] of Object.entries(LEAD_DESKS)) {
+  const desk = all.find((a) => a.id === lead.id)
+  if (!desk) {
+    fail(`${name}: lead ${lead.id} has no desk`)
+    continue
+  }
+  const own = deskObstacle(desk.desk, lead.id)
+  const boxes = blockMembers(lead.cluster)
+    .filter((id) => id !== lead.id)
+    .map((id) => deskObstacle(all.find((a) => a.id === id)!.desk, id))
+  const w = own.x2 - own.x1
+  const d = own.z2 - own.z1
+  const gap = lead.side === 'w'
+    ? Math.min(...boxes.map((b) => b.x1)) - own.x2
+    : own.x1 - Math.max(...boxes.map((b) => b.x2))
+  const facing = lead.side === 'w' ? -Math.PI / 2 : Math.PI / 2
+  if (!near(Math.min(w, d), 1.03, 0.01) || !near(Math.max(w, d), PITCH, 0.01)) {
+    fail(`${name}: lead desk ${w.toFixed(2)} x ${d.toFixed(2)}, want a vertical 1.03 x ${PITCH}`)
+  } else if (Math.abs(gap) > BLOCK_GAP) {
+    fail(`${name}: lead desk ${gap.toFixed(2)} from the block (want flush)`)
+  } else if (Math.abs(desk.desk.rot - facing) > 1e-6) {
+    fail(`${name}: lead desk rot ${desk.desk.rot.toFixed(2)}, want ${facing.toFixed(2)} (facing the team)`)
+  } else {
+    ok(`${name}: lead desk flush on the ${lead.side} face of the block, facing the team`)
+  }
+}
 
 // the auto-placed desks of one team share one lattice block
 for (const team of ['lobby', 'dev', 'edu']) {

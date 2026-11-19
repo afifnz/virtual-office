@@ -108,7 +108,7 @@ with sync_playwright() as p:
     rows = json.loads(pg.evaluate(PROBE))
     b.close()
 
-EXPECTED = 12   # one seated avatar per desk (11 + the devops desk)
+EXPECTED = 13   # one seated avatar per desk (12 + the devops desk)
 SEAT = 0.4725
 KEY = {"x": 0.04, "y": 0.786, "z": -0.26}   # actor frame, keyboard top centre
 print(f"{'desk':>12} {'hipY':>6} {'kneeL-R':>8} {'angL':>6} {'angR':>6} {'sole':>6} "

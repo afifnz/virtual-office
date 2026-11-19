@@ -6,8 +6,8 @@
  *   node /tmp/layout_check.mjs
  */
 import {
-  BLOCK_GAP, CLUSTERS, DESKS, DESK_EXIT, FLOOR, NAV, NAV_EDGES, OBSTACLES, POIS, SPOTS,
-  WALLS, clusterOf, nearestNode, type Obstacle,
+  BLOCK_GAP, CLUSTERS, DESKS, DESK_EXIT, FLOOR, LEAD_DESKS, NAV, NAV_EDGES, OBSTACLES, POIS,
+  SPOTS, WALLS, blockMembers, clusterOf, nearestNode, type Obstacle,
 } from '../frontend/src/lib/rooms'
 import { navPath, type Pt } from '../frontend/src/lib/nav'
 import { SIDESTEP, avoid, homeward, onward, retrace, seatPoint } from '../frontend/src/lib/routes'
@@ -83,6 +83,50 @@ for (const [name, ids] of Object.entries(CLUSTERS)) {
   }
   if (worst > BLOCK_GAP) fail(`${name}: blok tidak mepet, celah terbesar ${worst.toFixed(2)}`)
   else ok(`${name}: ${group.length} meja mepet satu blok (${xs.length} x ${zs.length}, celah ${worst.toFixed(2)})`)
+}
+
+// ------------------------------------------------------------ lead desks
+// A lead desk is not part of the block grid: it stands on the block's short
+// side, flush against it and turned a quarter turn, so the lead faces the team
+// instead of the wall behind him.
+const DESK_DEPTH = 1.03
+for (const [name, lead] of Object.entries(LEAD_DESKS)) {
+  const desk = spotOf(lead.id)
+  const group = (CLUSTERS[lead.cluster] ?? []).map((id) => spotOf(id)).filter((d): d is NonNullable<typeof d> => !!d)
+  if (!desk) { fail(`${name}: meja lead ${lead.id} tanpa posisi`); continue }
+  if (!group.length) { fail(`${name}: blok ${lead.cluster} kosong`); continue }
+  const own = obstacleOf(lead.id)
+  const w = own.x2 - own.x1
+  const d = own.z2 - own.z1
+  if (!(near(Math.min(w, d), DESK_DEPTH, 0.01) && near(Math.max(w, d), PITCH, 0.01))) {
+    fail(`${name}: meja lead tidak vertikal (${w.toFixed(2)} x ${d.toFixed(2)}, mau ${DESK_DEPTH} x ${PITCH})`)
+    continue
+  }
+  const boxes = group.map((g) => obstacleOf(g.id))
+  const bX1 = Math.min(...boxes.map((b) => b.x1))
+  const bX2 = Math.max(...boxes.map((b) => b.x2))
+  const bZ1 = Math.min(...boxes.map((b) => b.z1))
+  const bZ2 = Math.max(...boxes.map((b) => b.z2))
+  // flush against the face it claims, without cutting into the block
+  const sideGap = lead.side === 'w' ? bX1 - own.x2 : own.x1 - bX2
+  if (sideGap < -BLOCK_GAP) fail(`${name}: meja lead menabrak blok (${sideGap.toFixed(2)})`)
+  else if (sideGap > BLOCK_GAP) fail(`${name}: meja lead tidak mepet sisi ${lead.side} blok (celah ${sideGap.toFixed(2)})`)
+  // and it spans the block's whole depth, so no hole is left at either end
+  if (own.z1 < bZ1 - BLOCK_GAP || own.z2 > bZ2 + BLOCK_GAP) {
+    fail(`${name}: meja lead keluar dari kedalaman blok (z ${own.z1.toFixed(2)}..${own.z2.toFixed(2)} vs ${bZ1.toFixed(2)}..${bZ2.toFixed(2)})`)
+  }
+  const zc = (bZ1 + bZ2) / 2
+  const ownZc = (own.z1 + own.z2) / 2
+  if (Math.abs(ownZc - zc) > BLOCK_GAP) {
+    fail(`${name}: meja lead tidak di tengah sisi blok (z ${ownZc.toFixed(2)} vs ${zc.toFixed(2)})`)
+  }
+  // facing the block, not the wall: -PI/2 faces +x, +PI/2 faces -x
+  const facing = lead.side === 'w' ? -Math.PI / 2 : Math.PI / 2
+  if (Math.abs(desk.rot - facing) > 1e-6) {
+    fail(`${name}: meja lead rot ${desk.rot.toFixed(2)}, harus ${facing.toFixed(2)} supaya menghadap tim`)
+  } else {
+    ok(`${name}: meja lead ${lead.id} ${w.toFixed(2)}x${d.toFixed(2)} mepet sisi ${lead.side} blok, menghadap tim (rot ${desk.rot.toFixed(2)})`)
+  }
 }
 
 // ------------------------------------------------------------ circulation
