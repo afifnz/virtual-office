@@ -26,7 +26,8 @@ import sys
 from playwright.sync_api import sync_playwright
 
 CHROME = "/opt/playwright/chromium-1255/chrome-linux64/chrome"
-ARGS = ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--no-sandbox", "--disable-dev-shm-usage"]
+ARGS = ["--use-gl=swiftshader", "--enable-unsafe-swiftshader", "--no-sandbox", "--disable-dev-shm-usage",
+        "--renderer-process-limit=1", "--disable-extensions", "--mute-audio"]
 OUT = os.environ.get("SHOT_OUT", "/workspace/.gotmp/ndoro-shots")
 DPR = 1.5
 HIDE = ".hud,.roster,.feed,.card,.mobile-bar,.dpad,.prox-chip{display:none!important}"
