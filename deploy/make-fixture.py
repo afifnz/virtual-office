@@ -185,6 +185,20 @@ def main():
         con.commit()
         con.close()
 
+    # ---- coder2 / Bagas: the second implementer, green tests and moving on
+    con = db_for(home, "coder2")
+    sid = "c0de0002"
+    session(con, sid, "coder2", "subagent", None, now - 800, now - 40, (None, None))
+    msg(con, sid, "user", "kerjakan tiket kedua", now - 800)
+    msg(con, sid, "assistant", "", now - 120, calls=[{
+        "id": "c1", "type": "function",
+        "function": {"name": "terminal", "arguments": json.dumps({"command": "npm run build"})},
+    }], tokens=240)
+    msg(con, sid, "tool", "vite v5 built in 12.4s", now - 40, tool="terminal", tokens=80)
+    hourly_history(con, sid, 5, 5, 2, now)
+    con.commit()
+    con.close()
+
     # ---- edu team: Ayu is writing, the other two are away
     con = db_for(home, "edu")
     sid = "edu1lead"

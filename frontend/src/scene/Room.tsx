@@ -45,8 +45,8 @@ export function Room() {
         <meshStandardMaterial map={floor} roughness={0.9} metalness={0.02} />
       </mesh>
       {/* pendopo rug under the reception corner: Ndoro Kakung's desk and the counter */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-5.2, 0.012, 10.8]}>
-        <planeGeometry args={[6.8, 4.6]} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-6.9, 0.012, 6.4]}>
+        <planeGeometry args={[6.4, 4.4]} />
         <meshStandardMaterial map={rug} roughness={0.95} />
       </mesh>
 
@@ -94,13 +94,13 @@ export function Room() {
       })}
 
       {/* room signs, above the boards on the back walls and beside the entrance */}
-      <sprite position={[-10, 2.95, -14.78]} scale={[3.4, 3.4 / signs.dev.aspect, 1]}>
+      <sprite position={[-7.6, 2.95, -9.78]} scale={[3.4, 3.4 / signs.dev.aspect, 1]}>
         <spriteMaterial map={signs.dev.tex} transparent depthWrite={false} />
       </sprite>
-      <sprite position={[10, 2.95, -14.78]} scale={[3.4, 3.4 / signs.edu.aspect, 1]}>
+      <sprite position={[7.0, 2.95, -9.78]} scale={[3.4, 3.4 / signs.edu.aspect, 1]}>
         <spriteMaterial map={signs.edu.tex} transparent depthWrite={false} />
       </sprite>
-      <sprite position={[6.2, 2.55, 14.78]} scale={[3.0, 3.0 / signs.lobby.aspect, 1]}>
+      <sprite position={[5.4, 2.55, 9.78]} scale={[3.0, 3.0 / signs.lobby.aspect, 1]}>
         <spriteMaterial map={signs.lobby.tex} transparent depthWrite={false} />
       </sprite>
 
@@ -136,21 +136,21 @@ export function Room() {
 
 /** One pendant per desk cluster (its exact centroid) plus the pendopo zones. */
 const LAMPS: Array<[number, number]> = [
-  [-5.4, 10.7],
-  [8.0, 12.0],
-  [-18.6, 8.0],
-  [18.6, 8.8],
-  [-10.0, -6.4],
-  [10.0, -6.4],
+  [-6.9, 6.4],
+  [7.4, 6.6],
+  [-11.5, 6.4],
+  [12.6, 5.6],
+  [-7.6, -4.4],
+  [7.0, -4.4],
 ]
 
 const PLANTS: Array<[number, number]> = [
-  [-19.2, 14.2],
-  [19.2, 14.2],
-  [-19.2, -14.2],
-  [19.2, -14.2],
-  [-2.2, 3.9],
-  [2.2, 3.9],
+  [-13.4, 9.3],
+  [13.4, 9.3],
+  [-13.4, -9.3],
+  [13.4, -9.3],
+  [-4.8, 2.7],
+  [4.8, 2.7],
 ]
 
 /** Terracotta gentong with lidah mertua (sansevieria) — a fixture of every Indonesian office. */

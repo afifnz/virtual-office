@@ -9,8 +9,8 @@
  */
 import { AGENTS } from '../frontend/src/lib/agents'
 import { applyConfig, agentsFor, lookFor, officeTZ, resolveAgentId, rosterAgents } from '../frontend/src/lib/roster'
-import { DEFAULT_GRID, clearance, deskObstacle, type Obstacle } from '../frontend/src/lib/layout'
-import { FLOOR, NAV, NAV_EDGES, OBSTACLES, WALL_OBSTACLES, WALL_T } from '../frontend/src/lib/rooms'
+import { DEFAULT_GRID, clearance, deskObstacle, segRectDist, type Obstacle } from '../frontend/src/lib/layout'
+import { BLOCK_GAP, CLUSTERS, FLOOR, LEAD_DESKS, NAV, NAV_EDGES, OBSTACLES, WALL_OBSTACLES, WALL_T, blockMembers, clusterOf } from '../frontend/src/lib/rooms'
 
 let fails = 0
 const fail = (msg: string) => {
@@ -54,7 +54,7 @@ const cfg = {
   source: 'local',
   profiles: [...AGENTS.map((a) => a.id), ...extra.map((e) => e.id)],
   roster: [...AGENTS.map((a) => ({ id: a.id, name: a.name, role: a.role, team: a.team })), ...extra],
-  layout: { floor: { w: 40, d: 30 }, grid: { dx: 4.5, dz: 4.0 }, aisle: 1.6 },
+  layout: { floor: { w: 28, d: 20 }, grid: { dx: 4.5, dz: 4.0 }, aisle: 1.6 },
   teams: [
     { id: 'lobby', label: 'Pendopo' },
     { id: 'dev', label: 'Tim Dev' },
@@ -93,26 +93,21 @@ else ok('roster tz is applied to the client clock')
 const all = rosterAgents()
 const allObstacles: Obstacle[] = [...WALL_OBSTACLES, ...OBSTACLES.filter((o) => !o.id.startsWith('desk-')), ...all.map((a) => deskObstacle(a.desk, a.id))]
 
-// Team rooms are facing pods: a front row (rot 0) and a back row (rot PI) on the
-// same column, desk tops meeting POD_DZ apart in z. Mirrors layout_check.ts.
-const POD_DZ = 0.8
-const partnerOf = (a: (typeof all)[number]) =>
-  all.find(
-    (o) =>
-      o.id !== a.id &&
-      near(o.desk.x, a.desk.x) &&
-      near(Math.abs(o.desk.z - a.desk.z), POD_DZ) &&
-      !near(o.desk.rot, a.desk.rot),
-  )
+// Team desks sit in touching blocks (dev 3 x 2 + the lead's wing, edu 2 x 2):
+// inside a block the 1.6 aisle does not apply, everywhere else it does. Mirrors
+// layout_check.ts.
+const teammates = (id: string) => {
+  const name = clusterOf(id)
+  return name ? new Set(blockMembers(name)) : new Set([id])
+}
 
 let minClear = 99
 for (const a of all) {
-  // the desk across the pod is meant to touch; every other neighbour keeps the aisle
-  const partner = partnerOf(a)
+  const block = teammates(a.id)
   const clear = clearance({
     spot: a.desk,
     id: a.id,
-    obstacles: partner ? allObstacles.filter((o) => o.id !== `desk-${partner.id}`) : allObstacles,
+    obstacles: allObstacles.filter((o) => !o.id.startsWith('desk-') || !block.has(o.id.slice('desk-'.length))),
     floor: FLOOR,
     wallT: WALL_T,
   })
@@ -121,35 +116,72 @@ for (const a of all) {
 }
 ok(`aisle: minimum ${minClear.toFixed(2)} for all ${all.length} desks`)
 
-// the hand-placed desks keep their own lattice: lobby on the plain grid, the
-// team rooms as facing pods on 4.5 columns
-for (const team of ['lobby', 'dev', 'edu']) {
-  const group = all.filter((a) => a.team === team && AGENTS.some((s) => s.id === a.id))
-  if (group.length < 2) continue
-  const x0 = Math.min(...group.map((a) => a.desk.x))
-  const z0 = Math.min(...group.map((a) => a.desk.z))
-  const pods = team !== 'lobby'
-  for (const a of group) {
-    const kx = (a.desk.x - x0) / DEFAULT_GRID.dx
-    if (Math.abs(kx - Math.round(kx)) > 0.002) fail(`${team}/${a.id}: x ${a.desk.x} off the ${DEFAULT_GRID.dx} lattice`)
-    if (pods) {
-      const p = partnerOf(a)
-      if (!p || !group.includes(p)) {
-        fail(`${team}/${a.id}: no facing desk across the pod`)
-        continue
-      }
-      const front = a.desk.z > p.desk.z ? a : p
-      if (!near(front.desk.rot, 0)) fail(`${team}/${front.id}: pod front row must be rot 0`)
-    } else {
-      const kz = (a.desk.z - z0) / DEFAULT_GRID.dz
-      if (Math.abs(kz - Math.round(kz)) > 0.002) fail(`${team}/${a.id}: z ${a.desk.z} off the ${DEFAULT_GRID.dz} lattice`)
+// the hand-placed desks keep their blocks: dev 3 x 2, edu 2 x 2, tops touching
+const PITCH = 1.62
+const ROW_PITCH = 0.78
+for (const [name, ids] of Object.entries(CLUSTERS)) {
+  const group = all.filter((a) => ids.includes(a.id))
+  if (group.length !== ids.length) {
+    fail(`${name}: ${ids.length - group.length} block desk missing`)
+    continue
+  }
+  const xs = [...new Set(group.map((a) => a.desk.x))].sort((x, y) => x - y)
+  const zs = [...new Set(group.map((a) => a.desk.z))].sort((x, y) => x - y)
+  const dxs = xs.slice(1).map((x, i) => +(x - xs[i]!).toFixed(3))
+  const dzs = zs.slice(1).map((z, i) => +(z - zs[i]!).toFixed(3))
+  if (!dxs.every((d) => near(d, PITCH))) fail(`${name}: columns ${dxs} != ${PITCH}`)
+  if (!dzs.every((d) => near(d, ROW_PITCH))) fail(`${name}: rows ${dzs} != ${ROW_PITCH}`)
+  const front = group.filter((a) => near(a.desk.rot, 0))
+  const back = group.filter((a) => near(a.desk.rot, Math.PI))
+  if (front.length !== group.length / 2) fail(`${name}: ${front.length} front / ${back.length} back rows`)
+  let worst = 0
+  const obs = (id: string) => deskObstacle(all.find((a) => a.id === id)!.desk, id)
+  for (let i = 0; i < group.length; i++) {
+    for (let j = i + 1; j < group.length; j++) {
+      const p = group[i]!.desk
+      const q = group[j]!.desk
+      const alongX = near(Math.abs(q.x - p.x), PITCH) && near(q.z, p.z)
+      const alongZ = near(q.x, p.x) && near(Math.abs(q.z - p.z), ROW_PITCH)
+      if (!alongX && !alongZ) continue
+      const a = obs(group[i]!.id)
+      const b = obs(group[j]!.id)
+      const ddx = Math.max(b.x1 - a.x2, a.x1 - b.x2, 0)
+      const ddz = Math.max(b.z1 - a.z2, a.z1 - b.z2, 0)
+      worst = Math.max(worst, Math.hypot(ddx, ddz))
     }
   }
-  ok(
-    pods
-      ? `${team}: ${group.length} hand-placed desks in facing pods on ${DEFAULT_GRID.dx} columns`
-      : `${team}: ${group.length} hand-placed desks on the ${DEFAULT_GRID.dx} x ${DEFAULT_GRID.dz} lattice`,
-  )
+  if (worst > BLOCK_GAP) fail(`${name}: block is not touching (gap ${worst.toFixed(2)})`)
+  else ok(`${name}: ${group.length} hand-placed desks in one touching ${xs.length} x ${zs.length} block`)
+}
+
+// the devops desk stands alone, beside the server rack (tested in layout_check.ts)
+
+// the dev lead stands on the block's short side, flush and facing his team
+for (const [name, lead] of Object.entries(LEAD_DESKS)) {
+  const desk = all.find((a) => a.id === lead.id)
+  if (!desk) {
+    fail(`${name}: lead ${lead.id} has no desk`)
+    continue
+  }
+  const own = deskObstacle(desk.desk, lead.id)
+  const boxes = blockMembers(lead.cluster)
+    .filter((id) => id !== lead.id)
+    .map((id) => deskObstacle(all.find((a) => a.id === id)!.desk, id))
+  const w = own.x2 - own.x1
+  const d = own.z2 - own.z1
+  const gap = lead.side === 'w'
+    ? Math.min(...boxes.map((b) => b.x1)) - own.x2
+    : own.x1 - Math.max(...boxes.map((b) => b.x2))
+  const facing = lead.side === 'w' ? -Math.PI / 2 : Math.PI / 2
+  if (!near(Math.min(w, d), 1.03, 0.01) || !near(Math.max(w, d), PITCH, 0.01)) {
+    fail(`${name}: lead desk ${w.toFixed(2)} x ${d.toFixed(2)}, want a vertical 1.03 x ${PITCH}`)
+  } else if (Math.abs(gap) > BLOCK_GAP) {
+    fail(`${name}: lead desk ${gap.toFixed(2)} from the block (want flush)`)
+  } else if (Math.abs(desk.desk.rot - facing) > 1e-6) {
+    fail(`${name}: lead desk rot ${desk.desk.rot.toFixed(2)}, want ${facing.toFixed(2)} (facing the team)`)
+  } else {
+    ok(`${name}: lead desk flush on the ${lead.side} face of the block, facing the team`)
+  }
 }
 
 // the auto-placed desks of one team share one lattice block
@@ -167,25 +199,21 @@ for (const team of ['lobby', 'dev', 'edu']) {
   ok(`${team}: ${group.length} auto-placed desks on one ${DEFAULT_GRID.dx} x ${DEFAULT_GRID.dz} block`)
 }
 
-// a desk must not stand on a walkway
+// a desk must not stand on a walkway: the same 0.35 walker half-width the nav
+// graph uses, tested against every edge of the graph
+const WALKER = 0.35
+let tightest = 99
 for (const a of all) {
   const own = deskObstacle(a.desk, a.id)
   for (const [x, y] of NAV_EDGES) {
     const na = NAV.find((n) => n.id === x)!
     const nb = NAV.find((n) => n.id === y)!
-    const inside =
-      own.x1 - 0.35 < Math.max(na.x, nb.x) &&
-      own.x2 + 0.35 > Math.min(na.x, nb.x) &&
-      own.z1 - 0.35 < Math.max(na.z, nb.z) &&
-      own.z2 + 0.35 > Math.min(na.z, nb.z)
-    // the bounding-box test is loose; only report a real footprint hit
-    if (inside) {
-      const clear = clearance({ spot: a.desk, obstacles: [], floor: FLOOR, wallT: WALL_T })
-      if (clear < 0) fail(`${a.id}: desk on a walkway (${x}-${y})`)
-    }
+    const d = segRectDist([na.x, na.z], [nb.x, nb.z], own)
+    tightest = Math.min(tightest, d)
+    if (d < WALKER) fail(`${a.id}: desk blocks the walkway ${x}-${y} (${d.toFixed(2)} < ${WALKER})`)
   }
 }
-ok('no desk sits on a walkway')
+ok(`no desk sits on a walkway (closest ${tightest.toFixed(2)} to an edge)`)
 
 // ------------------------------------------------ 4. deterministic placement
 const first = JSON.stringify(rosterAgents().map((a) => [a.id, a.desk]))

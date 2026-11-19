@@ -43,6 +43,12 @@ const (
 	DefaultTZ     = "Asia/Jakarta"
 	DefaultPort   = 8131
 	DefaultBind   = "127.0.0.1"
+
+	// The public API is polled by every open office tab. 120/min with a burst
+	// of 30 leaves room for a handful of tabs plus a reconnecting client while
+	// still stopping a loop that ignores Retry-After.
+	DefaultRateLimitPerMin = 120
+	DefaultRateLimitBurst  = 30
 )
 
 // Config is the resolved server configuration.
@@ -62,6 +68,12 @@ type Config struct {
 	Title      string // window/document title
 	TZ         string // IANA name; the office day boundary and hourly buckets follow it
 	WebDir     string // optional directory with the built frontend; "" = API only
+
+	// Per-IP rate limit for /api/*. RateLimit=false turns it off entirely
+	// (RATE_LIMIT=off), which the e2e suite does because it drives one client.
+	RateLimit       bool
+	RateLimitPerMin int
+	RateLimitBurst  int
 }
 
 // Load reads the environment, applying defaults, and validates the result.
@@ -132,6 +144,21 @@ func Load() (Config, error) {
 		gateway = filepath.Join(home, "gateway_state.json")
 	}
 
+	// Rate limit knobs are parsed even when the limit is off, so a typo shows
+	// up at startup instead of the day someone re-enables it.
+	rateOn, err := parseRateLimitSwitch(os.Getenv("RATE_LIMIT"))
+	if err != nil {
+		return Config{}, err
+	}
+	perMin, err := envInt("RATE_LIMIT_PER_MIN", DefaultRateLimitPerMin, 1, 1_000_000)
+	if err != nil {
+		return Config{}, err
+	}
+	burst, err := envInt("RATE_LIMIT_BURST", DefaultRateLimitBurst, 1, 1_000_000)
+	if err != nil {
+		return Config{}, err
+	}
+
 	var profiles []string
 	if src == "remote" {
 		// A remote office reports its own roster through /api/config. PROFILES is
@@ -168,7 +195,37 @@ func Load() (Config, error) {
 		Title:      title,
 		TZ:         tz,
 		WebDir:     strings.TrimSpace(os.Getenv("WEB_DIR")),
+
+		RateLimit:       rateOn,
+		RateLimitPerMin: perMin,
+		RateLimitBurst:  burst,
 	}, nil
+}
+
+// parseRateLimitSwitch reads RATE_LIMIT. Empty means on: the public endpoint
+// should not be unprotected just because nobody set a variable.
+func parseRateLimitSwitch(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "on", "1", "true", "yes":
+		return true, nil
+	case "off", "0", "false", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("RATE_LIMIT=%q tidak dikenal (pakai on atau off)", raw)
+	}
+}
+
+// envInt reads a positive integer env var, falling back to def when unset.
+func envInt(name string, def, min, max int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < min || n > max {
+		return 0, fmt.Errorf("%s=%q bukan angka %d..%d", name, raw, min, max)
+	}
+	return n, nil
 }
 
 // ValidateBaseURL accepts an absolute http(s) base URL and returns it without a

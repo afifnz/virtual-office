@@ -18,16 +18,17 @@ export function Furniture({ agents }: { agents: Agent[] }) {
       <CafeTable />
       <Gamelan />
       <ServerRack />
+      <DevOpsCorner />
       <TaskBoard
-        x={-10.0}
-        z={-14.7}
+        x={-7.6}
+        z={-9.7}
         title="SPRINT TIM DEV"
         accent="#82aac8"
         agents={agents.filter((a) => agentMeta(a.id).team === 'dev')}
       />
       <TaskBoard
-        x={10.0}
-        z={-14.7}
+        x={7.0}
+        z={-9.7}
         title="PAPAN ADDIE"
         accent="#deb860"
         agents={agents.filter((a) => agentMeta(a.id).team === 'edu')}
@@ -35,8 +36,10 @@ export function Furniture({ agents }: { agents: Agent[] }) {
       <Bookshelf />
       <Lesehan />
       <Cat />
+      <Cabinet x={-12.6} z={0.9} accent="#82aac8" plate="BERKAS" />
+      <Cabinet x={12.0} z={0.9} accent="#deb860" plate="MATERI" />
       <Entrance />
-      <Rug shadows={[[-5.4, 10.6], [18.4, 8.8], [8.0, 12.0]]} />
+      <Rug shadows={[[-6.9, 6.4], [13.0, 5.4], [7.4, 6.6]]} />
     </group>
   )
 }
@@ -67,7 +70,7 @@ function Reception() {
   return (
     // beside Ndoro Kakung's desk, its front turned to the entrance path (+x), so a
     // visitor walking in sees the plate and nobody sits staring at its back
-    <group position={[-3.9, 0, 10.8]} rotation={[0, Math.PI / 2, 0]}>
+    <group position={[-3.9, 0, 7.0]} rotation={[0, Math.PI / 2, 0]}>
       <mesh position={[0, 0.52, 0]}>
         <boxGeometry args={[2.6, 1.04, 0.62]} />
         <meshStandardMaterial color="#7c5638" roughness={0.72} />
@@ -104,7 +107,7 @@ function MeetingTable() {
     [x, 0.8, 0] as [number, number, number],
   ])
   return (
-    <group position={[8.0, 0, 12.0]}>
+    <group position={[7.4, 0, 6.6]}>
       <mesh position={[0, 0.745, 0]}>
         <boxGeometry args={[3.0, 0.06, 1.1]} />
         <meshStandardMaterial color="#8a6142" roughness={0.6} />
@@ -165,7 +168,7 @@ function MeetingTable() {
 /** A round bistro table with two stools, a step away from the warung kopi. */
 function CafeTable() {
   return (
-    <group position={[-15.5, 0, 5.2]}>
+    <group position={[-10.4, 0, 5.6]}>
       <mesh position={[0, 0.74, 0]}>
         <cylinderGeometry args={[0.42, 0.42, 0.05, 20]} />
         <meshStandardMaterial color="#8a6142" roughness={0.6} />
@@ -203,7 +206,7 @@ function CafeTable() {
 
 function Lounge() {
   return (
-    <group position={[19.4, 0, 8.8]} rotation={[0, Math.PI / 2, 0]}>
+    <group position={[13.4, 0, 5.4]} rotation={[0, Math.PI / 2, 0]}>
       {/* sofa */}
       <group position={[0, 0, 0]}>
         <mesh position={[0, 0.24, 0]}>
@@ -289,7 +292,7 @@ function KopiCorner() {
     px: 40,
   })
   return (
-    <group position={[-19.3, 0, 8.0]} rotation={[0, Math.PI / 2, 0]}>
+    <group position={[-13.5, 0, 5.4]} rotation={[0, Math.PI / 2, 0]}>
       <mesh position={[0, 0.52, 0]}>
         <boxGeometry args={[2.8, 1.04, 0.6]} />
         <meshStandardMaterial color="#6f4c32" roughness={0.75} />
@@ -331,33 +334,13 @@ function KopiCorner() {
           <meshStandardMaterial color="#e4d8c2" roughness={0.55} />
         </mesh>
       ))}
-      {/* stools */}
-      {[-0.9, 0, 0.9].map((x) => (
-        <group key={x} position={[x, 0, 1.05]}>
-          <mesh position={[0, 0.44, 0]}>
-            <cylinderGeometry args={[0.22, 0.22, 0.06, 12]} />
-            <meshStandardMaterial color="#8c6a44" roughness={0.85} />
-          </mesh>
-          {[
-            [-0.13, -0.13],
-            [0.13, -0.13],
-            [-0.13, 0.13],
-            [0.13, 0.13],
-          ].map(([lx, lz], i) => (
-            <mesh key={i} position={[lx!, 0.22, lz!]}>
-              <cylinderGeometry args={[0.022, 0.022, 0.44, 6]} />
-              <meshStandardMaterial color="#6d4f31" roughness={0.9} />
-            </mesh>
-          ))}
-        </group>
-      ))}
     </group>
   )
 }
 
 function Gamelan() {
   return (
-    <group position={[-19.1, 0, -5.6]} rotation={[0, Math.PI / 2, 0]}>
+    <group position={[-13.0, 0, -8.8]} rotation={[0, Math.PI / 2, 0]}>
       {/* gong frame */}
       <group position={[0, 0, -0.6]}>
         {[-0.9, 0.9].map((x) => (
@@ -405,8 +388,20 @@ function Gamelan() {
   )
 }
 
+/**
+ * Two-bay server rack in the dev room's back corner: dark steel, a vented door,
+ * a column of blinking status LEDs and a plate above it — the devops desk sits
+ * facing it, so the pair reads from the isometric camera as one corner.
+ */
 function ServerRack() {
   const leds = useRef<THREE.Group>(null)
+  const plate = labelTexture({
+    text: 'RAK SERVER',
+    color: '#f6ecdb',
+    bg: 'rgba(28,32,30,0.92)',
+    border: '#69b39b',
+    px: 44,
+  })
   useFrame((s) => {
     if (!leds.current) return
     const t = s.clock.elapsedTime
@@ -416,15 +411,36 @@ function ServerRack() {
     })
   })
   return (
-    <group position={[-17.2, 0, -14.4]}>
-      <mesh position={[0, 1.0, 0]}>
-        <boxGeometry args={[1.1, 2.0, 0.8]} />
+    <group position={[-0.55, 0, -9.3]}>
+      {/* plinth + body: 0.9 wide, 1.0 deep, 2.2 tall */}
+      <mesh position={[0, 0.05, 0]}>
+        <boxGeometry args={[0.94, 0.1, 1.04]} />
+        <meshStandardMaterial color="#17181a" roughness={0.85} />
+      </mesh>
+      <mesh position={[0, 1.15, 0]}>
+        <boxGeometry args={[0.9, 2.1, 1.0]} />
         <meshStandardMaterial color="#2b2b2e" roughness={0.6} metalness={0.35} />
       </mesh>
+      {/* door frame + recessed vented face, split in two bays */}
+      {[0.55, 1.7].map((y) => (
+        <group key={y}>
+          <mesh position={[0, y, 0.5]}>
+            <boxGeometry args={[0.8, 0.98, 0.03]} />
+            <meshStandardMaterial color="#1e1e21" roughness={0.7} metalness={0.2} />
+          </mesh>
+          {Array.from({ length: 7 }).map((_, i) => (
+            <mesh key={i} position={[0, y - 0.36 + i * 0.12, 0.52]}>
+              <boxGeometry args={[0.62, 0.03, 0.02]} />
+              <meshStandardMaterial color="#3a3d42" roughness={0.55} metalness={0.45} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      {/* status LEDs on the right-hand rail */}
       <group ref={leds}>
         {Array.from({ length: 16 }).map((_, i) => (
-          <mesh key={i} position={[-0.38 + (i % 8) * 0.11, 1.72 - Math.floor(i / 8) * 0.24, 0.41]}>
-            <sphereGeometry args={[0.022, 8, 6]} />
+          <mesh key={i} position={[0.34, 2.02 - i * 0.12, 0.52]}>
+            <sphereGeometry args={[0.024, 8, 6]} />
             <meshStandardMaterial
               color={i % 3 === 0 ? '#7fe0a0' : i % 3 === 1 ? '#ffcf6a' : '#8fbcff'}
               emissive={i % 3 === 0 ? '#4fc47a' : i % 3 === 1 ? '#e0a030' : '#4f86d0'}
@@ -433,10 +449,75 @@ function ServerRack() {
           </mesh>
         ))}
       </group>
-      <mesh position={[0, 2.06, 0]}>
-        <boxGeometry args={[1.2, 0.1, 0.9]} />
+      {/* cable tray and cap */}
+      <mesh position={[0, 2.26, 0]}>
+        <boxGeometry args={[1.0, 0.08, 1.1]} />
         <meshStandardMaterial color="#1e1e21" roughness={0.7} />
       </mesh>
+      <mesh position={[0, 2.42, -0.3]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.05, 0.05, 0.7, 8]} />
+        <meshStandardMaterial color="#4a4d52" roughness={0.6} metalness={0.3} />
+      </mesh>
+      <sprite position={[0, 2.86, 0.1]} scale={[1.5, 1.5 / plate.aspect, 1]}>
+        <spriteMaterial map={plate.tex} transparent depthWrite={false} />
+      </sprite>
+    </group>
+  )
+}
+
+/**
+ * The devops corner: a dark anti-static mat and a cable trunking run from the
+ * server rack to the devops desk, so the two read as one station from above
+ * instead of two unrelated pieces in a corner.
+ */
+function DevOpsCorner() {
+  return (
+    <group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-3.3, 0.014, -8.5]}>
+        <planeGeometry args={[2.2, 2.6]} />
+        <meshStandardMaterial color="#2f3336" roughness={0.95} />
+      </mesh>
+      <mesh position={[-2.35, 0.045, -8.9]}>
+        <boxGeometry args={[2.7, 0.05, 0.14]} />
+        <meshStandardMaterial color="#26292c" roughness={0.7} metalness={0.2} />
+      </mesh>
+      <mesh position={[-3.6, 0.045, -8.6]}>
+        <boxGeometry args={[0.14, 0.05, 0.72]} />
+        <meshStandardMaterial color="#26292c" roughness={0.7} metalness={0.2} />
+      </mesh>
+    </group>
+  )
+}
+
+/** A low teak filing cabinet with a labelled plate, for a corner that would
+ *  otherwise be bare floor. */
+function Cabinet({ x, z, accent, plate }: { x: number; z: number; accent: string; plate: string }) {
+  const label = labelTexture({
+    text: plate,
+    color: '#f6ecdb',
+    bg: 'rgba(46,31,23,0.9)',
+    border: accent,
+    px: 40,
+  })
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, 0.44, 0]}>
+        <boxGeometry args={[1.4, 0.88, 0.52]} />
+        <meshStandardMaterial color="#6b4a30" roughness={0.78} />
+      </mesh>
+      <mesh position={[0, 0.9, 0]}>
+        <boxGeometry args={[1.46, 0.06, 0.58]} />
+        <meshStandardMaterial color="#8a6142" roughness={0.6} />
+      </mesh>
+      {[0.24, 0.46, 0.68].map((y) => (
+        <mesh key={y} position={[0, y, 0.27]}>
+          <boxGeometry args={[1.24, 0.03, 0.02]} />
+          <meshStandardMaterial color="#8a6142" roughness={0.7} />
+        </mesh>
+      ))}
+      <sprite position={[0, 1.18, 0.08]} scale={[0.8, 0.8 / label.aspect, 1]}>
+        <spriteMaterial map={label.tex} transparent depthWrite={false} />
+      </sprite>
     </group>
   )
 }
@@ -496,7 +577,7 @@ function Bookshelf() {
     '#3f6b64', '#8c5a6b', '#4a5a3c', '#a06a3c', '#4b4b6b', '#6b4a3a',
   ]
   return (
-    <group position={[19.5, 0, -11.0]} rotation={[0, -Math.PI / 2, 0]}>
+    <group position={[11.0, 0, -9.79]}>
       <mesh position={[0, 1.1, 0]}>
         <boxGeometry args={[2.6, 2.2, 0.42]} />
         <meshStandardMaterial color="#6b4a30" roughness={0.78} />
@@ -521,7 +602,7 @@ function Bookshelf() {
 
 function Lesehan() {
   return (
-    <group position={[16.6, 0, -6.2]}>
+    <group position={[12.1, 0, -4.4]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]}>
         <planeGeometry args={[3.4, 2.6]} />
         <meshStandardMaterial color="#b99b6a" roughness={0.95} />
@@ -565,7 +646,7 @@ function Cat() {
     if (head.current) head.current.rotation.y = Math.sin(t * 0.7) * 0.3
   })
   return (
-    <group position={[3.6, 0, 12.6]} rotation={[0, -0.5, 0]}>
+    <group position={[2.6, 0, 8.2]} rotation={[0, -0.5, 0]}>
       <mesh position={[0, 0.16, 0]} scale={[1, 0.9, 1.5]}>
         <sphereGeometry args={[0.19, 14, 12]} />
         <meshStandardMaterial color="#d68a3f" roughness={0.95} />
@@ -598,7 +679,7 @@ function Cat() {
 
 function Entrance() {
   return (
-    <group position={[0, 0, 15.6]}>
+    <group position={[0, 0, 10.6]}>
       <mesh position={[0, 0.09, 0]}>
         <boxGeometry args={[5.6, 0.18, 1.8]} />
         <meshStandardMaterial color="#9a8f7c" roughness={0.95} />

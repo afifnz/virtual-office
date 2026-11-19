@@ -4,11 +4,11 @@ import (
 	"officeapi/internal/roster"
 )
 
-// Floor defaults match the room the frontend draws (40 x 30 world units, ~1 m
+// Floor defaults match the room the frontend draws (28 x 20 world units, ~1 m
 // each). They are published in /api/config so a client never has to guess.
 const (
-	DefaultFloorW = 40.0
-	DefaultFloorD = 30.0
+	DefaultFloorW = 28.0
+	DefaultFloorD = 20.0
 	// Desk lattice. Every desk the scene draws sits on this grid, and an agent
 	// with no hand-placed desk is laid out on it too, so the office stays
 	// legible when a new profile shows up.

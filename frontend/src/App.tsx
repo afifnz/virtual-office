@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Office, agentFocus } from './scene/Office'
+import { Scene } from './components/Scene'
 import type { MoveIntent, RigCommand } from './scene/CameraRig'
 import { Hud } from './components/Hud'
 import { Roster } from './components/Roster'
@@ -11,6 +11,7 @@ import { DPad } from './components/DPad'
 import { useStatus } from './hooks/useStatus'
 import { useIsMobile, useIsTouch } from './hooks/useViewport'
 import { resolveAgentId } from './lib/agents'
+import { agentFocus } from './lib/focus'
 import { SPOTS } from './lib/rooms'
 
 export default function App() {
@@ -113,7 +114,7 @@ export default function App() {
   return (
     <div className={`app ${mobile ? 'is-mobile' : ''}`}>
       <div className="canvas-wrap">
-        <Office
+        <Scene
           status={data}
           command={command}
           moveIntent={moveIntent}

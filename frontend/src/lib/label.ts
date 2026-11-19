@@ -14,35 +14,127 @@ export interface LabelSpec {
   border?: string
   bar?: string
   px?: number
+  /**
+   * Cap the width/height ratio of the plate. Long names and long subtitles
+   * (blocked reasons, tool lists) otherwise grow the sprite without limit and
+   * the plate runs off the frame — which reads as a cut-off nameplate. When a
+   * plate would exceed the cap the type is stepped down first; only the
+   * *subtitle* is ever ellipsized, never the name.
+   */
+  maxAspect?: number
+}
+
+interface Plate {
+  cw: number
+  ch: number
+  padX: number
+  padY: number
+  barW: number
+  px: number
+  subPx: number
+  text: string
+  textW: number
+  subW: number
+  textAsc: number
+  textDesc: number
+  subAsc: number
+  subDesc: number
+  subText: string
+  gap: number
 }
 
 const cache = new Map<string, { tex: THREE.CanvasTexture; aspect: number }>()
+
+const FONT = (px: number) =>
+  `600 ${px}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`
+const SUB_FONT = (px: number) => `500 ${px}px ui-sans-serif, system-ui, sans-serif`
+
+function measure(ctx: CanvasRenderingContext2D, text: string, px: number, sub: boolean) {
+  ctx.font = sub ? SUB_FONT(px) : FONT(px)
+  const m = ctx.measureText(text)
+  return {
+    w: Math.ceil(m.width),
+    asc: Math.ceil(m.actualBoundingBoxAscent || px * 0.75),
+    desc: Math.ceil(m.actualBoundingBoxDescent || px * 0.25),
+  }
+}
+
+/** Lay one plate out at a given type size; ink metrics decide the box. */
+function layout(ctx: CanvasRenderingContext2D, spec: LabelSpec, px: number): Plate {
+  const padX = Math.round(px * 0.45)
+  const padY = Math.round(px * 0.34)
+  const subPx = Math.round(px * 0.42)
+  const gap = Math.round(px * 0.14)
+  const barW = spec.bar ? Math.round(px * 0.16) : 0
+  const main = measure(ctx, spec.text, px, false)
+  const sub = spec.sub ? measure(ctx, spec.sub, subPx, true) : null
+  const cw = Math.max(main.w, sub?.w ?? 0) + padX * 2 + barW
+  const ch = padY * 2 + main.asc + main.desc + (sub ? gap + sub.asc + sub.desc : 0)
+  return {
+    cw,
+    ch,
+    padX,
+    padY,
+    barW,
+    px,
+    subPx,
+    text: spec.text,
+    textW: main.w,
+    subW: sub?.w ?? 0,
+    textAsc: main.asc,
+    textDesc: main.desc,
+    subAsc: sub?.asc ?? 0,
+    subDesc: sub?.desc ?? 0,
+    subText: spec.sub ?? '',
+    gap,
+  }
+}
+
+/** Trim the subtitle (never the name) until the plate fits the aspect cap. */
+function fitSub(ctx: CanvasRenderingContext2D, plate: Plate, maxAspect: number): Plate {
+  if (!plate.subText) return plate
+  const limit = Math.max(24, maxAspect * plate.ch - plate.padX * 2 - plate.barW)
+  const s = trimTo(ctx, plate.subText, plate.subPx, limit, true)
+  if (s === plate.subText) return plate
+  return { ...plate, subText: s, subW: measure(ctx, s, plate.subPx, true).w }
+}
+
+/** Last resort for a very long *name*: shorten it deliberately, with an ellipsis. */
+function fitName(ctx: CanvasRenderingContext2D, plate: Plate, maxAspect: number): Plate {
+  const limit = Math.max(24, maxAspect * plate.ch - plate.padX * 2 - plate.barW)
+  if (plate.textW <= limit) return plate
+  const s = trimTo(ctx, plate.text, plate.px, limit, false)
+  return { ...plate, text: s, textW: measure(ctx, s, plate.px, false).w }
+}
+
+function trimTo(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  px: number,
+  limit: number,
+  sub: boolean,
+): string {
+  if (measure(ctx, text, px, sub).w <= limit) return text
+  let s = text
+  while (s.length > 1 && measure(ctx, `${s}…`, px, sub).w > limit) s = s.slice(0, -1)
+  return `${s.replace(/[\s·,;:-]+$/, '')}…`
+}
 
 export function labelTexture(spec: LabelSpec): { tex: THREE.CanvasTexture; aspect: number } {
   const key = JSON.stringify(spec)
   const hit = cache.get(key)
   if (hit) return hit
 
-  const px = spec.px ?? 58
-  const padX = Math.round(px * 0.45)
-  const padY = Math.round(px * 0.32)
-  const subPx = Math.round(px * 0.42)
+  const measureCtx = document.createElement('canvas').getContext('2d')!
+  const maxAspect = spec.maxAspect ?? Infinity
 
-  const measure = document.createElement('canvas').getContext('2d')!
-  const font = `600 ${px}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`
-  measure.font = font
-  const textW = Math.ceil(measure.measureText(spec.text).width)
-  let subW = 0
-  if (spec.sub) {
-    measure.font = `500 ${subPx}px ui-sans-serif, system-ui, sans-serif`
-    subW = Math.ceil(measure.measureText(spec.sub).width)
-  }
-  const contentW = Math.max(textW, subW)
-  const barW = spec.bar ? Math.round(px * 0.16) : 0
+  let plate = layout(measureCtx, spec, spec.px ?? 58)
+  // Trim the subtitle first (blocked reasons are long and expendable), then the
+  // name only if it alone still overflows the cap.
+  plate = fitSub(measureCtx, plate, maxAspect)
+  plate = fitName(measureCtx, plate, maxAspect)
 
-  const cw = contentW + padX * 2 + barW
-  const ch = spec.sub ? padY * 2 + px + subPx + Math.round(px * 0.18) : padY * 2 + px
-
+  const { cw, ch } = plate
   const canvas = document.createElement('canvas')
   canvas.width = cw
   canvas.height = ch
@@ -50,33 +142,37 @@ export function labelTexture(spec: LabelSpec): { tex: THREE.CanvasTexture; aspec
   ctx.clearRect(0, 0, cw, ch)
 
   if (spec.bg) {
-    const r = Math.round(px * 0.28)
+    const r = Math.round(plate.px * 0.28)
     ctx.fillStyle = spec.bg
     roundRect(ctx, 0, 0, cw, ch, r)
     ctx.fill()
   }
   if (spec.border) {
-    const r = Math.round(px * 0.28)
+    const r = Math.round(plate.px * 0.28)
     ctx.strokeStyle = spec.border
-    ctx.lineWidth = Math.max(2, px * 0.05)
+    ctx.lineWidth = Math.max(2, plate.px * 0.05)
     roundRect(ctx, ctx.lineWidth / 2, ctx.lineWidth / 2, cw - ctx.lineWidth, ch - ctx.lineWidth, r)
     ctx.stroke()
   }
   if (spec.bar) {
     ctx.fillStyle = spec.bar
-    roundRect(ctx, padX * 0.3, padY * 0.7, barW, ch - padY * 1.4, barW / 2)
+    roundRect(ctx, plate.padX * 0.3, plate.padY * 0.7, plate.barW, ch - plate.padY * 1.4, plate.barW / 2)
     ctx.fill()
   }
 
-  ctx.textBaseline = 'top'
+  // Baseline from the measured ascent, so descenders (the "g" in Kakung, the
+  // "y" in Wahyu) always land inside the canvas instead of on its edge.
+  const x = plate.padX + plate.barW
+  const baseY = plate.padY + plate.textAsc
+  ctx.textBaseline = 'alphabetic'
   ctx.fillStyle = spec.color ?? '#f6efe3'
-  ctx.font = font
-  ctx.fillText(spec.text, padX + barW, padY)
+  ctx.font = FONT(plate.px)
+  ctx.fillText(plate.text, x, baseY)
 
   if (spec.sub) {
     ctx.fillStyle = spec.subColor ?? 'rgba(246,239,227,0.62)'
-    ctx.font = `500 ${subPx}px ui-sans-serif, system-ui, sans-serif`
-    ctx.fillText(spec.sub, padX + barW, padY + px + Math.round(px * 0.16))
+    ctx.font = SUB_FONT(plate.subPx)
+    ctx.fillText(plate.subText, x, baseY + plate.textDesc + plate.gap + plate.subAsc)
   }
 
   const tex = new THREE.CanvasTexture(canvas)
