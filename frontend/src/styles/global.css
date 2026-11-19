@@ -474,17 +474,43 @@ ul {
   z-index: 25;
   top: calc(84px + var(--safe-t));
   left: calc(12px + var(--safe-l));
-  width: 268px;
-  max-height: calc(100dvh - 200px);
+  width: 246px;
+  /* the panel owns a bounded height; the list scrolls inside it instead of
+     spilling past the rounded box (where .app's overflow:hidden cut it) */
+  max-height: calc(100dvh - 168px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .roster-body {
+  /* flex:1 + min-height:0 is what makes a flex child actually scroll: without
+     it the body keeps its content height and the last rows are unreachable */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* .app sets touch-action:none for the 3D canvas; re-enable vertical panning
+     here or a finger drag over the list does nothing on mobile */
+  touch-action: pan-y;
   padding: 6px;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(214, 180, 130, 0.45) transparent;
+}
+
+.roster-body::-webkit-scrollbar {
+  width: 8px;
+}
+.roster-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.roster-body::-webkit-scrollbar-thumb {
+  background: rgba(214, 180, 130, 0.4);
+  border-radius: 999px;
+}
+.roster-body:hover::-webkit-scrollbar-thumb {
+  background: rgba(214, 180, 130, 0.62);
 }
 
 .roster-team h3 {
@@ -1175,11 +1201,18 @@ ul {
     left: 0;
     bottom: 0;
     width: min(88vw, 340px);
-    max-height: none;
+    height: 100dvh;
+    max-height: 100dvh;
     border-radius: 0 16px 16px 0;
     padding-top: var(--safe-t);
     padding-bottom: var(--safe-b);
     z-index: 45;
+    overflow: hidden;
+  }
+
+  /* the drawer keeps its head fixed and scrolls the list under it */
+  .roster.is-drawer .roster-body {
+    padding-bottom: calc(10px + var(--safe-b));
   }
 
   .feed.is-sheet {
@@ -1319,5 +1352,15 @@ ul {
 @media (min-width: 761px) {
   .hud-detail {
     display: flex;
+  }
+
+  /* 13 desks fit a 548px column only if a row is 40px; 44px is the mobile
+     touch target, desktop pointers do not need it */
+  .roster-row {
+    min-height: 40px;
+    padding: 5px 8px;
+  }
+  .roster-team h3 {
+    padding: 8px 6px 4px;
   }
 }
