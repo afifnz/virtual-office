@@ -40,7 +40,7 @@ cfg=$(curl -s localhost:8211/api/config)
 check "default id is Ndoro Kakung / ASISTEN UTAMA / lobby" '"id":"default","name":"Ndoro Kakung","role":"ASISTEN UTAMA","team":"lobby"' "$cfg"
 check "dev is Bima / SDLC LEAD" '"id":"dev","name":"Bima","role":"SDLC LEAD","team":"dev"' "$cfg"
 check "team ids are lobby/dev/edu" '"teams":[{"id":"lobby","label":"Pendopo"},{"id":"dev","label":"Tim Dev"},{"id":"edu","label":"Tim Edu"}]' "$cfg"
-check "layout publishes grid 4.5 x 4.0 and aisle 1.6" '"layout":{"floor":{"w":40,"d":30},"grid":{"dx":4.5,"dz":4},"aisle":1.6}' "$cfg"
+check "layout publishes grid 4.5 x 4.0 and aisle 1.6" '"layout":{"floor":{"w":28,"d":20},"grid":{"dx":4.5,"dz":4},"aisle":1.6}' "$cfg"
 check "pendopo is not published as a team id" 'Pendopo' "$cfg"
 checknot "no legacy team id" '"id":"pendopo"' "$cfg"
 kill "$pid" 2>/dev/null

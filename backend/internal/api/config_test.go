@@ -58,7 +58,7 @@ func TestConfigEndpoint(t *testing.T) {
 
 	layout, _ := body["layout"].(map[string]any)
 	floor, _ := layout["floor"].(map[string]any)
-	if floor["w"] != 40.0 || floor["d"] != 30.0 {
+	if floor["w"] != 28.0 || floor["d"] != 20.0 {
 		t.Fatalf("floor = %v", floor)
 	}
 

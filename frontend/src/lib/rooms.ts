@@ -2,8 +2,15 @@ import { AGENTS } from './agents'
 import { deskObstacle as deskFootprint, type Edge, type Obstacle } from './layout'
 import { setFloorContext, setFurniture } from './roster'
 
-/** The floor is 40 x 30 in world units (1 unit ~ 1 m): 4:3, not a corridor. */
-export const FLOOR = { w: 40, d: 30, y: 0 } as const
+/**
+ * The floor is 28 x 20 world units (1 unit ~ 1 m): 7:5, not a corridor.
+ *
+ * Sized from the furniture, not the other way round: the dev block is
+ * 3 x 1.62 + 2 x 1.03 = 4.86 x 2.08, the edu block 2 x 1.62 + 2 x 1.03 =
+ * 3.24 x 2.08, and every desk keeps a 1.6-unit aisle to the walls and to the
+ * furniture around its block. Lobby 28 x 8, team rooms 14 x 12 each.
+ */
+export const FLOOR = { w: 28, d: 20, y: 0 } as const
 export const WALL_H = 3.4
 export const WALL_T = 0.22
 
@@ -17,26 +24,26 @@ export interface WallSeg {
 }
 
 /**
- * Room split — Pendopo across the front (z 3..15, 40 x 12), Tim Dev back-left
- * (x -20..0, z -15..3) and Tim Edu back-right (x 0..20, z -15..3), both 20 x 18.
- * Doors: main entrance at x = 0 / z = 15, two symmetric team doors at x = +-10
- * on the z = 3 partition, one doorway between the teams at x = 0.
+ * Room split — Pendopo across the front (z 2..10, 28 x 8), Tim Dev back-left
+ * (x -14..0, z -10..2) and Tim Edu back-right (x 0..14, z -10..2), both 14 x 12.
+ * Doors: main entrance at x = 0 / z = 10, two team doors at x = +-7.5 on the
+ * z = 2 partition, one doorway between the teams at x = 0.
  */
 export const WALLS: WallSeg[] = [
   // outer shell
-  { axis: 'x', at: -15, from: -20, to: 20 }, // back
-  { axis: 'z', at: -20, from: -15, to: 15 }, // left
-  { axis: 'z', at: 20, from: -15, to: 15 }, // right
+  { axis: 'x', at: -10, from: -14, to: 14 }, // back
+  { axis: 'z', at: -14, from: -10, to: 10 }, // left
+  { axis: 'z', at: 14, from: -10, to: 10 }, // right
   // front wall with the main entrance gap (x -2.2 .. 2.2)
-  { axis: 'x', at: 15, from: -20, to: -2.2 },
-  { axis: 'x', at: 15, from: 2.2, to: 20 },
-  // pendopo / team rooms partition, two symmetric doorways at x -12.2..-7.8 and 7.8..12.2
-  { axis: 'x', at: 3, from: -20, to: -12.2 },
-  { axis: 'x', at: 3, from: -7.8, to: 7.8 },
-  { axis: 'x', at: 3, from: 12.2, to: 20 },
+  { axis: 'x', at: 10, from: -14, to: -2.2 },
+  { axis: 'x', at: 10, from: 2.2, to: 14 },
+  // pendopo / team rooms partition, two symmetric doorways at x -9.7..-5.3 and 5.3..9.7
+  { axis: 'x', at: 2, from: -14, to: -9.7 },
+  { axis: 'x', at: 2, from: -5.3, to: 5.3 },
+  { axis: 'x', at: 2, from: 9.7, to: 14 },
   // dev | edu divider, doorway at z -1.4 .. 1.4
-  { axis: 'z', at: 0, from: -15, to: -1.4 },
-  { axis: 'z', at: 0, from: 1.4, to: 3 },
+  { axis: 'z', at: 0, from: -10, to: -1.4 },
+  { axis: 'z', at: 0, from: 1.4, to: 2 },
 ]
 
 export interface Door {
@@ -50,9 +57,9 @@ export interface Door {
 }
 
 export const DOORS: Door[] = [
-  { x: 0, z: 15, rot: 0, label: 'MASUK', w: 4.4 },
-  { x: -10, z: 3, rot: 0, label: 'TIM DEV', w: 4.4 },
-  { x: 10, z: 3, rot: 0, label: 'TIM EDU', w: 4.4 },
+  { x: 0, z: 10, rot: 0, label: 'MASUK', w: 4.4 },
+  { x: -7.5, z: 2, rot: 0, label: 'TIM DEV', w: 4.4 },
+  { x: 7.5, z: 2, rot: 0, label: 'TIM EDU', w: 4.4 },
   { x: 0, z: 0, rot: Math.PI / 2, label: '', w: 2.8 },
 ]
 
@@ -65,16 +72,35 @@ export interface DeskSpot {
 
 export type { Obstacle }
 
-/** One desk per agent, on a 4.5 x 4.0 grid (see lib/agents.ts). */
+/**
+ * One desk per agent. Team desks sit in touching blocks (see CLUSTERS): the dev
+ * six in a 3 x 2 island, the edu four in a 2 x 2, the devops desk on its own by
+ * the server rack. Desk tops are 1.62 wide and 1.03 deep, so a 1.62 column
+ * pitch and a 0.78 row pitch make the tops meet with no seam at all.
+ */
 export const DESKS: DeskSpot[] = AGENTS.map((a) => ({ id: a.id, ...a.desk }))
+
+/** Desks that form one touching block; every other pair keeps a 1.6 aisle. */
+export const CLUSTERS: Record<string, string[]> = {
+  dev: ['dev', 'planner', 'uiux', 'coder', 'reviewer', 'tester'],
+  edu: ['edu', 'edu-designer', 'edu-writer', 'edu-reviewer'],
+}
+
+const CLUSTER_OF: Record<string, string> = Object.fromEntries(
+  Object.entries(CLUSTERS).flatMap(([name, ids]) => ids.map((id) => [id, name])),
+)
+
+/** Cluster a desk belongs to, or null for a free-standing desk. */
+export function clusterOf(id: string): string | null {
+  return CLUSTER_OF[id] ?? null
+}
+
+/** Two desks of the same block are allowed to touch; 0 here, 0.02 in the checks. */
+export const BLOCK_GAP = 0.02
 
 /** Where a seated agent stands up to: 2.0 behind the chair, never through the desk. */
 export const DESK_EXIT: Record<string, [number, number]> = Object.fromEntries(
-  DESKS.map((d) => {
-    const fx = Math.sin(d.rot)
-    const fz = Math.cos(d.rot)
-    return [d.id, [d.x + fx * 2.0, d.z + fz * 2.0] as [number, number]]
-  }),
+  DESKS.map((d) => [d.id, deskExit(d)]),
 )
 
 /** Where a seated agent stands up to: 2.0 behind the chair, never through the desk. */
@@ -92,34 +118,34 @@ export interface Spot {
 }
 
 export const SPOTS: Record<string, Spot> = {
-  lobby: { id: 'lobby', label: 'Pendopo', pos: [-9.6, 2.3, 14.3], target: [-6.0, 0.9, 10.3], fov: 55 },
-  dev: { id: 'dev', label: 'Tim Dev', pos: [-10.0, 4.6, 1.4], target: [-10.0, 0.35, -7.0], fov: 58 },
-  edu: { id: 'edu', label: 'Tim Edu', pos: [10.0, 4.6, 1.4], target: [10.0, 0.35, -7.0], fov: 58 },
-  tampak: { id: 'tampak', label: 'Tampak', pos: [0, 22, 28], target: [0, 0, -1], fov: 42 },
-  luar: { id: 'luar', label: 'Luar', pos: [24, 17, 56], target: [0, 2.6, 6], fov: 44 },
+  lobby: { id: 'lobby', label: 'Pendopo', pos: [-9.8, 2.4, 9.2], target: [-6.6, 0.9, 5.2], fov: 55 },
+  dev: { id: 'dev', label: 'Tim Dev', pos: [-1.2, 5.4, 2.6], target: [-7.0, 0.3, -6.2], fov: 60 },
+  edu: { id: 'edu', label: 'Tim Edu', pos: [12.4, 5.4, 2.6], target: [6.6, 0.3, -6.2], fov: 60 },
+  tampak: { id: 'tampak', label: 'Tampak', pos: [0, 17, 18], target: [0, 0, -0.5], fov: 42 },
+  luar: { id: 'luar', label: 'Luar', pos: [18, 13, 36], target: [0, 2.4, 4], fov: 44 },
 }
 
 /**
- * Outside the building: the stone batur (40 x 30 floor + a 3-unit veranda on
+ * Outside the building: the stone batur (28 x 20 floor + a 3-unit veranda on
  * every side), the yard below it, the roof eave height, the gapura on the path
  * and the trees ([x, z, scale]) — all clear of the path and the "luar" camera.
  */
 export const EXTERIOR = {
   batur: { w: FLOOR.w + 6, d: FLOOR.d + 6 },
-  ground: { y: -0.4, size: 170 },
+  ground: { y: -0.4, size: 130 },
   eaveY: 3.0,
-  gapuraZ: 34,
+  gapuraZ: 25,
   trees: [
-    [-30, 8, 1.2],
-    [-28, -12, 1.0],
-    [-32, 22, 1.1],
-    [30, -10, 1.2],
-    [31, 12, 1.0],
-    [36, 28, 1.1],
-    [-12, -25, 1.0],
-    [12, -26, 1.15],
-    [-14, 32, 0.9],
-    [-25, 36, 0.9],
+    [-22, 6, 1.2],
+    [-20, -10, 1.0],
+    [-24, 16, 1.1],
+    [22, -8, 1.2],
+    [23, 11, 1.0],
+    [27, 19, 1.1],
+    [-9, -19, 1.0],
+    [9, -20, 1.15],
+    [-12, 24, 0.9],
+    [-19, 27, 0.9],
   ] as Array<[number, number, number]>,
 } as const
 
@@ -135,17 +161,17 @@ export interface Poi {
 
 /** Idle agents walk to one of these, do the act, then walk home. */
 export const POIS: Poi[] = [
-  { id: 'kopi', name: 'warung kopi', pos: [-17.5, 8.0], act: 'sip', team: 'lobby' },
-  { id: 'jendela', name: 'jendela', pos: [-15.0, 14.2], act: 'gaze', team: 'lobby' },
-  { id: 'kucing', name: 'kucing oren', pos: [3.6, 11.7], act: 'pet', team: 'lobby' },
-  { id: 'resepsionis', name: 'meja resepsionis', pos: [-2.7, 10.8], act: 'chat', team: 'lobby' },
-  { id: 'rapat', name: 'meja rapat', pos: [8.0, 10.2], act: 'chat', team: 'lobby' },
-  { id: 'meja-kopi', name: 'meja kopi', pos: [-15.5, 6.3], act: 'sip', team: 'lobby' },
-  { id: 'gamelan', name: 'gamelan', pos: [-17.2, -5.6], act: 'gamelan', team: 'dev' },
-  { id: 'server', name: 'rak server', pos: [-17.2, -13.2], act: 'check', team: 'dev' },
-  { id: 'papan', name: 'papan sprint', pos: [-10.0, -13.7], act: 'read', team: 'dev' },
-  { id: 'buku', name: 'rak buku', pos: [18.2, -11.0], act: 'read', team: 'edu' },
-  { id: 'lesehan', name: 'lesehan', pos: [14.2, -6.2], act: 'sit', team: 'edu' },
+  { id: 'kopi', name: 'warung kopi', pos: [-12.4, 5.4], act: 'sip', team: 'lobby' },
+  { id: 'jendela', name: 'jendela', pos: [-10.4, 9.2], act: 'gaze', team: 'lobby' },
+  { id: 'kucing', name: 'kucing oren', pos: [2.6, 7.4], act: 'pet', team: 'lobby' },
+  { id: 'resepsionis', name: 'meja resepsionis', pos: [-3.0, 6.6], act: 'chat', team: 'lobby' },
+  { id: 'rapat', name: 'meja rapat', pos: [7.4, 4.6], act: 'chat', team: 'lobby' },
+  { id: 'meja-kopi', name: 'meja kopi', pos: [-10.4, 4.2], act: 'sip', team: 'lobby' },
+  { id: 'gamelan', name: 'gamelan', pos: [-11.6, -4.4], act: 'gamelan', team: 'dev' },
+  { id: 'server', name: 'rak server', pos: [-1.9, -8.0], act: 'check', team: 'dev' },
+  { id: 'papan', name: 'papan sprint', pos: [-7.6, -9.2], act: 'read', team: 'dev' },
+  { id: 'buku', name: 'rak buku', pos: [10.6, -8.9], act: 'read', team: 'edu' },
+  { id: 'lesehan', name: 'lesehan', pos: [11.5, -2.6], act: 'sit', team: 'edu' },
 ]
 
 /** Waypoint graph — every edge is walkable and clear of furniture. */
@@ -156,65 +182,42 @@ export interface NavNode {
 }
 
 export const NAV: NavNode[] = [
-  // pendopo
-  { id: 'gate', x: 0, z: 13.6 },
-  { id: 'lobby-n', x: -6.0, z: 13.4 },
-  { id: 'lobby-win', x: -13.0, z: 13.2 },
-  { id: 'lobby-nw', x: -12.0, z: 12.0 },
-  { id: 'lobby-c', x: 0, z: 9.6 },
-  { id: 'lobby-desk', x: -7.0, z: 7.2 },
-  { id: 'lobby-w', x: -12.0, z: 7.2 },
-  { id: 'lobby-kopi', x: -16.2, z: 8.0 },
-  { id: 'lobby-cat', x: 3.6, z: 10.6 },
-  { id: 'lobby-e', x: 12.0, z: 9.6 },
-  { id: 'lobby-lounge', x: 16.2, z: 8.8 },
-  { id: 'lobby-sw', x: -10.0, z: 4.8 },
-  { id: 'lobby-se', x: 10.0, z: 4.8 },
+  // pendopo: a ring round the reception, meeting table and kopi corner
+  { id: 'gate', x: 0, z: 9.3 },
+  { id: 'lobby-nw', x: -8.6, z: 9.3 },
+  { id: 'lobby-ne', x: 10.2, z: 9.3 },
+  { id: 'lobby-nwc', x: -12.3, z: 8.6 },
+  { id: 'lobby-kopi', x: -12.3, z: 5.4 },
+  { id: 'lobby-sw', x: -7.5, z: 3.5 },
+  { id: 'lobby-c', x: -2.0, z: 3.5 },
+  { id: 'lobby-sc', x: 2.6, z: 3.5 },
+  { id: 'lobby-se', x: 7.5, z: 3.5 },
+  { id: 'lobby-e', x: 10.2, z: 3.5 },
+  { id: 'lobby-wc', x: -12.3, z: 3.5 },
+  { id: 'lobby-wm', x: -8.6, z: 3.5 },
+  { id: 'lobby-desk', x: -6.9, z: 4.6 },
+  { id: 'lobby-recep', x: -2.2, z: 6.6 },
+  { id: 'lobby-cat', x: 2.6, z: 6.6 },
+  // dev room: front aisle (z -1.6), side aisles (x -11.0 / -1.8), back aisle (z -6.4)
   { id: 'inner-door', x: 0, z: 0 },
-  // dev room: front aisle (z -2.5), pod gaps (x -12.25 / -7.75), back aisle (z -9.6)
-  { id: 'dev-door', x: -10.0, z: 1.8 },
-  { id: 'dev-front', x: -10.0, z: -2.6 },
-  { id: 'dev-open-w', x: -17.1, z: -2.4 },
-  { id: 'dev-f1', x: -14.5, z: -2.5 },
-  { id: 'dev-g1', x: -12.25, z: -2.5 },
-  { id: 'dev-g2', x: -7.75, z: -2.5 },
-  { id: 'dev-f3', x: -5.5, z: -2.5 },
-  { id: 'dev-open-e', x: -2.4, z: -2.4 },
-  { id: 'dev-gam', x: -16.6, z: -5.2 },
-  { id: 'dev-mid-w', x: -17.1, z: -6.4 },
-  { id: 'dev-mid1', x: -12.25, z: -6.6 },
-  { id: 'dev-mid2', x: -7.75, z: -6.6 },
-  { id: 'dev-mid-e', x: -2.4, z: -6.4 },
-  { id: 'dev-bk-w', x: -17.1, z: -9.6 },
-  { id: 'dev-bk1', x: -14.5, z: -9.6 },
-  { id: 'dev-bk-g1', x: -12.25, z: -9.6 },
-  { id: 'dev-bk2', x: -10.0, z: -9.6 },
-  { id: 'dev-bk-g2', x: -7.75, z: -9.6 },
-  { id: 'dev-bk3', x: -5.5, z: -9.6 },
-  { id: 'dev-bk-e', x: -2.4, z: -9.6 },
-  { id: 'dev-back-w', x: -16.2, z: -12.4 },
-  { id: 'dev-back1', x: -12.25, z: -12.4 },
-  { id: 'dev-back-c', x: -10.0, z: -12.4 },
-  { id: 'dev-back2', x: -7.75, z: -12.4 },
-  { id: 'dev-back-e', x: -3.0, z: -12.4 },
-  // edu room: same pattern, pod gap at x 10
-  { id: 'edu-door', x: 10.0, z: 1.8 },
-  { id: 'edu-front', x: 10.0, z: -2.6 },
-  { id: 'edu-open-w', x: 3.2, z: -2.4 },
-  { id: 'edu-f1', x: 7.75, z: -2.5 },
-  { id: 'edu-f2', x: 12.25, z: -2.5 },
-  { id: 'edu-open-e', x: 14.0, z: -2.4 },
-  { id: 'edu-mid-w', x: 3.5, z: -6.4 },
-  { id: 'edu-mid-c', x: 10.0, z: -6.6 },
-  { id: 'edu-mid-e', x: 14.0, z: -6.4 },
-  { id: 'edu-bk-w', x: 3.5, z: -9.6 },
-  { id: 'edu-bk1', x: 7.75, z: -9.6 },
-  { id: 'edu-bk-c', x: 10.0, z: -9.6 },
-  { id: 'edu-bk2', x: 12.25, z: -9.6 },
-  { id: 'edu-bk-e', x: 14.0, z: -9.6 },
-  { id: 'edu-back-w', x: 3.5, z: -12.4 },
-  { id: 'edu-back-c', x: 10.0, z: -12.4 },
-  { id: 'edu-back-e', x: 15.5, z: -12.4 },
+  { id: 'dev-door', x: -7.5, z: 1.0 },
+  { id: 'dev-front-w', x: -11.0, z: -1.6 },
+  { id: 'dev-front', x: -7.5, z: -1.6 },
+  { id: 'dev-front-e', x: -1.8, z: -1.6 },
+  { id: 'dev-gam', x: -11.0, z: -4.4 },
+  { id: 'dev-back-w', x: -11.0, z: -6.4 },
+  { id: 'dev-back', x: -7.6, z: -6.4 },
+  { id: 'dev-back-e', x: -1.8, z: -6.4 },
+  // edu room: same pattern, wider block aisle
+  { id: 'edu-door', x: 7.5, z: 1.0 },
+  { id: 'edu-front-w', x: 3.0, z: -1.6 },
+  { id: 'edu-front', x: 7.5, z: -1.6 },
+  { id: 'edu-front-e', x: 9.4, z: -1.6 },
+  { id: 'edu-front-r', x: 11.9, z: -1.6 },
+  { id: 'edu-back-w', x: 3.0, z: -6.6 },
+  { id: 'edu-back', x: 7.0, z: -6.6 },
+  { id: 'edu-back-e', x: 9.4, z: -6.6 },
+  { id: 'edu-shelf', x: 12.4, z: -6.6 },
 ]
 
 /** Wall footprints, so a new desk never lands inside a partition. */
@@ -226,80 +229,52 @@ export const WALL_OBSTACLES: Obstacle[] = WALLS.map((w, i) => {
 })
 
 export const NAV_EDGES: Array<[string, string]> = [
-  ['gate', 'lobby-n'],
+  // pendopo ring
+  ['gate', 'lobby-nw'],
+  ['gate', 'lobby-ne'],
   ['gate', 'lobby-c'],
-  ['lobby-n', 'lobby-win'],
-  ['lobby-win', 'lobby-nw'],
-  ['lobby-nw', 'lobby-w'],
-  ['lobby-c', 'lobby-desk'],
-  ['lobby-c', 'lobby-cat'],
-  ['lobby-c', 'lobby-e'],
-  ['lobby-c', 'lobby-sw'],
-  ['lobby-c', 'lobby-se'],
-  ['lobby-desk', 'lobby-w'],
-  ['lobby-w', 'lobby-kopi'],
-  ['lobby-e', 'lobby-lounge'],
+  ['lobby-nw', 'lobby-nwc'],
+  ['lobby-nwc', 'lobby-kopi'],
+  ['lobby-kopi', 'lobby-wc'],
+  ['lobby-wc', 'lobby-wm'],
+  ['lobby-wm', 'lobby-sw'],
+  ['lobby-nw', 'lobby-wm'] as [string, string],
+  ['lobby-sw', 'lobby-c'],
+  ['lobby-c', 'lobby-sc'],
+  ['lobby-sc', 'lobby-se'],
+  ['lobby-se', 'lobby-e'],
+  ['lobby-e', 'lobby-ne'],
+  ['lobby-wm', 'lobby-desk'],
+  ['lobby-sw', 'lobby-desk'],
+  ['lobby-c', 'lobby-recep'],
+  ['lobby-sc', 'lobby-cat'],
+  // into the team rooms
   ['lobby-sw', 'dev-door'],
   ['lobby-se', 'edu-door'],
   ['dev-door', 'dev-front'],
-  // dev front aisle
-  ['dev-open-w', 'dev-f1'],
-  ['dev-f1', 'dev-g1'],
-  ['dev-g1', 'dev-front'],
-  ['dev-front', 'dev-g2'],
-  ['dev-g2', 'dev-f3'],
-  ['dev-f3', 'dev-open-e'],
-  ['dev-open-w', 'dev-gam'],
-  ['dev-gam', 'dev-mid-w'],
-  ['dev-open-w', 'dev-mid-w'],
-  ['dev-open-e', 'dev-mid-e'],
-  // through the gaps between pod columns
-  ['dev-g1', 'dev-mid1'],
-  ['dev-g2', 'dev-mid2'],
-  ['dev-mid1', 'dev-bk-g1'],
-  ['dev-mid2', 'dev-bk-g2'],
-  // dev back aisle
-  ['dev-mid-w', 'dev-bk-w'],
-  ['dev-mid-e', 'dev-bk-e'],
-  ['dev-bk-w', 'dev-bk1'],
-  ['dev-bk1', 'dev-bk-g1'],
-  ['dev-bk-g1', 'dev-bk2'],
-  ['dev-bk2', 'dev-bk-g2'],
-  ['dev-bk-g2', 'dev-bk3'],
-  ['dev-bk3', 'dev-bk-e'],
-  ['dev-bk-w', 'dev-back-w'],
-  ['dev-bk-g1', 'dev-back1'],
-  ['dev-bk2', 'dev-back-c'],
-  ['dev-bk-g2', 'dev-back2'],
-  ['dev-bk-e', 'dev-back-e'],
-  ['dev-back-w', 'dev-back1'],
-  ['dev-back1', 'dev-back-c'],
-  ['dev-back-c', 'dev-back2'],
-  ['dev-back2', 'dev-back-e'],
-  ['dev-open-e', 'inner-door'],
-  ['inner-door', 'edu-open-w'],
-  // edu front aisle
   ['edu-door', 'edu-front'],
-  ['edu-open-w', 'edu-f1'],
-  ['edu-f1', 'edu-front'],
-  ['edu-front', 'edu-f2'],
-  ['edu-f2', 'edu-open-e'],
-  ['edu-open-w', 'edu-mid-w'],
-  ['edu-open-e', 'edu-mid-e'],
-  ['edu-front', 'edu-mid-c'],
+  // dev front aisle
+  ['dev-front-w', 'dev-front'],
+  ['dev-front', 'dev-front-e'],
+  ['dev-front-e', 'dev-back-e'],
+  ['dev-front-w', 'dev-gam'],
+  ['dev-gam', 'dev-back-w'],
+  // dev back aisle
+  ['dev-back-w', 'dev-back'],
+  ['dev-back', 'dev-back-e'],
+  // inner doorway between the rooms
+  ['dev-front-e', 'inner-door'],
+  ['inner-door', 'edu-front-w'],
+  // edu front aisle
+  ['edu-front-w', 'edu-front'],
+  ['edu-front', 'edu-front-e'],
+  ['edu-front-e', 'edu-front-r'],
+  ['edu-front-e', 'edu-back-e'],
   // edu back aisle
-  ['edu-mid-w', 'edu-bk-w'],
-  ['edu-mid-c', 'edu-bk-c'],
-  ['edu-mid-e', 'edu-bk-e'],
-  ['edu-bk-w', 'edu-bk1'],
-  ['edu-bk1', 'edu-bk-c'],
-  ['edu-bk-c', 'edu-bk2'],
-  ['edu-bk2', 'edu-bk-e'],
-  ['edu-bk-w', 'edu-back-w'],
-  ['edu-bk-c', 'edu-back-c'],
-  ['edu-bk-e', 'edu-back-e'],
-  ['edu-back-w', 'edu-back-c'],
-  ['edu-back-c', 'edu-back-e'],
+  ['edu-back-w', 'edu-back'],
+  ['edu-back', 'edu-back-e'],
+  ['edu-back-e', 'edu-shelf'],
+  ['edu-front-w', 'edu-back-w'],
 ]
 
 /** Nearest nav node to a point, used to enter/exit the graph from a desk. */
@@ -328,20 +303,23 @@ function deskObstacle(d: DeskSpot): Obstacle {
 export const OBSTACLES: Obstacle[] = [
   ...DESKS.map(deskObstacle),
   // pendopo — big pieces hug the walls
-  { id: 'resepsionis', x1: -4.27, z1: 9.42, x2: -3.53, z2: 12.18 },
-  { id: 'meja-rapat', x1: 6.4, z1: 10.9, x2: 9.6, z2: 13.1 },
-  { id: 'meja-kopi', x1: -16.5, z1: 4.75, x2: -14.5, z2: 5.65 },
-  { id: 'kopi', x1: -19.6, z1: 6.6, x2: -18.03, z2: 9.4 },
-  { id: 'sofa', x1: 17.44, z1: 6.24, x2: 19.85, z2: 11.36 },
-  { id: 'kucing', x1: 3.36, z1: 12.36, x2: 3.84, z2: 12.84 },
+  { id: 'resepsionis', x1: -4.27, z1: 5.62, x2: -3.53, z2: 8.38 },
+  { id: 'meja-rapat', x1: 5.8, z1: 5.5, x2: 9.0, z2: 7.7 },
+  { id: 'meja-kopi', x1: -11.35, z1: 4.7, x2: -9.45, z2: 6.5 },
+  { id: 'kopi', x1: -13.9, z1: 3.9, x2: -13.2, z2: 6.9 },
+  { id: 'sofa', x1: 12.95, z1: 4.2, x2: 13.85, z2: 6.6 },
+  { id: 'sofa-table', x1: 11.15, z1: 5.05, x2: 12.45, z2: 5.75 },
+  { id: 'kucing', x1: 2.36, z1: 7.96, x2: 2.84, z2: 8.44 },
+  { id: 'berkas', x1: -13.3, z1: 0.64, x2: -11.9, z2: 1.16 },
+  { id: 'materi', x1: 11.3, z1: 0.64, x2: 12.7, z2: 1.16 },
   // dev room
-  { id: 'gamelan', x1: -19.77, z1: -6.7, x2: -18.0, z2: -4.6 },
-  { id: 'server', x1: -17.75, z1: -14.8, x2: -16.65, z2: -14.0 },
-  { id: 'papan-dev', x1: -11.8, z1: -14.78, x2: -8.2, z2: -14.62 },
+  { id: 'gamelan', x1: -13.885, z1: -5.45, x2: -12.115, z2: -3.35 },
+  { id: 'server', x1: -1.0, z1: -9.85, x2: -0.1, z2: -8.75 },
+  { id: 'papan-dev', x1: -9.4, z1: -9.78, x2: -5.8, z2: -9.62 },
   // edu room
-  { id: 'buku', x1: 19.29, z1: -12.3, x2: 19.71, z2: -9.7 },
-  { id: 'lesehan', x1: 14.9, z1: -7.5, x2: 18.3, z2: -4.9 },
-  { id: 'papan-edu', x1: 8.2, z1: -14.78, x2: 11.8, z2: -14.62 },
+  { id: 'buku', x1: 9.7, z1: -10.0, x2: 12.3, z2: -9.58 },
+  { id: 'lesehan', x1: 10.4, z1: -5.7, x2: 13.8, z2: -3.1 },
+  { id: 'papan-edu', x1: 5.2, z1: -9.78, x2: 8.8, z2: -9.62 },
 ]
 
 /**

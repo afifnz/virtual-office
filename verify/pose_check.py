@@ -102,17 +102,20 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={"width": 1280, "height": 800})
     pg.on("pageerror", lambda e: print("PAGEERROR:", e))
     pg.goto(url, wait_until="load")
-    # 11 avatars + shader compile on a software rasteriser: 16 s flaked, 30 s
+    # 12 avatars + shader compile on a software rasteriser: 16 s flaked, 30 s
     # is steady (AGENTS.md §8)
     pg.wait_for_timeout(30000)
     rows = json.loads(pg.evaluate(PROBE))
     b.close()
 
+EXPECTED = 12   # one seated avatar per desk (11 + the devops desk)
 SEAT = 0.4725
 KEY = {"x": 0.04, "y": 0.786, "z": -0.26}   # actor frame, keyboard top centre
 print(f"{'desk':>12} {'hipY':>6} {'kneeL-R':>8} {'angL':>6} {'angR':>6} {'sole':>6} "
       f"{'wristL (x,y,z)':>22} {'wristR (x,y,z)':>22} {'headH':>6} {'head/body':>9}")
 bad = []
+if len(rows) != EXPECTED:
+    bad.append(f"{len(rows)} seated avatars, want {EXPECTED}")
 for r in rows:
     print(f"{str(r['at']):>12} {r['hipY']:>6.3f} {r['kneeLevelL']:>8.3f} {r['kneeAngleL']:>6.1f} "
           f"{(r['kneeAngleR'] if r['kneeAngleR'] is not None else float('nan')):>6.1f} {r['soleY']:>6.3f} "

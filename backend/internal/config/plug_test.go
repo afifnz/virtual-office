@@ -158,7 +158,7 @@ func TestBuildPayloadPublishesGridAndRedactsRemote(t *testing.T) {
 	if p.Layout.Grid.DX != 4.5 || p.Layout.Grid.DZ != 4.0 || p.Layout.Aisle != 1.6 {
 		t.Fatalf("layout = %+v", p.Layout)
 	}
-	if p.Layout.Floor.W != 40 || p.Layout.Floor.D != 30 {
+	if p.Layout.Floor.W != 28 || p.Layout.Floor.D != 20 {
 		t.Fatalf("floor = %+v", p.Layout.Floor)
 	}
 }

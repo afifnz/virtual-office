@@ -102,11 +102,15 @@ function Windows() {
   const list = useMemo(() => {
     const out: Array<{ x: number; z: number; ry: number }> = []
     const off = 0.14
-    for (const x of [-15, -9, 9, 15]) out.push({ x, z: FLOOR.d / 2 + off, ry: 0 })
-    for (const x of [-15, -10, -5, 5, 10, 15]) out.push({ x, z: -FLOOR.d / 2 - off, ry: Math.PI })
-    for (const z of [-10, -5, 8, 12]) {
-      out.push({ x: -FLOOR.w / 2 - off, z, ry: -Math.PI / 2 })
-      out.push({ x: FLOOR.w / 2 + off, z, ry: Math.PI / 2 })
+    // every window is a fraction of the wall it sits on, so shrinking the floor
+    // keeps them on the wall instead of leaving them in mid air
+    const hx = FLOOR.w / 2
+    const hz = FLOOR.d / 2
+    for (const f of [-0.96, -0.56, 0.56, 0.96]) out.push({ x: f * hx, z: hz + off, ry: 0 })
+    for (const f of [-0.96, -0.64, -0.32, 0.32, 0.64, 0.96]) out.push({ x: f * hx, z: -hz - off, ry: Math.PI })
+    for (const f of [-0.8, -0.15, 0.45, 0.8]) {
+      out.push({ x: -hx - off, z: f * hz, ry: -Math.PI / 2 })
+      out.push({ x: hx + off, z: f * hz, ry: Math.PI / 2 })
     }
     return out
   }, [])
@@ -231,9 +235,14 @@ function Roof({ show }: { show: boolean }) {
       tile,
       upper,
       wood,
-      lower: frustum(batur.w + 1.4, batur.d + 1.4, eaveY, 30, 20, 5.3),
-      top: frustum(24, 14, 5.6, 9, 0.6, 11.6),
-      band: { size: [25.2, 0.3, 15.2] as [number, number, number], y: 5.45 },
+      // the tiers keep the proportions of the floor they cover, so the eave
+      // still overhangs the walls after the room shrinks
+      lower: frustum(batur.w + 1.4, batur.d + 1.4, eaveY, batur.w * 0.652, batur.d * 0.556, 5.3),
+      top: frustum(batur.w * 0.522, batur.d * 0.389, 5.6, 9, 0.6, 11.6),
+      band: {
+        size: [batur.w * 0.548, 0.3, batur.d * 0.422] as [number, number, number],
+        y: 5.45,
+      },
     }
   }, [])
 

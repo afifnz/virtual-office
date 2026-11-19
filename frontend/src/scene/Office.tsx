@@ -45,7 +45,7 @@ export function Office({ status, command, moveIntent, onNear, onMove, onPick, dp
     <Canvas
       dpr={dpr}
       gl={{ antialias: true, powerPreference: 'high-performance', alpha: true }}
-      camera={{ fov: 55, near: 0.08, far: 140, position: [1.6, 1.95, 13.0] }}
+      camera={{ fov: 55, near: 0.08, far: 140, position: [0, 1.95, 8.4] }}
       onPointerMissed={() => onPick('')}
       onCreated={({ gl, scene, camera }) => {
         // diagnostics hooks used by verify/*.py and the perf probe

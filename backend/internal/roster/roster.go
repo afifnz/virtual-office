@@ -47,6 +47,7 @@ var DefaultAgents = []Entry{
 	{ID: "coder", Name: "Dimas", Role: "IMPLEMENTER", Team: TeamDev},
 	{ID: "reviewer", Name: "Yoga", Role: "CODE REVIEW", Team: TeamDev},
 	{ID: "tester", Name: "Sari", Role: "QA", Team: TeamDev},
+	{ID: "devops", Name: "Wahyu", Role: "DEVOPS", Team: TeamDev},
 	{ID: "edu", Name: "Ayu", Role: "EDU LEAD", Team: TeamEdu},
 	{ID: "edu-designer", Name: "Nisa", Role: "DESAIN INSTRUKSIONAL", Team: TeamEdu},
 	{ID: "edu-writer", Name: "Yohan", Role: "PENULIS MATERI", Team: TeamEdu},
