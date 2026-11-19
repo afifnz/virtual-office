@@ -218,7 +218,7 @@ func TestBuildPayload(t *testing.T) {
 	if p.HermesHome != "/hermes" || p.RemoteURL != "" {
 		t.Fatalf("home/remote = %q/%q", p.HermesHome, p.RemoteURL)
 	}
-	if p.Layout.Floor.W != 40 || p.Layout.Floor.D != 30 {
+	if p.Layout.Floor.W != 28 || p.Layout.Floor.D != 20 {
 		t.Fatalf("floor = %+v", p.Layout.Floor)
 	}
 	if len(p.Roster) != 2 || len(p.Teams) == 0 || len(p.Profiles) != 2 {
