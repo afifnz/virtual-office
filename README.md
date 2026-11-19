@@ -214,9 +214,22 @@ Read-only, tanpa auth, bind `127.0.0.1` saja (Caddy yang mempublikasikan).
 | `GET /api/config` | `{title, tz, source, hermes_home, remote_api_url, profiles, roster[], layout{floor,grid,aisle}, teams[]}` |
 | `GET /api/status` | `{now, gateway, agents[], feed[], tasks[], comms[], dbs_checked, dbs_ok, dbs_err, dbs_failed[]}` |
 | `GET /api/agents/{id}` | satu objek agen, `404` kalau tidak ada |
+| `GET /metrics` | teks Prometheus; **hanya dari `127.0.0.1`**, IP lain `403` |
 
 Bentuk JSON identik dengan API lama (kunci baru hanya ditambahkan), jadi reverse
 proxy/frontend lain tetap cocok.
+
+**Rate limit & metrik.** Setiap `/api/*` dibatasi per IP dengan token bucket
+in-memory (default `120`/menit, burst `30`; lihat `RATE_LIMIT*` di bawah). Lewat
+limit → `429` dengan header `Retry-After` dan body
+`{"error":"rate_limited","retry_after_s":N}`. `/health` dan `/api/health`
+dikecualikan supaya monitoring tidak pernah ikut kena. IP diambil dari
+`X-Real-IP` (di-set Caddy) hanya kalau peer-nya loopback/privat; selain itu
+`RemoteAddr`, jadi header itu tidak bisa dipalsukan dari internet.
+`GET /metrics` menyajikan `office_http_requests_total{path,status}`,
+`office_http_request_duration_seconds`, `office_snapshot_age_seconds`, dan
+`office_rate_limited_total` dalam format teks Prometheus; endpoint ini hanya
+bisa dibaca dari `127.0.0.1` (Caddy tidak mem-proxy-kannya) — IP lain `403`.
 
 **Kesehatan basis data.** `/api/health` membuka setiap `state.db` (tanpa membaca
 baris) dan melaporkan `dbs_ok`/`dbs_err`. Kalau ada DB tapi **tidak satu pun**
@@ -289,6 +302,9 @@ Semua lewat environment variable; tidak ada path user yang di-hardcode.
 | `GATEWAY_FILE` | `$HERMES_HOME/gateway_state.json` | status gateway |
 | `WEB_DIR` | — | folder `dist` frontend; kalau diisi, API juga menyajikan SPA (dipakai image Docker) |
 | `LOG_REQUESTS` | `0` | log tiap request ke stderr |
+| `RATE_LIMIT` | `on` | `off` mematikan rate limit per-IP untuk `/api/*` |
+| `RATE_LIMIT_PER_MIN` | `120` | token yang diisi ulang per menit per IP |
+| `RATE_LIMIT_BURST` | `30` | token awal; lonjakan sebesar ini dilayani sekaligus |
 
 Profil yang punya folder `$HERMES_HOME/profiles/<nama>/state.db` otomatis
 ditambahkan ke roster walau tidak ada di `PROFILES`. Profil tanpa `state.db`
