@@ -112,7 +112,7 @@ def main():
             f,
         )
 
-    # ---- default / Galuh: working right now, and delegating to Tim Dev
+    # ---- default / Ndoro Kakung: working right now, and delegating to Tim Dev
     con = db_for(home, "default")
     sid = "a1b2c3d4e5f60718"
     session(con, sid, "default", "telegram", None, now - 900, now - 3, (None, None))

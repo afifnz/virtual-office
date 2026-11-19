@@ -151,13 +151,13 @@ func TestNormalizeTeamAlias(t *testing.T) {
 
 // An override that only sets a name must not lose the seeded role/team.
 func TestOverrideIsFieldWise(t *testing.T) {
-	doc := &Document{Agents: []Entry{{ID: "default", Name: "Galuh Afif"}}}
+	doc := &Document{Agents: []Entry{{ID: "default", Name: "Ndoro Kakung Wijaya"}}}
 	set := Resolver{Profiles: []string{"default"}, Layers: []*Document{doc}}.Resolve()
 	if len(set.Entries) != 1 {
 		t.Fatalf("entries = %+v", set.Entries)
 	}
 	e := set.Entries[0]
-	if e.Name != "Galuh Afif" {
+	if e.Name != "Ndoro Kakung Wijaya" {
 		t.Fatalf("name = %q", e.Name)
 	}
 	if e.Role != "ASISTEN UTAMA" || e.Team != TeamLobby {

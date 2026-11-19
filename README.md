@@ -20,7 +20,7 @@ verify/    skrip screenshot Playwright + hasil PNG
 
 | Ruang | Agen |
 |---|---|
-| **Pendopo** (depan, z > 4) | Galuh — `default` |
+| **Pendopo** (depan, z > 4) | Ndoro Kakung — `default` |
 | **Ruang Tim Dev** (kiri belakang) | Bima `dev`, Raka `planner`, Laras `uiux`, Dimas `coder`, Yoga `reviewer`, Sari `tester` |
 | **Ruang Tim Edu** (kanan belakang) | Ayu `edu`, Nisa `edu-designer`, Yohan `edu-writer`, Hadi `edu-reviewer` |
 
@@ -320,7 +320,7 @@ tanpa mengubah kode.
 `pendopo` masih diterima di file roster sebagai alias `lobby`.
 
 Roster diturunkan dari profil yang ditemukan. Profil yang ada di roster bawaan
-(`DefaultAgents`, 11 profil) memakai nama/peran/tim aslinya — Galuh, Bima, dst.
+(`DefaultAgents`, 11 profil) memakai nama/peran/tim aslinya — Ndoro Kakung, Bima, dst.
 Profil lain dapat `name = id`, peran `Agen`, dan tim ditebak dari nama
 (`default`/`lobby` → `lobby`, `edu*` → `edu`, sisanya `dev`). Override berlapis,
 prioritas dari atas: `OFFICE_ROSTER_JSON` → file `OFFICE_ROSTER` → roster
@@ -417,9 +417,9 @@ tanpa error, `vite build` sukses, dan `verify/shoot.py` melaporkan
 
 - `verify/desktop-1280-overview.png` — Pendopo dengan HUD
 - `verify/desktop-1280-overview-clean.png` — ruangan tanpa panel
-- `verify/desktop-1280-face-closeup.png` — potret Galuh (`?face=galuh`)
+- `verify/desktop-1280-face-closeup.png` — potret Ndoro Kakung (`?face=ndoro-kakung`)
 - `verify/desktop-1280-face-crop.png` — crop 900×900 area kepala
-- `verify/portrait-galuh.png` / `-crop.png` — potret yang sama, versi file potret
+- `verify/portrait-ndoro-kakung.png` / `-crop.png` — potret yang sama, versi file potret
 - `verify/portrait-bima.png` / `-crop.png` — potret agen pria (rambut pendek)
 - `verify/mobile-390-default.png` — HUD satu baris, feed tertutup
 - `verify/mobile-390-feed.png` — bottom sheet Aktivitas
@@ -490,7 +490,7 @@ Pemeriksaan pose (dipakai untuk merapikan avatar di skala dashboard):
 - **Laptop, bukan monitor 27"**, di sisi meja (diputar 43°) supaya wajah agen
   tetap terlihat dari sudut pandang pengunjung. Nameplate diperkecil (0,3 unit)
   agar tidak menutupi orangnya.
-- **Deep link potret**: `?face=galuh` (atau `?face=dev`) menerbangkan kamera ke
+- **Deep link potret**: `?face=ndoro-kakung` (atau `?face=dev`) menerbangkan kamera ke
   potret 3/4 dengan lensa 30° pada jarak 1,4 m — dipakai `verify/shoot.py`
   sebagai bukti wajah. `#coder` tetap membuka meja agen seperti versi lama.
 - **Mobile**: feed jadi bottom sheet 58–62dvh yang bisa ditutup, taskboard

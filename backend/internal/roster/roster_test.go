@@ -15,7 +15,7 @@ func TestResolveDefaultsFromProfiles(t *testing.T) {
 	// A profile with a seed entry inherits the name/role/team the frontend ships;
 	// an unknown profile falls back to its id, the generic role and the dev room.
 	want := map[string]Entry{
-		"default":    {ID: "default", Name: "Galuh", Role: "ASISTEN UTAMA", Team: "lobby"},
+		"default":    {ID: "default", Name: "Ndoro Kakung", Role: "ASISTEN UTAMA", Team: "lobby"},
 		"dev":        {ID: "dev", Name: "Bima", Role: "SDLC LEAD", Team: "dev"},
 		"edu-writer": {ID: "edu-writer", Name: "Yohan", Role: "PENULIS MATERI", Team: "edu"},
 		"zzz-baru":   {ID: "zzz-baru", Name: "zzz-baru", Role: GenericRole, Team: "dev"},
@@ -224,7 +224,7 @@ agents:
     role: Lead Dev
     team: dev
   - id: default
-    name: Galuh
+    name: Ndoro Kakung
 `
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -236,7 +236,7 @@ agents:
 	if doc.Title != "Kantor Afif" || doc.TZ != "Asia/Jakarta" {
 		t.Fatalf("doc = %+v", doc)
 	}
-	if len(doc.Agents) != 2 || doc.Agents[0].Name != "Bima" || doc.Agents[1].Name != "Galuh" {
+	if len(doc.Agents) != 2 || doc.Agents[0].Name != "Bima" || doc.Agents[1].Name != "Ndoro Kakung" {
 		t.Fatalf("agents = %+v", doc.Agents)
 	}
 	if len(doc.Teams) != 2 || doc.Teams[1].Label != "Ruang Tim Edu" {
@@ -248,7 +248,7 @@ agents:
 	for _, e := range set.Entries {
 		byID[e.ID] = e
 	}
-	if byID["dev"].Role != "Lead Dev" || byID["default"].Name != "Galuh" {
+	if byID["dev"].Role != "Lead Dev" || byID["default"].Name != "Ndoro Kakung" {
 		t.Fatalf("resolved = %+v", set.Entries)
 	}
 	// coder is not in the file: the seed entry from DefaultAgents still applies
