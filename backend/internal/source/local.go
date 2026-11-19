@@ -60,3 +60,18 @@ func (s *local) DBStatus(context.Context) DBStatus {
 	h := s.l.Probe()
 	return DBStatus{Available: true, Checked: h.Checked, OK: h.OK, Err: h.Err, Failed: h.Failed}
 }
+
+// SnapshotAge is the age of the cached snapshot, for /metrics. The second
+// result is false before the first build: there is no age to report yet.
+func (s *local) SnapshotAge() (time.Duration, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snapAt.IsZero() {
+		return 0, false
+	}
+	age := s.clock().Sub(s.snapAt)
+	if age < 0 {
+		return 0, true
+	}
+	return age, true
+}
