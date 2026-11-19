@@ -3,7 +3,7 @@
  *
  * `/api/config` is the single source of truth: title, timezone, teams and the
  * list of desks. The static table in agents.ts is only the seed — it supplies
- * the hand-placed desks and the look of the twelve original agents, so an
+ * the hand-placed desks and the look of the thirteen original agents, so an
  * existing office renders exactly as before. A profile the seed does not know
  * gets a deterministic look (hashed from its id, drawn from the same palette)
  * and the nearest free desk on the 4.5 x 4.0 lattice.
@@ -453,7 +453,7 @@ export async function loadConfig(): Promise<OfficeConfig | null> {
 
 /**
  * The bundled roster as an OfficeConfig. Used when /api/config cannot be
- * reached at all: the office must still render the twelve seeded desks
+ * reached at all: the office must still render the thirteen seeded desks
  * instead of an empty room (an API outage is not an empty office).
  */
 export function seedConfig(): OfficeConfig {

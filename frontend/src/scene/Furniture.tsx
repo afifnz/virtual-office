@@ -340,7 +340,7 @@ function KopiCorner() {
 
 function Gamelan() {
   return (
-    <group position={[-13.0, 0, -4.4]} rotation={[0, Math.PI / 2, 0]}>
+    <group position={[-13.0, 0, -8.8]} rotation={[0, Math.PI / 2, 0]}>
       {/* gong frame */}
       <group position={[0, 0, -0.6]}>
         {[-0.9, 0.9].map((x) => (

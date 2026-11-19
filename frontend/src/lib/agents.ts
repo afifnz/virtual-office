@@ -43,8 +43,10 @@ export interface AgentMeta {
  * Team desks sit in one touching block each (see CLUSTERS in lib/rooms.ts): a
  * front row (rot 0) and a back row (rot PI) whose desk tops meet edge to edge,
  * with the columns a desk-width apart, so the six dev desks read as one island
- * and the four edu desks as a second. The devops desk stands alone by the
- * server rack.
+ * and the four edu desks as a second. The dev lead sits at the head of that
+ * island: his desk stands on its short side, flush against the west face and
+ * turned a quarter turn (rot -PI/2) so he faces his team. The devops desk
+ * stands alone by the server rack.
  */
 export const AGENTS: AgentMeta[] = [
   {
@@ -64,12 +66,13 @@ export const AGENTS: AgentMeta[] = [
     name: 'Bima',
     role: 'SDLC LEAD',
     team: 'dev',
-    desc: 'Koordinator tim pengembangan. Memecah permintaan lalu mendelegasikan ke Raka, Laras, Dimas, Yoga, dan Sari.',
+    desc: 'Koordinator tim pengembangan. Memecah permintaan lalu mendelegasikan ke Raka, Laras, Dimas, Bagas, Yoga, dan Sari.',
     look: {
       skin: '#a9744f', hair: '#221a17', style: 'crop', shirt: '#4d6b86', pants: '#2c2f33',
       accent: '#82aac8', build: 1.12, tall: 1.02, stubble: true,
     },
-    desk: { x: -9.22, z: -4.01, rot: 0 },
+    // head of the dev island: short side against the block, facing +x (his team)
+    desk: { x: -10.42, z: -4.4, rot: -Math.PI / 2 },
   },
   {
     id: 'planner',
@@ -106,6 +109,19 @@ export const AGENTS: AgentMeta[] = [
       accent: '#6e8fb4', headphones: '#465c78', build: 1.0, tall: 1.01, stubble: true,
     },
     desk: { x: -9.22, z: -4.79, rot: Math.PI },
+  },
+  {
+    id: 'coder2',
+    name: 'Bagas',
+    role: 'IMPLEMENTER',
+    team: 'dev',
+    desc: 'Implementer kedua: mengambil fitur dan perbaikan yang paralel dengan Dimas, menulis kode di repo yang ditugaskan dan menjaga test tetap hijau.',
+    look: {
+      skin: '#b9825a', hair: '#241d19', style: 'crop', shirt: '#3f5570', pants: '#2d3038',
+      accent: '#8fb0d0', build: 1.02, tall: 1.01, stubble: true,
+    },
+    // the desk Bima left: front row, west column, facing -z like the rest of it
+    desk: { x: -9.22, z: -4.01, rot: 0 },
   },
   {
     id: 'reviewer',
