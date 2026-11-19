@@ -190,7 +190,6 @@ export const POIS: Poi[] = [
   { id: 'meja-kopi', name: 'meja kopi', pos: [-10.4, 4.2], act: 'sip', team: 'lobby' },
   { id: 'gamelan', name: 'gamelan', pos: [-11.2, -8.7], act: 'gamelan', team: 'dev' },
   { id: 'server', name: 'rak server', pos: [-1.9, -8.0], act: 'check', team: 'dev' },
-  { id: 'papan', name: 'papan sprint', pos: [-7.6, -9.2], act: 'read', team: 'dev' },
   { id: 'buku', name: 'rak buku', pos: [10.6, -8.9], act: 'read', team: 'edu' },
   { id: 'lesehan', name: 'lesehan', pos: [11.5, -2.6], act: 'sit', team: 'edu' },
 ]
@@ -342,7 +341,6 @@ export const OBSTACLES: Obstacle[] = [
   // dev room — the gamelan sits in the back-left corner, clear of the lead's desk
   { id: 'gamelan', x1: -13.885, z1: -9.85, x2: -12.115, z2: -7.75 },
   { id: 'server', x1: -1.0, z1: -9.85, x2: -0.1, z2: -8.75 },
-  { id: 'papan-dev', x1: -9.4, z1: -9.78, x2: -5.8, z2: -9.62 },
   // edu room
   { id: 'buku', x1: 9.7, z1: -10.0, x2: 12.3, z2: -9.58 },
   { id: 'lesehan', x1: 10.4, z1: -5.7, x2: 13.8, z2: -3.1 },
