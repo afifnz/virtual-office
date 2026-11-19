@@ -2,11 +2,11 @@
 // the desks the frontend draws, with a display name, a role and a team.
 //
 // The default roster is the one the frontend ships (frontend/src/lib/agents.ts):
-// Ndoro Kakung in the lobby, Bima/Raka/Laras/Dimas/Yoga/Sari in the dev room,
-// Ayu/Nisa/Yohan/Hadi in the edu room. A profile with no seed entry is shown
-// under its own id with the generic role "Agen". Names, roles and teams can be
-// layered in from a JSON/YAML file (OFFICE_ROSTER) or an inline JSON document
-// (OFFICE_ROSTER_JSON).
+// Ndoro Kakung in the lobby, Bima/Raka/Laras/Dimas/Bagas/Yoga/Sari in the dev
+// room, Ayu/Nisa/Yohan/Hadi in the edu room. A profile with no seed entry is
+// shown under its own id with the generic role "Agen". Names, roles and teams
+// can be layered in from a JSON/YAML file (OFFICE_ROSTER) or an inline JSON
+// document (OFFICE_ROSTER_JSON).
 package roster
 
 import (
@@ -45,6 +45,7 @@ var DefaultAgents = []Entry{
 	{ID: "planner", Name: "Raka", Role: "ANALIS & ARSITEK", Team: TeamDev},
 	{ID: "uiux", Name: "Laras", Role: "UI/UX DESIGNER", Team: TeamDev},
 	{ID: "coder", Name: "Dimas", Role: "IMPLEMENTER", Team: TeamDev},
+	{ID: "coder2", Name: "Bagas", Role: "IMPLEMENTER", Team: TeamDev},
 	{ID: "reviewer", Name: "Yoga", Role: "CODE REVIEW", Team: TeamDev},
 	{ID: "tester", Name: "Sari", Role: "QA", Team: TeamDev},
 	{ID: "devops", Name: "Wahyu", Role: "DEVOPS", Team: TeamDev},

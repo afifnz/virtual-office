@@ -6,9 +6,10 @@ import { setFloorContext, setFurniture } from './roster'
  * The floor is 28 x 20 world units (1 unit ~ 1 m): 7:5, not a corridor.
  *
  * Sized from the furniture, not the other way round: the dev block is
- * 3 x 1.62 + 2 x 1.03 = 4.86 x 2.08, the edu block 2 x 1.62 + 2 x 1.03 =
- * 3.24 x 2.08, and every desk keeps a 1.6-unit aisle to the walls and to the
- * furniture around its block. Lobby 28 x 8, team rooms 14 x 12 each.
+ * 3 x 1.62 + 2 x 1.03 = 4.86 x 2.08 plus the lead's 1.62-wide desk on its west
+ * face, the edu block 2 x 1.62 + 2 x 1.03 = 3.24 x 2.08, and every desk keeps a
+ * 1.6-unit aisle to the walls and to the furniture around its block. Lobby
+ * 28 x 8, team rooms 14 x 12 each.
  */
 export const FLOOR = { w: 28, d: 20, y: 0 } as const
 export const WALL_H = 3.4
@@ -74,25 +75,45 @@ export type { Obstacle }
 
 /**
  * One desk per agent. Team desks sit in touching blocks (see CLUSTERS): the dev
- * six in a 3 x 2 island, the edu four in a 2 x 2, the devops desk on its own by
- * the server rack. Desk tops are 1.62 wide and 1.03 deep, so a 1.62 column
- * pitch and a 0.78 row pitch make the tops meet with no seam at all.
+ * six in a 3 x 2 island with the lead's desk flush against its west face, the
+ * edu four in a 2 x 2, the devops desk on its own by the server rack. Desk tops
+ * are 1.62 wide and 1.03 deep, so a 1.62 column pitch and a 0.78 row pitch make
+ * the tops meet with no seam at all.
  */
 export const DESKS: DeskSpot[] = AGENTS.map((a) => ({ id: a.id, ...a.desk }))
 
 /** Desks that form one touching block; every other pair keeps a 1.6 aisle. */
 export const CLUSTERS: Record<string, string[]> = {
-  dev: ['dev', 'planner', 'uiux', 'coder', 'reviewer', 'tester'],
+  dev: ['coder2', 'planner', 'uiux', 'coder', 'reviewer', 'tester'],
   edu: ['edu', 'edu-designer', 'edu-writer', 'edu-reviewer'],
 }
 
-const CLUSTER_OF: Record<string, string> = Object.fromEntries(
-  Object.entries(CLUSTERS).flatMap(([name, ids]) => ids.map((id) => [id, name])),
-)
+/**
+ * A lead desk stands on the short side of its block, flush against it and
+ * turned a quarter turn so the lead faces the team instead of the wall: it
+ * shares the block's floor, so no aisle runs between them. `side` is the block
+ * face it touches ('w' = the west edge).
+ */
+export const LEAD_DESKS: Record<string, { id: string; cluster: string; side: 'w' | 'e' }> = {
+  dev: { id: 'dev', cluster: 'dev', side: 'w' },
+}
+
+const CLUSTER_OF: Record<string, string> = {
+  ...Object.fromEntries(
+    Object.entries(CLUSTERS).flatMap(([name, ids]) => ids.map((id) => [id, name])),
+  ),
+  ...Object.fromEntries(Object.values(LEAD_DESKS).map((l) => [l.id, l.cluster])),
+}
 
 /** Cluster a desk belongs to, or null for a free-standing desk. */
 export function clusterOf(id: string): string | null {
   return CLUSTER_OF[id] ?? null
+}
+
+/** Every desk that shares one block's floor: its rows plus its lead desks. */
+export function blockMembers(name: string): string[] {
+  const leads = Object.values(LEAD_DESKS).filter((l) => l.cluster === name).map((l) => l.id)
+  return [...(CLUSTERS[name] ?? []), ...leads]
 }
 
 /** Two desks of the same block are allowed to touch; 0 here, 0.02 in the checks. */
@@ -119,7 +140,7 @@ export interface Spot {
 
 export const SPOTS: Record<string, Spot> = {
   lobby: { id: 'lobby', label: 'Pendopo', pos: [-9.8, 2.4, 9.2], target: [-6.6, 0.9, 5.2], fov: 55 },
-  dev: { id: 'dev', label: 'Tim Dev', pos: [-1.2, 5.4, 2.6], target: [-7.0, 0.3, -6.2], fov: 60 },
+  dev: { id: 'dev', label: 'Tim Dev', pos: [-2.2, 5.6, 2.2], target: [-8.6, 0.3, -4.6], fov: 60 },
   edu: { id: 'edu', label: 'Tim Edu', pos: [12.4, 5.4, 2.6], target: [6.6, 0.3, -6.2], fov: 60 },
   tampak: { id: 'tampak', label: 'Tampak', pos: [0, 17, 18], target: [0, 0, -0.5], fov: 42 },
   luar: { id: 'luar', label: 'Luar', pos: [18, 13, 36], target: [0, 2.4, 4], fov: 44 },
@@ -167,7 +188,7 @@ export const POIS: Poi[] = [
   { id: 'resepsionis', name: 'meja resepsionis', pos: [-3.0, 6.6], act: 'chat', team: 'lobby' },
   { id: 'rapat', name: 'meja rapat', pos: [7.4, 4.6], act: 'chat', team: 'lobby' },
   { id: 'meja-kopi', name: 'meja kopi', pos: [-10.4, 4.2], act: 'sip', team: 'lobby' },
-  { id: 'gamelan', name: 'gamelan', pos: [-11.6, -4.4], act: 'gamelan', team: 'dev' },
+  { id: 'gamelan', name: 'gamelan', pos: [-11.2, -8.7], act: 'gamelan', team: 'dev' },
   { id: 'server', name: 'rak server', pos: [-1.9, -8.0], act: 'check', team: 'dev' },
   { id: 'papan', name: 'papan sprint', pos: [-7.6, -9.2], act: 'read', team: 'dev' },
   { id: 'buku', name: 'rak buku', pos: [10.6, -8.9], act: 'read', team: 'edu' },
@@ -198,16 +219,19 @@ export const NAV: NavNode[] = [
   { id: 'lobby-desk', x: -6.9, z: 4.6 },
   { id: 'lobby-recep', x: -2.2, z: 6.6 },
   { id: 'lobby-cat', x: 2.6, z: 6.6 },
-  // dev room: front aisle (z -1.6), side aisles (x -11.0 / -1.8), back aisle (z -6.4)
+  // dev room: front aisle (z -1.6), west aisle (x -12.42, behind the lead's
+  // chair), east aisle (x -1.8), back aisle (z -6.4), gamelan spur
   { id: 'inner-door', x: 0, z: 0 },
   { id: 'dev-door', x: -7.5, z: 1.0 },
-  { id: 'dev-front-w', x: -11.0, z: -1.6 },
+  { id: 'dev-front-w', x: -12.42, z: -1.6 },
   { id: 'dev-front', x: -7.5, z: -1.6 },
   { id: 'dev-front-e', x: -1.8, z: -1.6 },
-  { id: 'dev-gam', x: -11.0, z: -4.4 },
-  { id: 'dev-back-w', x: -11.0, z: -6.4 },
+  { id: 'dev-west', x: -12.42, z: -4.4 },
+  { id: 'dev-back-w', x: -12.42, z: -6.4 },
   { id: 'dev-back', x: -7.6, z: -6.4 },
   { id: 'dev-back-e', x: -1.8, z: -6.4 },
+  { id: 'dev-shelf', x: -11.2, z: -6.6 },
+  { id: 'dev-gam', x: -11.2, z: -8.6 },
   // edu room: same pattern, wider block aisle
   { id: 'edu-door', x: 7.5, z: 1.0 },
   { id: 'edu-front-w', x: 3.0, z: -1.6 },
@@ -257,8 +281,11 @@ export const NAV_EDGES: Array<[string, string]> = [
   ['dev-front-w', 'dev-front'],
   ['dev-front', 'dev-front-e'],
   ['dev-front-e', 'dev-back-e'],
-  ['dev-front-w', 'dev-gam'],
-  ['dev-gam', 'dev-back-w'],
+  ['dev-front-w', 'dev-west'],
+  ['dev-west', 'dev-back-w'],
+  ['dev-back-w', 'dev-shelf'],
+  ['dev-shelf', 'dev-back'],
+  ['dev-shelf', 'dev-gam'],
   // dev back aisle
   ['dev-back-w', 'dev-back'],
   ['dev-back', 'dev-back-e'],
@@ -312,8 +339,8 @@ export const OBSTACLES: Obstacle[] = [
   { id: 'kucing', x1: 2.36, z1: 7.96, x2: 2.84, z2: 8.44 },
   { id: 'berkas', x1: -13.3, z1: 0.64, x2: -11.9, z2: 1.16 },
   { id: 'materi', x1: 11.3, z1: 0.64, x2: 12.7, z2: 1.16 },
-  // dev room
-  { id: 'gamelan', x1: -13.885, z1: -5.45, x2: -12.115, z2: -3.35 },
+  // dev room — the gamelan sits in the back-left corner, clear of the lead's desk
+  { id: 'gamelan', x1: -13.885, z1: -9.85, x2: -12.115, z2: -7.75 },
   { id: 'server', x1: -1.0, z1: -9.85, x2: -0.1, z2: -8.75 },
   { id: 'papan-dev', x1: -9.4, z1: -9.78, x2: -5.8, z2: -9.62 },
   // edu room
