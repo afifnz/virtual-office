@@ -29,6 +29,10 @@ export default defineConfig({
     target: 'es2022',
     sourcemap: false,
     chunkSizeWarningLimit: 1200,
+    // Keep the modulepreload links for the entry's own deps (react), but drop
+    // the polyfill — every browser that runs es2022 ships modulepreload, and
+    // the polyfill module is one more thing to ship on the critical path.
+    modulePreload: { polyfill: false },
     rollupOptions: {
       output: {
         // The room is the only thing that needs three.js. Keep the renderer and
@@ -36,6 +40,11 @@ export default defineConfig({
         // re-download of the 3D engine (and vice versa), and so the browser can
         // fetch them in parallel with the app code.
         manualChunks(id: string) {
+          // Vite's preload helper is shared by the entry and the scene chunk;
+          // left alone Rollup files it under `three`, which drags the whole 3D
+          // engine back into the first paint. Park it with React instead — the
+          // entry loads that chunk anyway.
+          if (id.includes('vite/preload-helper')) return 'react'
           if (!id.includes('node_modules')) return
           if (/node_modules\/(three|three-[^/]+)\//.test(id)) return 'three'
           if (id.includes('node_modules/@react-three/')) return 'three'
