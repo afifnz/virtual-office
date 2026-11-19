@@ -17,7 +17,7 @@ import {
   pose,
 } from './human'
 import { buildFace, type Lid } from './face'
-import { buildHijabHead, buildSleeves } from './galuh'
+import { buildNdoroHead } from './ndoroKakung'
 import { toonify } from './toon'
 
 export type AvatarMode = 'seated' | 'walk' | 'stand'
@@ -72,7 +72,7 @@ export function Avatar({ id, look, status, mode, motion, headYaw = 0, lean = 0, 
   const lids = useRef<Lid[]>([])
   const [ready, setReady] = useState(false)
 
-  // ---- accessories: hijab / glasses / headphones ride on the head bone
+  // ---- accessories: the sculpted head / glasses / headphones ride on the head bone
   useEffect(() => {
     const mount = headMount(rig)
     if (!mount) return
@@ -80,20 +80,15 @@ export function Avatar({ id, look, status, mode, motion, headYaw = 0, lean = 0, 
     const lm = rig.landmarks
 
     const added: THREE.Object3D[] = []
-    if (look.hijab) {
-      // A hijab hides the whole head, so the pack's skull (and its 14 mm
-      // off-axis skin mesh) is replaced by our own head: the face, the cloth
-      // and the drape are one surface and cannot leave a gap.
+    if (look.sculptedHead) {
+      // The sculpted head replaces the pack's whole head, so the skull (and its
+      // 14 mm off-axis skin mesh), the hair and the eyebrow quads go: the face,
+      // the hair and the ears are one surface and cannot leave a gap.
       for (const m of rig.headMeshes) m.visible = false
-      const head = buildHijabHead(look, lm)
+      const head = buildNdoroHead(look, lm)
       mount.group.add(head.group)
       added.push(head.group)
       lids.current = head.lids
-      // a long-sleeve top: the pack only ships a tee, so the sleeves are
-      // grown along the arm bones (they follow the seated IK for free)
-      for (const sleeve of buildSleeves(rig, look.shirt)) {
-        added.push(sleeve)
-      }
     } else {
       if (look.glasses) {
         const glasses = buildGlasses(lm)

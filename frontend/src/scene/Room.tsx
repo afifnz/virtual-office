@@ -44,7 +44,7 @@ export function Room() {
         <planeGeometry args={[FLOOR.w, FLOOR.d]} />
         <meshStandardMaterial map={floor} roughness={0.9} metalness={0.02} />
       </mesh>
-      {/* pendopo rug under the reception corner: Galuh's desk and the counter */}
+      {/* pendopo rug under the reception corner: Ndoro Kakung's desk and the counter */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-5.2, 0.012, 10.8]}>
         <planeGeometry args={[6.8, 4.6]} />
         <meshStandardMaterial map={rug} roughness={0.95} />

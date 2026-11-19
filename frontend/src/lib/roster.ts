@@ -73,7 +73,6 @@ const PALETTE = {
   shirt: unique(AGENTS.map((a) => a.look.shirt)),
   pants: unique(AGENTS.map((a) => a.look.pants)),
   accent: unique(AGENTS.map((a) => a.look.accent)),
-  hijab: unique(AGENTS.filter((a) => a.look.hijab).map((a) => a.look.hijab!)),
 }
 
 const STYLES: HairStyle[] = ['crop', 'short', 'side', 'long', 'bun', 'curly', 'messy']
@@ -108,7 +107,6 @@ export function lookFor(id: string): Look {
   }
   if (female) {
     look.female = true
-    if (((h >>> 14) & 1) === 1) look.hijab = pick(PALETTE.hijab.length ? PALETTE.hijab : PALETTE.shirt, h, 23)
     if (((h >>> 15) & 1) === 1) look.skirt = true
   }
   if (((h >>> 12) & 1) === 1) look.glasses = true

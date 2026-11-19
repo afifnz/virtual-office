@@ -65,7 +65,7 @@ function Reception() {
     px: 44,
   })
   return (
-    // beside Galuh's desk, its front turned to the entrance path (+x), so a
+    // beside Ndoro Kakung's desk, its front turned to the entrance path (+x), so a
     // visitor walking in sees the plate and nobody sits staring at its back
     <group position={[-3.9, 0, 10.8]} rotation={[0, Math.PI / 2, 0]}>
       <mesh position={[0, 0.52, 0]}>

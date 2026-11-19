@@ -59,7 +59,7 @@ export function toToon(src: THREE.Material): THREE.Material {
     depthWrite: s.depthWrite,
     alphaTest: s.alphaTest,
     alphaMap: s.alphaMap,
-    // the hijab cloth carries its shading in vertex colours
+    // the sculpted hair carries its shading in vertex colours
     vertexColors: s.vertexColors,
     polygonOffset: s.polygonOffset,
     polygonOffsetFactor: s.polygonOffsetFactor,
