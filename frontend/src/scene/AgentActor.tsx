@@ -97,6 +97,9 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
     border: STATUS_COLOR[status],
     bar: STATUS_COLOR[status],
     px: 46,
+    // keep the plate narrow enough that a long name (Ndoro Kakung) or a long
+    // blocked reason cannot run past the frame or into its neighbour's plate
+    maxAspect: 4.4,
   })
 
   useFrame((state, dt) => {
@@ -282,8 +285,15 @@ export function AgentActor({ meta, agent, now, slots, onPick }: AgentActorProps)
             lookAround={status === 'idle' || status === 'reviewing'}
           />
         </Suspense>
-        <sprite position={[0, mode === 'seated' ? 1.46 : 1.98, 0]} scale={[0.3 * plate.aspect, 0.3, 1]}>
-          <spriteMaterial map={plate.tex} transparent depthWrite={false} />
+        {/* Plates are HUD labels: depthTest off so a monitor, partition or plant
+            in front of the agent can never slice the name in half. depthWrite
+            stays off, so they cannot hide the scene behind them. */}
+        <sprite
+          position={[0, mode === 'seated' ? 1.46 : 1.98, 0]}
+          scale={[0.3 * plate.aspect, 0.3, 1]}
+          renderOrder={10}
+        >
+          <spriteMaterial map={plate.tex} transparent depthWrite={false} depthTest={false} />
         </sprite>
         {status === 'blocked' ? <BlockedRing walking={mode !== 'seated'} /> : null}
         {mode === 'seated' ? <SeatShadow /> : null}
