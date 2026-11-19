@@ -159,6 +159,14 @@ type Dataset struct {
 	DBsOK      int
 	DBsErr     int
 	DBsFailed  []string
+
+	// MessagesCapped is set by the loader when a profile hit its message cap,
+	// so a KPI window is published as a lower bound instead of a total.
+	MessagesCapped bool
+
+	// TokenColumn reports whether at least one profile schema actually has a
+	// token column. false means tokens are structurally absent, not zero.
+	TokenColumn bool
 }
 
 type sessionWork struct {
@@ -173,30 +181,7 @@ type sessionWork struct {
 // Build derives the snapshot. Pure function: same input, same output.
 func Build(ds Dataset) Snapshot {
 	now := ds.Now
-	works := make([]*sessionWork, 0, 64)
-	byID := map[string]*sessionWork{}
-
-	// index sessions, attach messages
-	for _, p := range ds.Profiles {
-		msgBySession := map[string][]store.Msg{}
-		for _, m := range p.Msgs {
-			msgBySession[m.SessionID] = append(msgBySession[m.SessionID], m)
-		}
-		for _, s := range p.Sessions {
-			w := &sessionWork{sess: s, dbProfile: p.Name}
-			w.msgs = msgBySession[s.ID]
-			if n := len(w.msgs); n > 0 {
-				w.last, w.hasMsg = w.msgs[n-1], true
-			}
-			works = append(works, w)
-			byID[s.ID] = w
-		}
-	}
-
-	// attribute each session to an agent profile
-	for _, w := range works {
-		w.owner = attribute(w, byID)
-	}
+	works, byID := prepare(ds)
 
 	agents := buildAgents(ds, works, byID, now)
 	feed := buildFeed(works, now)
@@ -216,6 +201,33 @@ func Build(ds Dataset) Snapshot {
 		DBsErr:     ds.DBsErr,
 		DBsFailed:  ds.DBsFailed,
 	}
+}
+
+// prepare indexes sessions, attaches their messages and attributes each one to
+// the agent that owns it. Shared by Build (live snapshot) and BuildKPI so both
+// surfaces agree on which desk a session belongs to.
+func prepare(ds Dataset) ([]*sessionWork, map[string]*sessionWork) {
+	works := make([]*sessionWork, 0, 64)
+	byID := map[string]*sessionWork{}
+	for _, p := range ds.Profiles {
+		msgBySession := map[string][]store.Msg{}
+		for _, m := range p.Msgs {
+			msgBySession[m.SessionID] = append(msgBySession[m.SessionID], m)
+		}
+		for _, s := range p.Sessions {
+			w := &sessionWork{sess: s, dbProfile: p.Name}
+			w.msgs = msgBySession[s.ID]
+			if n := len(w.msgs); n > 0 {
+				w.last, w.hasMsg = w.msgs[n-1], true
+			}
+			works = append(works, w)
+			byID[s.ID] = w
+		}
+	}
+	for _, w := range works {
+		w.owner = attribute(w, byID)
+	}
+	return works, byID
 }
 
 // attribute decides which agent a session belongs to. A subagent session lives

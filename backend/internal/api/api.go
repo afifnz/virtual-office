@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"officeapi/internal/config"
+	"officeapi/internal/derive"
 	"officeapi/internal/roster"
 	"officeapi/internal/source"
 )
@@ -68,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/kpi", s.handleKPI)
 	mux.HandleFunc("GET /api/agents/{id}", s.handleAgent)
 	mux.HandleFunc("/", s.handleRoot)
 	return s.withCommon(mux)
@@ -138,6 +140,35 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snap)
 }
 
+// handleKPI serves per-agent aggregates for 7d|30d. It is deliberately separate
+// from /api/status: the live contract stays untouched, and a slow history read
+// can never make the office look offline.
+func (s *Server) handleKPI(w http.ResponseWriter, r *http.Request) {
+	window := strings.TrimSpace(r.URL.Query().Get("window"))
+	if window == "" {
+		window = "7d"
+	}
+	if _, ok := derive.ParseKPIWindow(window); !ok {
+		writeError(w, http.StatusBadRequest, "window tidak dikenal: "+window+" (pakai 7d atau 30d)")
+		return
+	}
+	ks, ok := s.src.(source.KPISource)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "sumber data ini belum mendukung /api/kpi")
+		return
+	}
+	rep, err := ks.KPI(r.Context(), window)
+	if err != nil {
+		s.log.Printf("warn kpi_failed window=%s source=%s err=%q", window, s.src.Kind(), err.Error())
+		writeError(w, http.StatusBadGateway, "KPI tidak bisa dibaca: "+err.Error())
+		return
+	}
+	if rep.Agents == nil {
+		rep.Agents = []derive.AgentKPI{}
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
 // degraded is the shared rule: databases were found, and not one opened.
 func degraded(checked, ok, errs int) bool { return checked > 0 && ok == 0 && errs > 0 }
 
@@ -202,7 +233,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, "agen tidak dikenal: "+id)
 }
 
-var knownPaths = map[string]bool{"/api/health": true, "/api/status": true, "/api/config": true}
+var knownPaths = map[string]bool{"/api/health": true, "/api/status": true, "/api/config": true, "/api/kpi": true}
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if knownPaths[r.URL.Path] || strings.HasPrefix(r.URL.Path, "/api/agents/") {

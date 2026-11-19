@@ -5,6 +5,7 @@ import { Hud } from './components/Hud'
 import { Roster } from './components/Roster'
 import { Feed, type FeedTab } from './components/Feed'
 import { TaskBoard } from './components/TaskBoard'
+import { KPI } from './components/KPI'
 import { ProximityCard } from './components/ProximityCard'
 import { DPad } from './components/DPad'
 import { useStatus } from './hooks/useStatus'
@@ -25,6 +26,7 @@ export default function App() {
   const [rosterOpen, setRosterOpen] = useState(!mobile)
   const [feedOpen, setFeedOpen] = useState(!mobile)
   const [taskOpen, setTaskOpen] = useState(false)
+  const [kpiOpen, setKpiOpen] = useState(false)
   const [tab, setTab] = useState<FeedTab>('aktivitas')
   const [hudOpen, setHudOpen] = useState(false)
   const [nearId, setNearId] = useState<string | null>(null)
@@ -132,6 +134,11 @@ export default function App() {
         onToggleFeed={() => setFeedOpen((v) => !v)}
         taskOpen={taskOpen}
         onToggleTasks={() => setTaskOpen((v) => !v)}
+        kpiOpen={kpiOpen}
+        onToggleKPI={() => {
+          setKpiOpen((v) => !v)
+          setTaskOpen(false)
+        }}
         expanded={hudOpen}
         onToggleExpanded={() => setHudOpen((v) => !v)}
         stale={stale}
@@ -162,6 +169,8 @@ export default function App() {
         <TaskBoard status={data} now={now} onClose={() => setTaskOpen(false)} mobile={mobile} />
       ) : null}
 
+      {kpiOpen ? <KPI mobile={mobile} onClose={() => setKpiOpen(false)} /> : null}
+
       {displayAgent && (!mobile || chipVisible) ? (
         <ProximityCard
           agent={displayAgent}
@@ -174,7 +183,7 @@ export default function App() {
 
       {/* the sheet and the taskboard are modal: the pad and bar step aside so
           nothing ever sits on top of the movement controls */}
-      {mobile && !feedOpen && !taskOpen ? (
+      {mobile && !feedOpen && !taskOpen && !kpiOpen ? (
         <>
           <DPad intent={moveIntent} />
           <nav className="mobile-bar" aria-label="Panel">
@@ -197,6 +206,17 @@ export default function App() {
               }}
             >
               <span aria-hidden="true">▤</span> Tugas
+            </button>
+            <button
+              type="button"
+              className={kpiOpen ? 'is-active' : ''}
+              onClick={() => {
+                setKpiOpen(true)
+                setFeedOpen(false)
+                setTaskOpen(false)
+              }}
+            >
+              <span aria-hidden="true">▥</span> KPI
             </button>
             <button type="button" onClick={() => setRosterOpen((v) => !v)}>
               <span aria-hidden="true">☰</span> Agen

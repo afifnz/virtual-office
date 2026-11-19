@@ -67,6 +67,22 @@ func NewRemote(base string, logger *log.Logger) (Source, error) {
 
 func (r *remote) Kind() string { return "remote" }
 
+// KPI GETs <base>/api/kpi so federation shows the upstream's measured numbers.
+// An older upstream answers 404; the handler surfaces that as 502 with the
+// message rather than showing a blank chart with invented zeros.
+func (r *remote) KPI(ctx context.Context, window string) (derive.KPIReport, error) {
+	var rep derive.KPIReport
+	ctx, cancel := context.WithTimeout(ctx, RemoteTimeout)
+	defer cancel()
+	if err := r.getJSON(ctx, "/api/kpi?window="+url.QueryEscape(window), &rep); err != nil {
+		return derive.KPIReport{}, err
+	}
+	if rep.Agents == nil {
+		rep.Agents = []derive.AgentKPI{}
+	}
+	return rep, nil
+}
+
 // Home is the upstream URL without credentials — it is published in /api/health.
 func (r *remote) Home() string { return r.shown }
 

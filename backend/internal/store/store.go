@@ -228,10 +228,30 @@ func (d *DB) Sessions() ([]Session, error) {
 	return out, rows.Err()
 }
 
+// HasTokens reports whether the messages table has a token column at all. When
+// it returns false, a caller must publish "tokens unknown", never 0.
+func (d *DB) HasTokens() bool { return d.c.mTokens != "" }
+
 // Messages reads message metadata, newest last. content is truncated so a huge
 // transcript cannot blow up memory; only its first bytes matter for classifying
 // delegation results and tool errors.
 func (d *DB) Messages(limit int) ([]Msg, error) {
+	return d.queryMessages("", nil, limit)
+}
+
+// MessagesSince reads the newest `limit` raw messages at or after since (unix
+// seconds), still returned oldest-first. A schema without a timestamp column
+// cannot be filtered, so it falls back to Messages: the caller filters in
+// memory and reports the result as approximate.
+func (d *DB) MessagesSince(since float64, limit int) ([]Msg, error) {
+	if d.c.mTS == "" {
+		return d.Messages(limit)
+	}
+	where := " WHERE " + d.c.mTS + " >= ?"
+	return d.queryMessages(where, []any{since}, limit)
+}
+
+func (d *DB) queryMessages(where string, args []any, limit int) ([]Msg, error) {
 	if !d.hasMessage || d.c.mSession == "" {
 		return nil, nil
 	}
@@ -248,7 +268,8 @@ func (d *DB) Messages(limit int) ([]Msg, error) {
 		sel = append([]string{d.c.mID}, sel...)
 	}
 
-	q := "SELECT " + strings.Join(sel, ",") + " FROM " + d.mTable
+	q := "SELECT " + strings.Join(sel, ", ") + " FROM " + d.mTable
+	q += where
 	if d.c.mTS != "" {
 		q += " ORDER BY " + d.c.mTS + " DESC, rowid DESC"
 	} else {
@@ -258,7 +279,7 @@ func (d *DB) Messages(limit int) ([]Msg, error) {
 		q += " LIMIT " + strconv.Itoa(limit)
 	}
 
-	rows, err := d.db.Query(q)
+	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

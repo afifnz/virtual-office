@@ -20,6 +20,8 @@ export function Hud({
   onToggleFeed,
   taskOpen,
   onToggleTasks,
+  kpiOpen,
+  onToggleKPI,
   expanded,
   onToggleExpanded,
   stale,
@@ -33,6 +35,8 @@ export function Hud({
   onToggleFeed: () => void
   taskOpen: boolean
   onToggleTasks: () => void
+  kpiOpen: boolean
+  onToggleKPI: () => void
   expanded: boolean
   onToggleExpanded: () => void
   stale: boolean
@@ -126,6 +130,15 @@ export function Hud({
               >
                 <span aria-hidden="true">▤</span>
                 <span className="btn-label">Tugas</span>
+              </button>
+              <button
+                type="button"
+                className={`icon-btn ${kpiOpen ? 'is-active' : ''}`}
+                onClick={onToggleKPI}
+                aria-label="KPI per agen"
+              >
+                <span aria-hidden="true">▥</span>
+                <span className="btn-label">KPI</span>
               </button>
             </>
           )}

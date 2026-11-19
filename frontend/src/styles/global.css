@@ -363,6 +363,7 @@ ul {
 .roster,
 .feed,
 .taskboard,
+.kpi,
 .card {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -1025,6 +1026,152 @@ ul {
   padding: 6px 12px;
 }
 
+/* ---------- KPI per agent ---------- */
+
+.kpi {
+  position: absolute;
+  z-index: 45;
+  left: 50%;
+  top: calc(84px + var(--safe-t));
+  transform: translateX(-50%);
+  width: min(760px, calc(100% - 24px));
+  max-height: calc(100dvh - 120px);
+  display: flex;
+  flex-direction: column;
+}
+
+.kpi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.kpi-numbers {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.kpi-num {
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(214, 180, 130, 0.1);
+  border-radius: 10px;
+  padding: 7px 10px;
+  min-width: 0;
+}
+.kpi-num b {
+  display: block;
+  font-size: 18px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-num span {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.kpi-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: 104px 1fr 52px;
+  align-items: center;
+  gap: 8px;
+}
+
+.kpi-name {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpi-track {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(214, 180, 130, 0.08);
+  overflow: hidden;
+}
+.kpi-track i {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--brass), #e6cd9c);
+}
+.kpi-row.is-blocked .kpi-track i {
+  background: linear-gradient(90deg, var(--blocked), #e2a08f);
+}
+
+.kpi-value {
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-sub {
+  grid-column: 2 / -1;
+  margin-top: -4px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-caption {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.kpi-note {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.kpi-note b {
+  color: var(--ink-dim);
+  font-weight: 600;
+}
+
+.kpi-empty {
+  padding: 26px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.kpi-empty small {
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.kpi-stale {
+  font-size: 10.5px;
+  color: var(--reviewing);
+  text-align: center;
+}
+
 /* ---------- phone ---------- */
 
 @media (max-width: 760px) {
@@ -1185,6 +1332,45 @@ ul {
   .taskboard.is-full .filter {
     min-height: 44px;
     padding: 8px 14px;
+  }
+
+  .kpi.is-full {
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    transform: none;
+    width: auto;
+    max-height: none;
+    border-radius: 0;
+    z-index: 50;
+    padding-top: var(--safe-t);
+    padding-bottom: var(--safe-b);
+  }
+
+  .kpi.is-full .panel-head {
+    padding-top: 12px;
+  }
+
+  .kpi.is-full .kpi-body {
+    padding-bottom: calc(20px + var(--safe-b));
+  }
+
+  .kpi.is-full .icon-btn.small {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .kpi-numbers {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .kpi-row {
+    grid-template-columns: 86px 1fr 46px;
+  }
+
+  .kpi-name {
+    font-size: 11px;
   }
 
   /* the card becomes a chip; the full card is desktop-only */
