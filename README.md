@@ -213,6 +213,7 @@ Read-only, tanpa auth, bind `127.0.0.1` saja (Caddy yang mempublikasikan).
 | `GET /api/health` | `{ok, degraded, version, now, uptime_s, source, home, profiles, bind, tz, dbs_available, dbs_checked, dbs_ok, dbs_err, dbs_failed[]}` |
 | `GET /api/config` | `{title, tz, source, hermes_home, remote_api_url, profiles, roster[], layout{floor,grid,aisle}, teams[]}` |
 | `GET /api/status` | `{now, gateway, agents[], feed[], tasks[], comms[], dbs_checked, dbs_ok, dbs_err, dbs_failed[]}` |
+| `GET /api/kpi?window=7d\|30d` | agregat per profil: `{window, from, to, generated_at, cache_ttl_s, agents[], totals, data}`; cache 60 detik per jendela |
 | `GET /api/agents/{id}` | satu objek agen, `404` kalau tidak ada |
 | `GET /metrics` | teks Prometheus; **hanya dari `127.0.0.1`**, IP lain `403` |
 
@@ -242,6 +243,29 @@ sebagian tetap kelihatan. `HERMES_HOME` kosong (belum ada DB) tetap sehat.
 Nilai mentahnya hanya dipakai HTTP client; semua yang keluar — `remote_api_url`
 di `/api/config`, `home` di `/api/health`, body `502`, dan log — memakai URL
 tanpa userinfo.
+
+**KPI per agen.** `/api/kpi` mengagregasi 7 atau 30 hari terakhir dari setiap
+`state.db`: sesi, pesan, tool call, hari/jam aktif, span aktif, detik terblokir
+(rangkaian ≥2 hasil tool yang gagal, tiap rangkaian dipegang maksimum
+`BlockedHold`), median/P90 jeda antar pesan, dan token bila kolomnya ada.
+Jendela lain dijawab `400`. Hasilnya di-cache **60 detik per jendela** supaya
+penonton tidak memicu pembacaan seluruh DB pada setiap request.
+
+Endpoint ini **tidak** mengubah `/api/status`; keduanya berbagi atribusi sesi
+yang sama (`derive.prepare`) tetapi tidak saling bergantung.
+
+**Kejujuran angka.** Tidak ada metrik yang dikarang:
+
+- `tokens.available:false` + `tokens.total:null` berarti kolom token tidak ada
+  (atau tidak berisi nilai) di `state.db` — **bukan** nol token. `data.token_column`
+  menyatakan apakah skemanya punya kolom itu sama sekali.
+- `data.cost_available` selalu `false`: `state.db` tidak menyimpan harga model
+  per pesan, jadi biaya rupiah/dolar per agen tidak bisa dihitung dan tidak
+  pernah ditampilkan sebagai `0`.
+- `data.messages_capped:true` berarti satu profil mencapai batas baca, sehingga
+  jumlah pesan adalah batas bawah, bukan total.
+- `blocked_pct`/`median_gap_s` bernilai `null` bila jendela tidak punya cukup
+  data — bukan `0%`.
 
 ```jsonc
 {

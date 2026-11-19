@@ -1,4 +1,4 @@
-import type { Agent, StatusPayload } from './types'
+import type { Agent, KpiPayload, KpiWindowKey, StatusPayload } from './types'
 
 /** Endpoint is same-origin in production; vite proxies it in dev. */
 const STATUS_URL = '/api/status'
@@ -44,5 +44,28 @@ function isStatus(v: unknown): v is StatusPayload {
     Array.isArray(o.feed) &&
     Array.isArray(o.tasks) &&
     Array.isArray(o.comms)
+  )
+}
+
+export async function fetchKPI(window: KpiWindowKey, signal: AbortSignal): Promise<KpiPayload> {
+  const res = await fetch(`/api/kpi?window=${window}`, {
+    signal,
+    headers: { accept: 'application/json' },
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
+  const json: unknown = await res.json()
+  if (!isKPI(json)) throw new ApiError('bentuk KPI tidak dikenal', res.status)
+  return json
+}
+
+function isKPI(v: unknown): v is KpiPayload {
+  if (typeof v !== 'object' || v === null) return false
+  const o = v as Record<string, unknown>
+  return (
+    (o.window === '7d' || o.window === '30d') &&
+    Array.isArray(o.agents) &&
+    typeof o.totals === 'object' &&
+    o.totals !== null
   )
 }

@@ -78,16 +78,21 @@ func (l *Loader) Probe() DBHealth {
 	return h
 }
 
-// Snapshot loads every profile DB and derives the payload. Errors are per
-// profile: one unreadable DB must not take the office down. The counts are
-// carried into the payload so a client can see a broken DB.
-func (l *Loader) Snapshot(now time.Time) derive.Snapshot {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+// loaded is the outcome of reading every profile DB once.
+type loaded struct {
+	datasets []derive.ProfileData
+	ok, bad  int
+	failed   []string
+	capped   bool
+	tokenCol bool
+}
 
-	datasets := make([]derive.ProfileData, 0, len(l.cfg.Profiles))
-	ok, bad := 0, 0
-	var failed []string
+// readAll opens each profile DB and reads its sessions plus messages at or
+// after since (0 = all recent messages up to limit). A per-profile failure
+// never aborts the rest: it is counted and named so the payload can say which
+// desk is unreadable.
+func (l *Loader) readAll(since float64, limit int) loaded {
+	var out loaded
 	for _, p := range l.cfg.Profiles {
 		path := store.DefaultProfileDB(l.cfg.Home, p)
 		if !store.HasDB(path) {
@@ -95,50 +100,110 @@ func (l *Loader) Snapshot(now time.Time) derive.Snapshot {
 		}
 		db, err := store.Open(path)
 		if err != nil {
-			bad++
-			failed = append(failed, p)
+			out.bad++
+			out.failed = append(out.failed, p)
 			l.log.Printf("warn profile=%s db_open_failed=%q", p, err.Error())
 			continue
 		}
 		sessions, err := db.Sessions()
 		if err != nil {
-			bad++
-			failed = append(failed, p)
+			out.bad++
+			out.failed = append(out.failed, p)
 			db.Close()
 			l.log.Printf("warn profile=%s sessions_failed=%q", p, err.Error())
 			continue
 		}
-		msgs, err := db.Messages(MessageWindow)
+		if db.HasTokens() {
+			out.tokenCol = true
+		}
+		var msgs []store.Msg
+		if since > 0 {
+			msgs, err = db.MessagesSince(since, limit)
+		} else {
+			msgs, err = db.Messages(limit)
+		}
 		if err != nil {
-			bad++
-			failed = append(failed, p)
+			out.bad++
+			out.failed = append(out.failed, p)
 			db.Close()
 			l.log.Printf("warn profile=%s messages_failed=%q", p, err.Error())
 			continue
 		}
+		if limit > 0 && len(msgs) >= limit {
+			out.capped = true
+		}
 		db.Close()
-		datasets = append(datasets, derive.ProfileData{Name: p, Sessions: sessions, Msgs: msgs})
-		ok++
+		out.datasets = append(out.datasets, derive.ProfileData{Name: p, Sessions: sessions, Msgs: msgs})
+		out.ok++
 	}
+	return out
+}
 
+// Snapshot loads every profile DB and derives the payload. Errors are per
+// profile: one unreadable DB must not take the office down. The counts are
+// carried into the payload so a client can see a broken DB.
+func (l *Loader) Snapshot(now time.Time) derive.Snapshot {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	r := l.readAll(0, MessageWindow)
 	nowF := float64(now.UnixNano()) / 1e9
 	snap := derive.Build(derive.Dataset{
 		ProfileNames: l.cfg.Profiles,
-		Profiles:     datasets,
+		Profiles:     r.datasets,
 		Gateway:      l.gateway(),
 		Now:          nowF,
 		Location:     l.loc,
 
-		DBsChecked: ok + bad,
-		DBsOK:      ok,
-		DBsErr:     bad,
-		DBsFailed:  failed,
+		DBsChecked: r.ok + r.bad,
+		DBsOK:      r.ok,
+		DBsErr:     r.bad,
+		DBsFailed:  r.failed,
 	})
 	if l.cfg.LogRequests {
 		l.log.Printf("info snapshot agents=%d feed=%d tasks=%d comms=%d dbs_ok=%d dbs_err=%d",
-			len(snap.Agents), len(snap.Feed), len(snap.Tasks), len(snap.Comms), ok, bad)
+			len(snap.Agents), len(snap.Feed), len(snap.Tasks), len(snap.Comms), r.ok, r.bad)
 	}
 	return snap
+}
+
+// KPIHistoryLimit caps rows read per profile for a KPI window. 30 days of heavy
+// use can exceed it; the report then says messages_capped=true instead of
+// presenting a truncated count as exact.
+const KPIHistoryLimit = 50000
+
+// KPI aggregates the requested window (7d or 30d) for every profile. Unlike
+// Snapshot it reads only rows inside the window, so a long history stays cheap.
+func (l *Loader) KPI(window string, now time.Time) derive.KPIReport {
+	days, ok := derive.ParseKPIWindow(window)
+	if !ok {
+		days = 7
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	nowF := float64(now.UnixNano()) / 1e9
+	from := nowF - float64(days)*86400
+	r := l.readAll(from, KPIHistoryLimit)
+	report := derive.BuildKPI(derive.Dataset{
+		ProfileNames: l.cfg.Profiles,
+		Profiles:     r.datasets,
+		Gateway:      l.gateway(),
+		Now:          nowF,
+		Location:     l.loc,
+
+		DBsChecked:     r.ok + r.bad,
+		DBsOK:          r.ok,
+		DBsErr:         r.bad,
+		DBsFailed:      r.failed,
+		MessagesCapped: r.capped,
+		TokenColumn:    r.tokenCol,
+	}, days)
+	if l.cfg.LogRequests {
+		l.log.Printf("info kpi window=%s agents=%d messages=%d dbs_ok=%d dbs_err=%d capped=%v",
+			report.Window, len(report.Agents), report.Totals.Messages, r.ok, r.bad, r.capped)
+	}
+	return report
 }
 
 // gateway reads gateway_state.json tolerantly.

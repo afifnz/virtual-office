@@ -86,4 +86,62 @@ export interface StatusPayload {
   comms: Comm[]
 }
 
+/** Wire types for GET /api/kpi — mirrors derive.KPIReport. */
+export type KpiWindowKey = '7d' | '30d'
+
+export interface KpiTokens {
+  available: boolean
+  total: number | null
+  messages_with_tokens: number
+}
+
+export interface KpiAgent {
+  id: string
+  sessions: number
+  messages: number
+  tool_calls: number
+  active_days: number
+  active_hours: number
+  median_gap_s: number | null
+  p90_gap_s: number | null
+  active_seconds: number
+  blocked_seconds: number
+  blocked_pct: number | null
+  last_active: number
+  tokens: KpiTokens
+}
+
+export interface KpiTotals {
+  sessions: number
+  messages: number
+  tool_calls: number
+  active_agents: number
+  active_seconds: number
+  blocked_seconds: number
+  blocked_pct: number | null
+  tokens: KpiTokens
+}
+
+export interface KpiDataQuality {
+  profiles_read: number
+  profiles_ok: number
+  profiles_err: number
+  profiles_failed?: string[]
+  messages_capped: boolean
+  /** false means state.db has no token column at all — never render 0 tokens */
+  token_column: boolean
+  cost_available: boolean
+}
+
+export interface KpiPayload {
+  window: KpiWindowKey
+  from: number
+  to: number
+  generated_at: number
+  cache_ttl_s: number
+  agents: KpiAgent[]
+  totals: KpiTotals
+  data: KpiDataQuality
+}
+
 export type TeamId = 'lobby' | 'dev' | 'edu'

@@ -29,6 +29,13 @@ type Source interface {
 	Snapshot(ctx context.Context, now time.Time) (derive.Snapshot, error)
 }
 
+// KPISource is implemented by sources that can aggregate historical activity
+// per agent. window is "7d" or "30d". A source that cannot (an old upstream)
+// leaves the endpoint answering 502 with the reason rather than inventing rows.
+type KPISource interface {
+	KPI(ctx context.Context, window string) (derive.KPIReport, error)
+}
+
 // Upstream is implemented by sources that can also proxy another office's
 // roster/title/timezone. Optional: /api/config falls back to the local roster.
 type Upstream interface {
