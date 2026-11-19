@@ -40,8 +40,11 @@ export interface AgentMeta {
  *
  * Desk rotation: 0 faces -z, PI faces +z, PI/2 faces -x, -PI/2 faces +x.
  *
- * Team rooms use facing pods: a front row (rot 0) and a back row (rot PI) whose
- * desk tops meet 0.8 apart in z, so teammates sit across from each other.
+ * Team desks sit in one touching block each (see CLUSTERS in lib/rooms.ts): a
+ * front row (rot 0) and a back row (rot PI) whose desk tops meet edge to edge,
+ * with the columns a desk-width apart, so the six dev desks read as one island
+ * and the four edu desks as a second. The devops desk stands alone by the
+ * server rack.
  */
 export const AGENTS: AgentMeta[] = [
   {
@@ -54,7 +57,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#d9a880', hair: '#241c18', style: 'crop', shirt: '#2f3d57', pants: '#2a2521',
       accent: '#b4553f', sculptedHead: true, mustache: true, build: 1.06, tall: 1.02,
     },
-    desk: { x: -6.8, z: 10.6, rot: Math.PI },
+    desk: { x: -6.9, z: 6.4, rot: Math.PI },
   },
   {
     id: 'dev',
@@ -66,7 +69,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#a9744f', hair: '#221a17', style: 'crop', shirt: '#4d6b86', pants: '#2c2f33',
       accent: '#82aac8', build: 1.12, tall: 1.02, stubble: true,
     },
-    desk: { x: -14.5, z: -6.2, rot: 0 },
+    desk: { x: -9.22, z: -4.01, rot: 0 },
   },
   {
     id: 'planner',
@@ -78,7 +81,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#b9825c', hair: '#2a211d', style: 'side', shirt: '#33405f', pants: '#565040',
       accent: '#80aa8c', glasses: true, build: 0.9, tall: 1.05,
     },
-    desk: { x: -10.0, z: -6.2, rot: 0 },
+    desk: { x: -7.6, z: -4.01, rot: 0 },
   },
   {
     id: 'uiux',
@@ -90,7 +93,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#d4a684', hair: '#241c19', style: 'long', shirt: '#b26870', pants: '#3a3846',
       accent: '#d67a92', build: 0.9, tall: 0.98, female: true,
     },
-    desk: { x: -5.5, z: -6.2, rot: 0 },
+    desk: { x: -5.98, z: -4.01, rot: 0 },
   },
   {
     id: 'coder',
@@ -102,7 +105,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#8d5f43', hair: '#1d1714', style: 'messy', shirt: '#3d4145', pants: '#20242e',
       accent: '#6e8fb4', headphones: '#465c78', build: 1.0, tall: 1.01, stubble: true,
     },
-    desk: { x: -14.5, z: -7.0, rot: Math.PI },
+    desk: { x: -9.22, z: -4.79, rot: Math.PI },
   },
   {
     id: 'reviewer',
@@ -114,7 +117,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#c08a63', hair: '#2c2420', style: 'short', shirt: '#7a6a52', pants: '#33302b',
       accent: '#b59a6a', glasses: true, build: 0.98, tall: 1.0,
     },
-    desk: { x: -10.0, z: -7.0, rot: Math.PI },
+    desk: { x: -7.6, z: -4.79, rot: Math.PI },
   },
   {
     id: 'tester',
@@ -126,7 +129,19 @@ export const AGENTS: AgentMeta[] = [
       skin: '#d2a17e', hair: '#2a211e', style: 'bun', shirt: '#5c7a6a', pants: '#3b3a3f',
       accent: '#8fc0a0', build: 0.92, tall: 0.99, female: true,
     },
-    desk: { x: -5.5, z: -7.0, rot: Math.PI },
+    desk: { x: -5.98, z: -4.79, rot: Math.PI },
+  },
+  {
+    id: 'devops',
+    name: 'Wahyu',
+    role: 'DEVOPS',
+    team: 'dev',
+    desc: 'Menjaga server, deploy, dan pipeline: rak server di sudut ruang dev, siap dipanggil kalau build atau rilis bermasalah.',
+    look: {
+      skin: '#9c6b47', hair: '#1f1a17', style: 'short', shirt: '#3f5a52', pants: '#24282c',
+      accent: '#69b39b', glasses: true, build: 1.04, tall: 1.01, stubble: true,
+    },
+    desk: { x: -3.8, z: -7.85, rot: 0 },
   },
   {
     id: 'edu',
@@ -138,7 +153,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#c48f6a', hair: '#241d1a', style: 'bun', shirt: '#8a6a3e', pants: '#3a3230',
       accent: '#deb860', build: 0.98, tall: 1.0, female: true,
     },
-    desk: { x: 12.25, z: -6.2, rot: 0 },
+    desk: { x: 6.19, z: -4.01, rot: 0 },
   },
   {
     id: 'edu-designer',
@@ -150,7 +165,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#d7ab88', hair: '#2b2220', style: 'long', shirt: '#6b7f5a', pants: '#3d3a42',
       accent: '#a8c078', build: 0.9, tall: 0.98, female: true,
     },
-    desk: { x: 7.75, z: -6.2, rot: 0 },
+    desk: { x: 7.81, z: -4.01, rot: 0 },
   },
   {
     id: 'edu-writer',
@@ -162,7 +177,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#a87a58', hair: '#211a17', style: 'side', shirt: '#4a5566', pants: '#38342e',
       accent: '#8ea8c0', build: 0.96, tall: 1.04,
     },
-    desk: { x: 12.25, z: -7.0, rot: Math.PI },
+    desk: { x: 6.19, z: -4.79, rot: Math.PI },
   },
   {
     id: 'edu-reviewer',
@@ -174,7 +189,7 @@ export const AGENTS: AgentMeta[] = [
       skin: '#b98a64', hair: '#332a26', style: 'crop', shirt: '#6e5a48', pants: '#2f2b27',
       accent: '#c0a080', glasses: true, build: 1.02, tall: 0.99,
     },
-    desk: { x: 7.75, z: -7.0, rot: Math.PI },
+    desk: { x: 7.81, z: -4.79, rot: Math.PI },
   },
 ]
 
@@ -215,6 +230,6 @@ export function agentMeta(id: string): AgentMeta {
       skin: '#c99772', hair: '#2a2220', style: 'short', shirt: '#5a6570', pants: '#33383d',
       accent: '#93a1ae', build: 1, tall: 1,
     },
-    desk: { x: 5.0, z: 8.6, rot: Math.PI },
+    desk: { x: 3.0, z: 5.0, rot: Math.PI },
   }
 }
