@@ -9,7 +9,9 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"log"
+	"math"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +21,8 @@ import (
 	"time"
 
 	"officeapi/internal/config"
+	"officeapi/internal/metrics"
+	"officeapi/internal/ratelimit"
 	"officeapi/internal/roster"
 	"officeapi/internal/source"
 )
@@ -43,6 +47,11 @@ type Server struct {
 	log     *log.Logger
 	started time.Time
 
+	// lim is nil when the rate limit is disabled (RATE_LIMIT=off). met is always
+	// present so /metrics works even with the limiter off.
+	lim *ratelimit.Limiter
+	met *metrics.Registry
+
 	gz gzipCache
 }
 
@@ -58,8 +67,27 @@ func NewServer(cfg config.Config, src source.Source, res roster.Resolver, logger
 		res:     res,
 		log:     logger,
 		started: time.Now(),
+		lim:     newLimiter(cfg),
+		met:     metrics.New(),
 		gz:      gzipCache{entries: map[string]gzipEntry{}},
 	}
+}
+
+// newLimiter returns nil when the limit is off. Zero-valued fields still get
+// the defaults so a caller that builds config.Config by hand cannot create a
+// limiter that rejects everything.
+func newLimiter(cfg config.Config) *ratelimit.Limiter {
+	if !cfg.RateLimit {
+		return nil
+	}
+	perMin, burst := cfg.RateLimitPerMin, cfg.RateLimitBurst
+	if perMin <= 0 {
+		perMin = config.DefaultRateLimitPerMin
+	}
+	if burst <= 0 {
+		burst = config.DefaultRateLimitBurst
+	}
+	return ratelimit.New(perMin, burst)
 }
 
 // Handler returns the root mux (Go 1.22 method+pattern routing, stdlib only).
@@ -69,8 +97,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/agents/{id}", s.handleAgent)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("/", s.handleRoot)
-	return s.withCommon(mux)
+
+	// Inside-out: common headers cover every answer including 429, the metrics
+	// wrapper counts whatever the limiter decided, and the limiter sits closest
+	// to the handlers so a rejected request touches no data source.
+	var h http.Handler = mux
+	if s.lim != nil {
+		h = s.withRateLimit(h)
+	}
+	h = s.withMetrics(h)
+	return s.withCommon(h)
 }
 
 func (s *Server) withCommon(next http.Handler) http.Handler {
@@ -91,6 +129,138 @@ func (s *Server) withCommon(next http.Handler) http.Handler {
 			s.log.Printf("info method=%s path=%s dur_ms=%d", r.Method, r.URL.Path, time.Since(start).Milliseconds())
 		}
 	})
+}
+
+// exemptFromLimit keeps monitoring (and the office's own health probes) out of
+// the per-IP bucket: a limiter must never be the reason an alert fires.
+func exemptFromLimit(path string) bool {
+	return path == "/health" || path == "/api/health"
+}
+
+// withRateLimit spends one token per /api/* request per client IP. Anything
+// outside /api/ is not limited: /metrics is loopback-only already, and static
+// assets are cheap.
+func (s *Server) withRateLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || exemptFromLimit(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ok, retry := s.lim.Allow(clientIP(r))
+		if ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		s.met.IncRateLimited()
+		secs := int(math.Ceil(retry.Seconds()))
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":         "rate_limited",
+			"retry_after_s": secs,
+		})
+	})
+}
+
+// withMetrics records one counter and one histogram observation per request,
+// including the ones the limiter rejected.
+func (s *Server) withMetrics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(rec, r)
+		s.met.Observe(normalizePath(r.URL.Path), strconv.Itoa(rec.status), time.Since(start))
+	})
+}
+
+// statusRecorder remembers the status code for the metrics middleware. Handlers
+// here always call WriteHeader, but the default covers handlers that do not.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// normalizePath caps label cardinality: ids and unknown paths collapse, so the
+// series count stays bounded no matter what a client asks for.
+func normalizePath(p string) string {
+	switch p {
+	case "/api/status", "/api/health", "/api/config", "/health", "/metrics":
+		return p
+	}
+	switch {
+	case strings.HasPrefix(p, "/api/agents/"):
+		return "/api/agents/:id"
+	case strings.HasPrefix(p, "/api/"):
+		return "/api/other"
+	default:
+		return "/other"
+	}
+}
+
+// clientIP is the rate-limit key. Caddy sets X-Real-IP, so behind the proxy the
+// bucket is per real client. The header is only trusted when the peer itself is
+// loopback or on a private network: otherwise a client that can reach the API
+// directly could pick a fresh identity per request and bypass the limit.
+func clientIP(r *http.Request) string {
+	peer := peerIP(r)
+	if peer != nil && (peer.IsLoopback() || peer.IsPrivate() || peer.IsLinkLocalUnicast()) {
+		if forwarded := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); forwarded != nil {
+			return forwarded.String()
+		}
+	}
+	if peer != nil {
+		return peer.String()
+	}
+	return r.RemoteAddr
+}
+
+func peerIP(r *http.Request) net.IP {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return net.ParseIP(strings.Trim(host, "[]"))
+}
+
+// metricsAllowed is stricter than clientIP on purpose: /metrics is not proxied
+// by Caddy, so only a loopback peer may read it. A proxy that does forward it
+// announces the real client in X-Real-IP and gets a 403.
+func metricsAllowed(r *http.Request) bool {
+	peer := peerIP(r)
+	if peer == nil || !peer.IsLoopback() {
+		return false
+	}
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Real-IP")); forwarded != "" {
+		ip := net.ParseIP(forwarded)
+		return ip != nil && ip.IsLoopback()
+	}
+	return true
+}
+
+// snapshotAger is implemented by sources that cache a snapshot; a source that
+// fetches per request (remote) has no age to report.
+type snapshotAger interface {
+	SnapshotAge() (time.Duration, bool)
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if !metricsAllowed(r) {
+		writeError(w, http.StatusForbidden, "metrics hanya bisa dibaca dari 127.0.0.1")
+		return
+	}
+	age := 0.0
+	if a, ok := s.src.(snapshotAger); ok {
+		if d, ok := a.SnapshotAge(); ok {
+			age = d.Seconds()
+		}
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = s.met.WriteText(w, age)
 }
 
 // rosterSet resolves the roster, inheriting the upstream roster when the source

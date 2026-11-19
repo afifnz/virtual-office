@@ -97,6 +97,7 @@ Tanpa akses `~/.hermes`? Pakai fixture: `deploy/make-fixture.py` lalu
 | `OFFICE_TITLE` / `OFFICE_TZ` | `Agent Office` / `Asia/Jakarta` | judul & zona waktu |
 | `WEB_DIR` | — | kalau diisi, API juga menyajikan SPA |
 | `PROFILES`, `GATEWAY_FILE`, `LOG_REQUESTS` | — | lama, masih berlaku (kecuali `PROFILES` di mode remote) |
+| `RATE_LIMIT` / `RATE_LIMIT_PER_MIN` / `RATE_LIMIT_BURST` | `on` / `120` / `30` | rate limit per-IP untuk `/api/*`; `off` mematikan. `/api/health` dikecualikan |
 
 Detail lengkap: `README.md` §Konfigurasi.
 

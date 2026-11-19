@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # End-to-end proof of the review fixes against the real binary.
 set -u
+# This suite drives one client (127.0.0.1) through every endpoint many times in a
+# row, which is exactly what the per-IP limiter exists to stop. Turning it off
+# keeps the checks about the API contract; the limiter itself is covered by
+# `go test ./internal/ratelimit` and the curl proof in the PR.
+export RATE_LIMIT=off
 BIN=/workspace/.gotmp/bin/office-api
 OUT=/workspace/.gotmp/e2e
 rm -rf "$OUT"; mkdir -p "$OUT"
