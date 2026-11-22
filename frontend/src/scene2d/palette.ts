@@ -89,7 +89,6 @@ export const FLOOR_MOTIF = {
     fleckLight: '#5C6A7B',
     mat: '#2A313B', // entry mat at the MASUK door
     matEdge: '#525F6D',
-    pool: '#414C59', // ceiling-light pool (pre-blended slab + lamp)
   },
   edu: {
     slab: '#C7D2DE',
@@ -97,14 +96,12 @@ export const FLOOR_MOTIF = {
     rug: '#8E99AC', // soft zone rug under the 2×2 edu block
     rugEdge: '#77839A',
     band: '#456E8F', // glass wall band along the north wall
-    pool: '#D5DDE6',
   },
   dev: {
     slab: '#232C38',
     seam: '#1B222D',
     tray: '#39434F', // steel cable tray
     lamp: '#F2E7C4', // ceiling-light strip core
-    pool: '#2B3542',
   },
 } as const
 

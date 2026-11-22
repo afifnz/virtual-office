@@ -64,10 +64,16 @@ const CHAIR_PX = 10
  * Per-floor floor motifs (design §3.1) in the modern palette:
  *  - L1 lobby: polished concrete slab, terrazzo flecks (deterministic per
  *    tile, no Math.random), a dark entry mat inside the MASUK door
- *  - L2 Tim Edu: light concrete slab, a soft zone rug under the 2×2 edu block,
- *    a glass wall band along the north wall
+ *  - L2 Tim Edu: light concrete slab with its seams, a glass wall band along
+ *    the north wall (the zone rug under the 2×2 block is a prop, so it gets a
+ *    woven texture and the seams stay continuous around it)
  *  - L3 Tim Dev: dark polished concrete, a steel cable tray and warm
  *    ceiling-light strips across the slab
+ *
+ * The solid ceiling-light "pool" rectangles are gone: a 6×3.2-unit block of a
+ * lighter tone reads as a rug or a placeholder on a bare floor, which is
+ * exactly what the screenshot review flagged on L2. The motif itself (flecks,
+ * seams, strips) now carries the whole slab without a hole in it.
  */
 function drawFloor(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   const f = FLOORS[floor]
@@ -105,12 +111,6 @@ function drawFloor(ctx: CanvasRenderingContext2D, floor: FloorId): void {
     ctx.fillRect(0, 0, f.w * TILE, 3)
     ctx.fillStyle = PALETTE.glass300
     ctx.fillRect(0, 0, f.w * TILE, 1)
-    // soft zone rug under the 2×2 edu block (x ±1.7, z -1.6..2.9)
-    ctx.fillStyle = m.rug
-    ctx.fillRect(toPx(-1.7), toPy(-1.6), Math.round(3.4 * TILE), Math.round(4.5 * TILE))
-    ctx.fillStyle = m.rugEdge
-    ctx.fillRect(toPx(-1.7), toPy(-1.6), Math.round(3.4 * TILE), 1)
-    ctx.fillRect(toPx(-1.7), toPy(2.9) - 1, Math.round(3.4 * TILE), 1)
   } else {
     const m = FLOOR_MOTIF.dev
     ctx.fillStyle = m.slab
@@ -123,7 +123,7 @@ function drawFloor(ctx: CanvasRenderingContext2D, floor: FloorId): void {
     ctx.fillRect(0, 3, f.w * TILE, 4)
     ctx.fillStyle = PALETTE.steel500
     for (let tx = 2; tx < f.w; tx += 4) ctx.fillRect(tx * TILE, 3, 1, 4)
-    // ceiling-light strips across the slab (the pools sit under them)
+    // ceiling-light strips across the slab: the one light source of L3
     for (const z of [-4.5, 0.5, 5.5]) {
       const y = toPy(z)
       ctx.fillStyle = m.lamp
@@ -132,37 +132,6 @@ function drawFloor(ctx: CanvasRenderingContext2D, floor: FloorId): void {
       ctx.fillRect(toPx(-9), y - 1, Math.round(18 * TILE), 1)
       ctx.fillRect(toPx(-9), y + 2, Math.round(18 * TILE), 1)
     }
-  }
-}
-
-/**
- * Ceiling-light pools and fixtures (design §3.1): warm-white lamps floating
- * on the slab. Pools are pre-blended solid tones (no alpha); fixtures are
- * small lamp bars with steel ends. Drawn before walls and furniture.
- */
-function drawCeilingLights(ctx: CanvasRenderingContext2D, floor: FloorId): void {
-  const f = FLOORS[floor]
-  const m = floor === 1 ? FLOOR_MOTIF.lobby : floor === 2 ? FLOOR_MOTIF.edu : FLOOR_MOTIF.dev
-  const lamp = PALETTE.lamp
-  const pools: Array<[number, number]> =
-    floor === 1 ? [[-5.5, 0.5], [6.5, 5.5]] : floor === 2 ? [[0, 0.6], [-6.5, -5.2], [6.5, 5.2]] : [[-6, -4.5], [0, 0.5], [6, 5.5]]
-  for (const [px, pz] of pools) {
-    const x = Math.round((px - 3 + f.w / 2) * TILE)
-    const y = Math.round((pz - 1.6 + f.d / 2) * TILE)
-    const w = Math.round(6 * TILE)
-    const h = Math.round(3.2 * TILE)
-    // the pool: a lighter patch of slab
-    ctx.fillStyle = m.pool
-    ctx.fillRect(x, y, w, h)
-    // the fixture: a short warm-white bar with steel end caps
-    const fw = Math.round(2.4 * TILE)
-    const fx = x + Math.round((w - fw) / 2)
-    const fy = y + Math.round(h / 2) - 1
-    ctx.fillStyle = PALETTE.steel500
-    ctx.fillRect(fx - 2, fy, 2, 2)
-    ctx.fillRect(fx + fw, fy, 2, 2)
-    ctx.fillStyle = lamp
-    ctx.fillRect(fx, fy, fw, 2)
   }
 }
 
@@ -349,7 +318,6 @@ export function createStaticLayer(floor: FloorId): HTMLCanvasElement {
   const ctx = canvas.getContext('2d')!
   ctx.imageSmoothingEnabled = false
   drawFloor(ctx, floor)
-  drawCeilingLights(ctx, floor)
   drawWalls(ctx, floor)
   // the lift sits on the slab before the furniture, so a prop mounted on the
   // shaft face (the call panel) is painted on top of it
