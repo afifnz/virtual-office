@@ -48,14 +48,18 @@ import {
   type PlacedPlate,
 } from './labels'
 import {
-  SIDE_BOARDS,
+  COMPACT_MAX_W,
+  SIDE_BOARD_TOP,
   SIDE_FLOOR_BACK,
   SIDE_FLOOR_FRONT,
   SIDE_GLASS_TOP,
   SIDE_H,
   SIDE_W,
+  boardsFor,
+  sideScale,
   sideTransform,
   sideSeats,
+  visibleDesignRect,
   worldXToDesign,
   type SideSeat,
   type SideViewport,
@@ -104,7 +108,12 @@ export function clearStaticCache(): void {
   staticCache.clear()
 }
 
-export function createStaticLayer(floor: FloorId, theme: ThemeName, tzName = 'WIB'): HTMLCanvasElement {
+export function createStaticLayer(
+  floor: FloorId,
+  theme: ThemeName,
+  tzName = 'WIB',
+  compact = false,
+): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(SIDE_W * CACHE_SCALE)
   canvas.height = Math.round(SIDE_H * CACHE_SCALE)
@@ -132,7 +141,7 @@ export function createStaticLayer(floor: FloorId, theme: ThemeName, tzName = 'WI
   drawFloorPlane(ctx, theme)
 
   // boards hang in front of the glass on one rail
-  drawBoards(ctx, theme, floor, tzName)
+  drawBoards(ctx, theme, floor, tzName, compact)
   // the lift core is part of the east wall
   drawLiftShaft(ctx, theme, floor)
 
@@ -145,11 +154,16 @@ export function createStaticLayer(floor: FloorId, theme: ThemeName, tzName = 'WI
   return canvas
 }
 
-export function staticLayerFor(floor: FloorId, theme: ThemeName, tzName = 'WIB'): HTMLCanvasElement {
-  const key = `${floor}:${theme}:${tzName}`
+export function staticLayerFor(
+  floor: FloorId,
+  theme: ThemeName,
+  tzName = 'WIB',
+  compact = false,
+): HTMLCanvasElement {
+  const key = `${floor}:${theme}:${tzName}:${compact ? 'phone' : 'wide'}`
   let canvas = staticCache.get(key)
   if (!canvas) {
-    canvas = createStaticLayer(floor, theme, tzName)
+    canvas = createStaticLayer(floor, theme, tzName, compact)
     if (staticCache.size >= CACHE_MAX) {
       const first = staticCache.keys().next().value
       if (first) staticCache.delete(first)
@@ -282,6 +296,11 @@ export interface RenderInput {
   /** WIB hour/minute for the wall clock (from the server `now`) */
   hour: number
   minute: number
+  /**
+   * Phone wall: three boards, no decorative panels. Defaults to
+   * `viewW < COMPACT_MAX_W` so a narrow canvas can never paint the wide set.
+   */
+  compact?: boolean
 }
 
 function avatarPose(pose: Pose): AvatarPose {
@@ -347,13 +366,14 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   const pal = THEME_TOKENS[theme]
   const status = THEME_STATUS[theme]
   const dpr = r.dpr
+  const compact = r.compact ?? r.viewW < COMPACT_MAX_W
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.fillStyle = pal.page
   ctx.fillRect(0, 0, r.viewW, r.viewH)
 
   // the cached stage, scaled by the camera
-  const stage = staticLayerFor(r.vp.floor, theme, tzLabel())
+  const stage = staticLayerFor(r.vp.floor, theme, tzLabel(), compact)
   ctx.drawImage(stage, t.left, t.top, SIDE_W * t.s, SIDE_H * t.s)
 
   const resolved = placeAgents(r.metas, r.byId, r.now, r.comms, r.t)
@@ -368,8 +388,9 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     ctx,
     theme,
     onFloor.map((p) => ({ id: p.meta.id, name: p.meta.name, status: p.agent?.status ?? 'offline' })),
+    compact,
   )
-  drawClockHands(ctx, theme, r.hour, r.minute)
+  drawClockHands(ctx, theme, r.hour, r.minute, compact)
 
   // ---- lift car: open while someone dwells, otherwise closed at this floor
   const liftY = 540 - (r.vp.floor - 1) * 100
@@ -413,8 +434,16 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   }
   const labelAgents = labelAgentsFor(seats, statuses)
   const bounds = { w: SIDE_W, h: SIDE_H }
-  const reserved = SIDE_BOARDS.map((b) => ({ x: b.x, y: 132, w: b.w, h: b.h }))
-  const { plates } = layoutSideLabels(labelAgents, bounds, reserved)
+  const reserved = boardsFor(compact).map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
+  // On the phone the sheet is wider than the screen: clamp plates to the part
+  // of the stage the viewport really shows, with a 4 CSS px safety margin, or a
+  // plate near the edge is cut by the screen ("BAGA…"). Only at the fit zoom —
+  // once the viewer zooms in, panning is expected and the stage is the bound.
+  const labelWindow =
+    compact && r.vp.zoom <= 1
+      ? { ...visibleDesignRect(r.viewW, r.viewH, 1), margin: Math.ceil(4 / sideScale(r.viewH, 1, r.viewW)) }
+      : undefined
+  const { plates } = layoutSideLabels(labelAgents, bounds, reserved, labelWindow)
   for (const plate of plates) {
     const agent = labelAgents.find((a) => a.id === plate.id)
     if (!agent) continue

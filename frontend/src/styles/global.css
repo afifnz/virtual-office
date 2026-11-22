@@ -2252,3 +2252,149 @@ body {
     animation: none;
   }
 }
+
+/* ==========================================================================
+   M4 — PHONE CANVAS (≤760 px)
+
+   The stage is 1000×688 design px and a 390×692 phone canvas draws it at half
+   scale, i.e. 500×344 CSS px. Two consequences drive everything below:
+
+     · the screen shows 780 design px of the sheet (110…890), so anything that
+       must not be cut by the screen edge has to live inside that window. The
+       painter drops the pinboard / burndown / architecture boards (3 px text,
+       right edge clipped) and keeps a compact plaque + status board + clock;
+       nameplates clamp to the window with a 4 CSS px margin;
+     · the stage sits in the middle of the canvas with ~174 px of empty band
+       above and below, which is where the zoom control and the pad belong —
+       never on top of a desk.
+
+   `verify/visual_check.ts` §11 parses the `--m-*` values below and asserts both
+   properties at 390×692. Change the numbers, keep the gate honest.
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  :root {
+    /* the reference phone the gate measures (Chromium 390×844 minus HUD/bar) */
+    --m-canvas-w: 390px;
+    --m-canvas-h: 692px;
+    --m-app-h: 844px;
+    --m-hud: 96px;
+    --m-toolbar: 56px;
+    /* canvas px the painter keeps clear at the bottom for the pad */
+    --m-ctrl-band: 120px;
+
+    /* zoom control: top-right, in the band above the stage */
+    --m-zoom-top: 8px;
+    --m-zoom-right: 8px;
+    --m-zoom-w: 128px;
+    --m-zoom-h: 42px;
+
+    /* D-pad: bottom-left, in the band below the stage */
+    --m-cell: 48px;
+    --m-pad-left: 12px;
+    --m-pad-bottom: 12px;
+    --m-pad-w: 156px; /* 3 × 48 + 2 × 6 */
+    --m-pad-h: 102px; /* 2 × 48 + 6 */
+
+    /* agent chip: top-left, clear of the zoom control */
+    --m-chip-top: 8px;
+    --m-chip-left: 12px;
+    --m-chip-h: 44px;
+    --m-chip-w: 238px;
+  }
+
+  .zoom-ctrl {
+    top: var(--m-zoom-top);
+    right: calc(var(--m-zoom-right) + var(--safe-r));
+    bottom: auto;
+  }
+
+  .dpad {
+    left: calc(var(--m-pad-left) + var(--safe-l));
+    bottom: calc(var(--m-toolbar) + var(--m-pad-bottom) + var(--safe-b));
+    grid-template-columns: repeat(3, var(--m-cell));
+    grid-template-rows: repeat(2, var(--m-cell));
+  }
+
+  .dpad-btn {
+    width: var(--m-cell);
+    height: var(--m-cell);
+    font-size: 15px;
+  }
+
+  /* the chip is a toast, not a card: it sits above the stage instead of on the
+     front-row desks it used to cover. It is positioned against `.app`, so the
+     HUD height is added back to land it at the top of the canvas. */
+  .prox-chip {
+    top: calc(var(--m-hud) + var(--m-chip-top));
+    bottom: auto;
+    left: calc(var(--m-chip-left) + var(--safe-l));
+    max-width: var(--m-chip-w);
+    min-height: var(--m-chip-h);
+  }
+
+  /* --- header: one row of floors, one row of numbers (no dot parades) --- */
+  .hud-row {
+    min-height: 40px;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .hud-caret {
+    order: 3;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
+
+  .floor-tabs.in-hud {
+    order: 2;
+    flex: 1 1 auto;
+    justify-content: flex-start;
+  }
+
+  .floor-tabs.in-hud .floor-tab {
+    flex: 0 1 auto;
+    justify-content: center;
+    min-height: 34px;
+    padding: 4px 9px;
+    gap: 5px;
+  }
+
+  /* L1/L2/L3 + how many agents sit there; the per-floor dot parade is gone */
+  .floor-tabs.in-hud .floor-tab-name,
+  .floor-tabs.in-hud .floor-tab-stat {
+    display: none;
+  }
+
+  .floor-tabs.in-hud .floor-tab-meta {
+    font-size: 11px;
+  }
+
+  .hud-summary {
+    order: 4;
+    flex: 1 1 auto;
+    margin: 0;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .hud-summary b {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .theme-ctrl {
+    order: 5;
+  }
+
+  .hud-detail {
+    order: 9;
+  }
+}
+

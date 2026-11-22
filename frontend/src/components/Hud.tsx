@@ -167,6 +167,37 @@ export function Hud(props: HudProps) {
     </div>
   )
 
+  // One line of numbers instead of the desktop's dot parade: the phone bar is
+  // 390 px wide and four dots per floor row pushed the canvas down.
+  const total = status?.agents.length ?? 0
+  const online = (status?.agents ?? []).filter((a) => a.status !== 'offline').length
+  const summary = mobile ? (
+    <p className="hud-summary">
+      <b>
+        {online}/{total}
+      </b>{' '}
+      online
+      {counts.get('working') ? (
+        <>
+          {' · '}
+          <b>{counts.get('working')}</b> bekerja
+        </>
+      ) : null}
+      {counts.get('reviewing') ? (
+        <>
+          {' · '}
+          <b>{counts.get('reviewing')}</b> review
+        </>
+      ) : null}
+      {counts.get('blocked') ? (
+        <>
+          {' · '}
+          <b>{counts.get('blocked')}</b> terblokir
+        </>
+      ) : null}
+    </p>
+  ) : null
+
   return (
     <>
       <header className={`hud ${expanded ? 'is-open' : ''}`}>
@@ -180,6 +211,8 @@ export function Hud(props: HudProps) {
           </div>
 
           <FloorTabs floor={props.floor} status={props.status} onFloor={props.onFloor} variant="hud" />
+
+          {summary}
 
           <ThemeControl
             theme={props.theme}

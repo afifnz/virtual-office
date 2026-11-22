@@ -43,7 +43,10 @@ import {
   SIDE_H,
   SIDE_RAIL_TOP,
   SIDE_W,
+  sideSeats,
+  visibleDesignRect,
 } from '../frontend/src/scene2d/side'
+import { shortName } from '../frontend/src/scene2d/labels'
 import { sunMoonBox } from '../frontend/src/scene2d/city'
 import { liftCarLabel, liftHeaderLabel, liftHeaderTeam } from '../frontend/src/scene2d/props-side'
 import type { AgentMeta } from '../frontend/src/lib/agents'
@@ -525,6 +528,82 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
   renderFrame(recordCtx(recA), input)
   renderFrame(recordCtx(recB), input)
   expect('same input → same frame', recA.ops.length === recB.ops.length && recA.ops.length > 100, true)
+}
+
+// ------------------------------------------------ 6. the phone frame (390×692)
+
+/**
+ * A 390×692 canvas is the phone: 390×844 minus the 96 px HUD and the 56 px bar.
+ * It draws the sheet at half scale, so only design x 110…890 reaches the glass.
+ * The frame must therefore (a) hang the compact wall — the pinboard, burndown
+ * and architecture panels are 3 px text and the diagram ends past the right
+ * edge — and (b) keep every nameplate inside that window. Both were reported
+ * from a real screenshot ("BAGA…" cut in half, ARSITEKTUR hanging off).
+ */
+{
+  const PW = 390
+  const PH = 692
+  const win = visibleDesignRect(PW, PH, 1)
+  /** Board cards are 148 px tall fills; the label text is char-split by tracking. */
+  const cardXs = (c: FakeCanvas): number[] =>
+    c.rec.ops
+      .filter((o) => o.name === 'fill' && Math.round(o.box[3] - o.box[1]) === SIDE_BOARD_H && o.box[2] - o.box[0] > 80)
+      .map((o) => Math.round(o.box[0]))
+  let phoneFrames = 0
+  let platesSeen = 0
+  for (const theme of THEMES) {
+    for (const floor of FLOOR_IDS) {
+      clearStaticCache()
+      const rec = newRecorder()
+      renderFrame(recordCtx(rec), {
+        theme,
+        metas: metasOf(),
+        byId: new Map(fullRoster().map((a) => [a.id, a])),
+        now: NOW,
+        comms: [],
+        vp: { camX: SIDE_W / 2, zoom: 1, floor },
+        viewW: PW,
+        viewH: PH,
+        dpr: 1,
+        still: true,
+        t: 0,
+        hour: 14,
+        minute: 5,
+      })
+      phoneFrames++
+      const texts = rec.texts
+      const count = texts.find((t) => /^\d+\/\d+$/.test(t))
+      const want = `${[0, 1, 4, 8][floor]}/${[0, 1, 4, 8][floor]}`
+      if (count !== want) fail(`L${floor}/${theme} phone: board count ${count}, want ${want}`)
+
+      // every seated agent still gets a plate, and the text starts inside the window
+      const seats = sideSeats(metasOf().filter((m) => m.desk.floor === floor))
+      for (const s of seats) {
+        const name = shortName(s.meta.name)
+        const op = rec.ops.find((o) => o.name === `fillText:${name}`)
+        if (!op) fail(`L${floor}/${theme} phone: ${s.meta.id} has no nameplate`)
+        else {
+          platesSeen++
+          if (op.box[0] < win.x0 || op.box[0] > win.x1) {
+            fail(`L${floor}/${theme} phone: plate ${name} starts at x ${op.box[0].toFixed(0)}, outside ${win.x0}…${win.x1}`)
+          }
+        }
+      }
+    }
+  }
+  if (phoneFrames) ok(`${phoneFrames} phone frames (${FLOOR_IDS.length} floors × ${THEMES.length} themes at ${PW}×${PH}) paint ${platesSeen} plates inside ${win.x0}…${win.x1}`)
+
+  // the two cached stages: three boards for the phone, six for the desktop
+  const phoneSheets = created.map(cardXs).filter((xs) => xs.length === 3)
+  if (!phoneSheets.length) fail(`no cached phone stage hangs 3 boards (saw ${created.map((c) => cardXs(c).length).join(',')})`)
+  else if (JSON.stringify(phoneSheets[0]) !== JSON.stringify([120, 252, 702])) {
+    fail(`phone stage boards at x ${phoneSheets[0].join(',')}, want 120,252,702`)
+  } else ok(`phone stage hangs 3 boards at x ${phoneSheets[0].join(',')} (pinboard/burndown/architecture dropped)`)
+  const wideSheets = created.map(cardXs).filter((xs) => xs.length === 6)
+  if (!wideSheets.length) fail('the wide stage is gone — desktop would lose its six boards')
+  else if (JSON.stringify(wideSheets[0]) !== JSON.stringify([4, 124, 338, 532, 696, 900])) {
+    fail(`wide stage boards at x ${wideSheets[0].join(',')}, want 4,124,338,532,696,900`)
+  } else ok(`wide stage still hangs 6 boards at x ${wideSheets[0].join(',')} (desktop untouched)`)
 }
 
 console.log('')
