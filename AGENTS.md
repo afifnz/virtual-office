@@ -4,7 +4,8 @@ Panduan untuk **agen otomatis** (Hermes, [CC], Codex, Cursor, Copilot, dan sejen
 melanjutkan pekerjaan di repo ini. Manusia cukup baca `README.md`; berkas ini mengikat
 perilaku agen: apa yang boleh, apa yang dilarang, dan bagaimana menyatakan pekerjaan selesai.
 
-Produk: **Agent Office** — kantor virtual 3D yang menampilkan agen Hermes secara live.
+Produk: **Agent Office** — kantor virtual 2D pixel-art (canvas 2D prosedural) yang menampilkan
+agen Hermes secara live.
 Live: https://office.afifnurzein.my.id · Repo: `afifnz/virtual-office`
 
 ---
@@ -46,9 +47,9 @@ backend/            Go 1.23, stdlib net/http, modernc.org/sqlite (tanpa cgo)
   internal/derive/  logika murni: status, blocked, jendela hari, DST
   internal/roster/  roster dinamis + parser YAML
   internal/api/     handler HTTP, header X-Office-*, static/SPA
-frontend/           React 18 + Vite + TS strict + @react-three/fiber
-  src/scene/        Office, Room, Desk, Furniture, Avatar, human, face, ndoroKakung
-  src/lib/          rooms (koordinat), agents (seed look), roster (runtime), layout
+frontend/           React 18 + Vite + TS strict (tanpa three.js sejak scene 2D)
+  src/scene2d/      Office2D, render, sprites, labels, pixelfont, palette, viewport, anim
+  src/lib/          rooms (koordinat), agents (seed look), roster (runtime), layout, view
   src/components/   HUD, Roster, Feed, TaskBoard, ProximityCard, DPad
   public/models/    GLB Quaternius (CC0) + LICENSE-quaternius.txt
 deploy/             build.sh, unit systemd, Caddy block, roster.example.yaml
@@ -249,7 +250,7 @@ Tanpa `-X …BuildCommit`, `/api/health` melapor `commit: "dev"` dan deploy tida
 | Port/env baru tidak berlaku | `enable --now` pada unit yang sudah aktif tidak me-restart | `systemctl --user restart` |
 | Browser masih menampilkan versi lama | HTML dikirim tanpa `Cache-Control`, browser memakai heuristic cache | hard reload; permanen: aturan `header` di Caddy |
 | `gateway.state = unknown` | kunci aslinya `gateway_state`, versinya `code_version` | sudah ditangani loader; jangan "perbaiki" dengan `state`/`version` |
-| Scene hitam di screenshot headless | WebGL di software rasterizer | `--use-gl=swiftshader --enable-unsafe-swiftshader`, viewport kecil, tunggu ~5 s |
+| Kanvas 2D kosong / teks tidak tergambar di screenshot | frame pertama belum jalan, atau `rAF` di-throttle | tunggu `window.__office2dReady === true` (+ `?still=1`), jangan `sleep` buta. Tidak perlu swiftshader: canvas 2D tidak pakai WebGL |
 | `ModuleNotFoundError` saat `go run` | dijalankan dari direktori salah | jalankan dari `backend/`, pakai `./cmd/office-api` |
 | `/api/status` "telat" ≤2 s, `now` sama di beberapa request | snapshot sengaja di-cache 2 s (`SnapshotTTL`, `source/local.go`) agar penonton tidak melipatgandakan pembacaan `state.db` | normal; jangan dihapus. `/api/health` tidak di-cache |
 | Journal tidak lagi berisi `info snapshot` | log itu kini di belakang `LOG_REQUESTS=1` | set `LOG_REQUESTS=1` saat debug |
