@@ -30,7 +30,7 @@ export function Roster({
   })
 
   return (
-    <aside className={`roster ${mobile ? 'is-drawer' : ''}`} aria-label="Daftar agen">
+    <aside className={`roster ${mobile ? 'is-sheet' : ''}`} aria-label="Daftar agen">
       <div className="panel-head">
         <h2>Agen</h2>
         <button type="button" className="icon-btn small" onClick={onClose} aria-label="Tutup daftar agen">
