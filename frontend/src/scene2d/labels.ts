@@ -1,33 +1,29 @@
 /**
- * Label layout for the 2D office — pure, no DOM, so `verify/visual_check.ts`
- * can replay it headless.
+ * Nameplates for the side view — measured in CSS px, laid out above the head.
  *
- * Plates are measured in **CSS pixels**, not world pixels: the world is scaled
- * by the integer zoom, the labels are not. That is what keeps 13 nameplates
- * readable on a floor whose desks stand only 1.62 world units apart (26 world
- * px, i.e. 52 CSS px at zoom 2): a plate drawn in world px would be as wide as
- * the neighbouring desk and the two texts would shred each other.
+ * Pure: no DOM. The painter uses the same numbers, and `verify/visual_check.ts`
+ * replays the layout headless. Widths come from `measureSans`, a conservative
+ * table for the UI font (the canvas then draws with `maxWidth` so a platform
+ * whose sans is a hair wider can never overflow its plate).
  *
- * Sizes therefore scale with the *screen*, not with the zoom, and every plate
- * carries the whole first name (max 6 letters) so a desk is readable at a
- * glance without opening a panel:
- *   compact (zoom 1) — name only, pixel font at scale 2 (the plan's readable
- *                      minimum: 1 world px = 1 CSS px here). The 13 plates are
- *                      wider than the 26 CSS px desk pitch, so placeStacks
- *                      staggers them vertically.
- *   full    (zoom 2) — name + status chip at scale 1 (the world is 2× bigger,
- *                      so a 7 px glyph already spans 2 world px)
- *   detail  (zoom ≥3) — name + chip + counters/task id
- *
- * A three-letter stub is never drawn: the only reason to shorten a name is the
- * 6-letter cap that keeps "NDORO KAKUNG" inside a desk slot.
+ * Rules (design §7.4):
+ *  - 24 px tall, radius 11, 11.5 px bold, fill = surface @ 0.92;
+ *  - always 8 px above the head;
+ *  - if the ideal slot is taken, step up 27 px (height + 3) and draw a 1 px
+ *    connector from the plate to the head — a plate never floats;
+ *  - hard gate: 0 plate↔plate, 0 plate↔other-head, avatar bbox overlap ≤ 20 %.
  */
-import { textWidth } from './pixelfont'
+import type { SideSeat } from './side'
 
-export type PlateMode = 'compact' | 'full' | 'detail'
-
-/** Maximum letters on a nameplate: the first word, capped. */
-export const NAME_MAX = 6
+export const PLATE_H = 24
+export const PLATE_GAP = 8
+export const PLATE_STEP = 27
+export const PLATE_RADIUS = 11
+export const PLATE_PAD = 7
+export const PLATE_FONT = 11.5
+export const PLATE_DOT = 6
+export const PLATE_DOT_GAP = 5
+export const NAME_MAX = 8
 
 export interface Rect {
   x: number
@@ -36,283 +32,243 @@ export interface Rect {
   h: number
 }
 
-/** Padding inside a plate, px. */
-export const PLATE_PAD = 2
-/** Gap between two stacked plates, px. */
-export const PLATE_GAP = 1
-/** Status dot size, px. */
-export const DOT = 4
-/** Plate height: a 7 px glyph row plus the padding above and below. */
-export const PLATE_H = 7 + 2 * PLATE_PAD
-/** Gap between the top of a head and the bottom of its nameplate, px. */
-export const NAME_GAP = 3
-/** Plaque height for the zone labels, px. */
-export const PLAQUE_H = 9
+export interface SideLabelAgent {
+  id: string
+  name: string
+  /** head centre x, design px */
+  cx: number
+  /** top of the head, design px */
+  headTop: number
+  headW: number
+  headH: number
+  /** status shape colour; null hides the shape */
+  dot: string | null
+  /** 'circle' | 'ring' | 'diamond' | 'square' | 'triangle' */
+  shape?: 'circle' | 'ring' | 'diamond' | 'square' | 'triangle'
+  offline: boolean
+}
 
-/**
- * Which plates a zoom draws. The nameplate is always the whole first name; the
- * mode only decides whether the status chip (zoom ≥2) and the counters
- * (zoom ≥3) join it.
- */
-export function plateMode(zoom: number): PlateMode {
-  if (zoom <= 1) return 'compact'
-  if (zoom >= 3) return 'detail'
-  return 'full'
+export interface PlacedPlate extends Rect {
+  id: string
+  /** connector from the plate's bottom-centre down to the head */
+  connector: boolean
 }
 
 /**
- * CSS px per glyph pixel. Zoom 1 draws 1 world px per CSS px, so the 5×7 font
- * would be 7 CSS px tall — the design's §viewport asks for a 2× font there so
- * the name stays readable on a phone. Zoom ≥2 doubles the world itself, so
- * scale 1 already lands on 2 CSS px per glyph pixel. Always an integer.
+ * Conservative advance widths (em) for the UI sans. Uppercase names are the
+ * common case, so they are measured a touch wide on purpose.
  */
-export function plateScale(zoom: number): number {
-  return zoom <= 1 ? 2 : 1
+const NARROW = new Set(['i', 'l', 'j', 'I', '.', ',', ':', ';', "'", '!', '|', '1'])
+const WIDE = new Set(['M', 'W', 'm', 'w', '@'])
+
+export function measureSans(text: string, size = PLATE_FONT, weight = 700): number {
+  const bold = weight >= 600 ? 1.04 : 1
+  let em = 0
+  for (const ch of text) {
+    if (ch === ' ') em += 0.29
+    else if (NARROW.has(ch)) em += 0.3
+    else if (WIDE.has(ch)) em += 0.9
+    else if (ch >= 'A' && ch <= 'Z') em += 0.73
+    else if (ch >= '0' && ch <= '9') em += 0.61
+    else if (ch >= 'a' && ch <= 'z') em += 0.57
+    else em += 0.6
+  }
+  return Math.round(em * size * bold * 10) / 10
 }
 
-/**
- * The name a plate shows: the first word, uppercased and capped at NAME_MAX.
- * Long roster names ("Ndoro Kakung") would otherwise overflow their desk slot.
- */
+/** The first word, uppercased and capped — a plate must fit its slot. */
 export function shortName(name: string): string {
   const first = (name.trim().split(/\s+/)[0] ?? '').toUpperCase()
   return first.slice(0, NAME_MAX)
 }
 
-/** Plate width for a text at a pixel-font scale (optionally with a status dot). */
-export function plateWidth(text: string, opts: { dot?: boolean; scale?: number } = {}): number {
-  const s = opts.scale ?? 1
-  const dot = opts.dot ? (DOT + 2) * s : 0
-  return textWidth(text, s) + dot + 2 * PLATE_PAD * s
-}
-
-/** Bubble plates carry a 1 px border and a 2 px tail, both scaled. */
-export function bubbleWidth(text: string, scale = 1): number {
-  return plateWidth(text, { scale }) + 2 * scale
-}
-
-/** Height of one plate kind at a pixel-font scale. */
-export function plateHeight(key: string, scale = 1): number {
-  return (key === 'bubble' ? PLATE_H + 3 : PLATE_H) * scale
+/** Plate width for a name (status shape included unless `dot` is false). */
+export function plateWidth(text: string, hasDot = true, size = PLATE_FONT): number {
+  return Math.ceil(measureSans(text, size, 700) + PLATE_PAD * 2 + (hasDot ? PLATE_DOT + PLATE_DOT_GAP : 0))
 }
 
 export function rectsOverlap(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
-/** Width of one desk slot in CSS px (desk column pitch 1.62 world units). */
-export function deskSlot(zoom: number): number {
-  return 1.62 * 16 * zoom
-}
-
-export interface StackPlate {
-  /** cache key suffix, e.g. 'name' / 'chip' / 'bubble' */
-  key: string
-  w: number
-  h: number
-}
-
-export interface Stack {
-  id: string
-  /** centre x of the stack, CSS px */
-  cx: number
-  /** y of the stack's bottom edge (the nameplate's bottom), CSS px */
-  bottom: number
-  /** plates ordered bottom → top */
-  plates: StackPlate[]
-}
-
-export interface PlacedPlate extends Rect {
-  id: string
-  key: string
-}
-
-/** Everything the layout needs to know about one agent's plate stack. */
-export interface LabelAgent {
-  id: string
-  name: string
-  /** head centre x, CSS px */
-  cx: number
-  /** head top y, CSS px */
-  topY: number
-  /**
-   * the drawn head box (CSS px). Desk rows sit 1.62 world units apart, so at
-   * zoom 2 the plate stack of the front row can reach the head of the row
-   * behind: a speech bubble that would land there is dropped instead of
-   * pointing at the wrong agent (see buildStacks).
-   */
-  head: Rect
-  offline: boolean
-  /** status word for the chip; '' hides the chip */
-  chip: string
-  /** '...' / '!' bubble text; '' hides it */
-  bubble: string
-  /** counters line, detail mode only; '' hides it */
-  counters: string
-  /** status dot colour; undefined drops the dot (compact mode) */
-  dot?: string
+/** Share of the smaller avatar bbox covered by the intersection. */
+export function overlapShare(a: Rect, b: Rect): number {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+  if (w <= 0 || h <= 0) return 0
+  const inter = w * h
+  const smaller = Math.min(a.w * a.h, b.w * b.h)
+  return smaller > 0 ? inter / smaller : 0
 }
 
 /**
- * The plate stack for every agent, bottom (nameplate) → top (bubble). Which
- * plates exist depends on the zoom: at zoom 1 only the nameplate is drawn (the
- * 13 plates are already 2× wide there); chips join at zoom 2 and counters at
- * zoom ≥3. `scale` is the pixel-font scale (see plateScale) and is applied to
- * every plate size so the layout and the painted sprite never disagree.
- *
- * A plate may never sit on a colleague's head: back-to-back desk rows stand
- * 1.62 world units apart, which is 52 CSS px at zoom 2, while a three-plate
- * stack is 38 px above the head — so the top plate of the front row can land on
- * the hair of the agent behind and read as *their* plate. The top decorative
- * plate (bubble, Zzz, counters, chip) is dropped until the stack clears; the
- * nameplate itself is never dropped, and the status dot on it keeps the state
- * visible.
+ * Place every plate above its head, stepping up when the ideal slot is taken.
+ * `reserved` holds the boards/rail area (plates may not sit on a board).
  */
-export function buildStacks(agents: readonly LabelAgent[], mode: PlateMode, scale = 1): Stack[] {
-  const heads = agents.map((a) => a.head)
-  return agents.map((a, index) => {
-    const stack: Stack = { id: a.id, cx: a.cx, bottom: a.topY - NAME_GAP, plates: [] }
-    const nameText = shortName(a.name)
-    stack.plates.push({
-      key: 'name',
-      w: plateWidth(nameText, { dot: Boolean(a.dot), scale }),
-      h: plateHeight('name', scale),
-    })
-    if (mode !== 'compact') {
-      if (a.offline) {
-        // an abandoned station says it with the "Z Z Z" tile, not a status
-        // chip: one plate is all the row pitch leaves room for
-        stack.plates.push({ key: 'zzz', w: plateWidth('Z Z Z', { scale }), h: plateHeight('zzz', scale) })
-      } else {
-        if (a.chip) stack.plates.push({ key: 'chip', w: plateWidth(a.chip, { scale }), h: plateHeight('chip', scale) })
-        if (mode === 'detail' && a.counters) {
-          stack.plates.push({
-            key: 'counters',
-            w: plateWidth(a.counters, { scale }),
-            h: plateHeight('counters', scale),
-          })
-        }
-        if (a.bubble) stack.plates.push({ key: 'bubble', w: bubbleWidth(a.bubble, scale), h: plateHeight('bubble', scale) })
-      }
-    }
-    // drop decorative plates from the top until nothing covers a colleague's head
-    while (stack.plates.length > 1) {
-      const top = stack.plates[stack.plates.length - 1]!
-      if (top.key === 'name') break
-      const totalH = stack.plates.reduce((sum, p) => sum + p.h, 0) + (stack.plates.length - 1) * PLATE_GAP * scale
-      const rect: Rect = { x: a.cx - top.w / 2, y: stack.bottom - totalH, w: top.w, h: top.h }
-      if (!heads.some((h, i) => i !== index && rectsOverlap(rect, h))) break
-      stack.plates.pop()
-    }
-    return stack
-  })
-}
-
-/**
- * Place every agent's plate stack so no two plates overlap and none leaves the
- * canvas. Stacks are processed in painter order (back rows first), so a front
- * row gives way to the row behind it instead of covering it.
- *
- * `reserved` carries rects that are already on screen (zone plaques); plates
- * never sit on top of those either. `scale` widens the deterministic search in
- * step with the plates, so the 2× nameplates at zoom 1 still find a free slot.
- */
-export function placeStacks(
-  stacks: readonly Stack[],
+export function layoutSideLabels(
+  agents: readonly SideLabelAgent[],
   bounds: { w: number; h: number },
   reserved: readonly Rect[] = [],
-  scale = 1,
-): PlacedPlate[] {
-  const placed: Rect[] = [...reserved]
-  const out: PlacedPlate[] = []
-  const gap = PLATE_GAP * scale
-  // the hand-tuned ladder from T1.9, stretched by the font scale
-  const dySteps = [0, 2, 4, 6, 8, 10, 13, 16, 20, 24, 30, 36, 44, 52, 62].map((v) => v * scale)
-  const dxSteps = [0, -6, 6, -12, 12, -20, 20, -30, 30].map((v) => v * scale)
+): { plates: PlacedPlate[]; violations: string[] } {
+  const occupied: Rect[] = [...reserved]
+  const heads = agents.map((a) => ({
+    id: a.id,
+    x: a.cx - a.headW / 2,
+    y: a.headTop,
+    w: a.headW,
+    h: a.headH,
+  }))
+  const plates: PlacedPlate[] = []
+  const violations: string[] = []
 
-  for (const st of stacks) {
-    if (st.plates.length === 0) continue
-    const maxW = st.plates.reduce((m, p) => Math.max(m, p.w), 0)
-    const totalH = st.plates.reduce((sum, p) => sum + p.h, 0) + (st.plates.length - 1) * gap
-    const maxX = Math.max(1, bounds.w - maxW - 1)
-    const x0 = Math.round(Math.min(Math.max(st.cx - maxW / 2, 1), maxX))
+  for (const a of agents) {
+    const text = shortName(a.name)
+    const w = plateWidth(text, Boolean(a.dot))
+    const idealX = Math.round(a.cx - w / 2)
+    const idealBottom = a.headTop - PLATE_GAP
+    let x = idealX
+    let y = Math.round(idealBottom - PLATE_H)
+    let placed = false
+    let connector = false
 
-    // Natural spot first, then lift the stack, then nudge it sideways. The
-    // search is fixed and deterministic: same input, same layout.
-    let chosen: { x: number; y: number } | null = null
-    outer: for (const dy of dySteps) {
-      for (const dx of dxSteps) {
-        const x = Math.round(Math.min(Math.max(x0 + dx, 1), maxX))
-        const y = Math.round(st.bottom - totalH - dy)
-        if (y < 1) continue
-        const box = { x, y, w: maxW, h: totalH }
-        if (!placed.some((r) => rectsOverlap(box, r))) {
-          chosen = { x, y }
-          break outer
-        }
+    // step up 27 px at a time (design §7.4), then nudge sideways
+    for (let step = 0; step <= 6 && !placed; step++) {
+      y = Math.round(idealBottom - PLATE_H - step * PLATE_STEP)
+      for (const dx of [0, -14, 14, -28, 28, -42, 42]) {
+        x = Math.round(idealX + dx)
+        if (x < 1 || x + w > bounds.w - 1 || y < 1) continue
+        const box: Rect = { x, y, w, h: PLATE_H }
+        if (occupied.some((r) => rectsOverlap(box, r))) continue
+        if (heads.some((hd) => hd.id !== a.id && rectsOverlap(box, hd))) continue
+        placed = true
+        connector = step > 0
+        break
       }
     }
-    if (!chosen) chosen = { x: x0, y: Math.max(1, Math.round(st.bottom - totalH)) }
+    if (!placed) {
+      x = Math.max(1, Math.min(idealX, bounds.w - w - 1))
+      y = Math.max(1, Math.round(idealBottom - PLATE_H))
+      violations.push(`${a.id}: no free plate slot above the head`)
+    }
+    const plate: PlacedPlate = { id: a.id, x, y, w, h: PLATE_H, connector }
+    plates.push(plate)
+    occupied.push(plate)
+  }
 
-    let y = chosen.y + totalH
-    for (const p of st.plates) {
-      y -= p.h
-      const plate: PlacedPlate = {
-        id: st.id,
-        key: p.key,
-        x: chosen.x + Math.round((maxW - p.w) / 2),
-        y,
-        w: p.w,
-        h: p.h,
+  return { plates, violations }
+}
+
+export interface SideGateReport {
+  plates: number
+  plateOverlaps: number
+  plateOnHead: number
+  avatarOverlapPct: number
+  minSameRowPx: number
+  minPlateHeadGap: number
+  violations: string[]
+}
+
+/**
+ * The hard gate from design §7.4, run for L1/L2/L3 before the scene is drawn.
+ * Returns measured numbers, not booleans, so the check can print them.
+ */
+export function sideGate(
+  seats: readonly SideSeat[],
+  plates: readonly PlacedPlate[],
+  bounds: { w: number; h: number },
+): SideGateReport {
+  const violations: string[] = []
+  let plateOverlaps = 0
+  for (let i = 0; i < plates.length; i++) {
+    for (let j = i + 1; j < plates.length; j++) {
+      if (rectsOverlap(plates[i]!, plates[j]!)) {
+        plateOverlaps++
+        violations.push(`${plates[i]!.id} plate overlaps ${plates[j]!.id}`)
       }
-      out.push(plate)
-      placed.push(plate)
-      y -= PLATE_GAP
     }
   }
 
-  return out
+  const headOf = (s: SideSeat): Rect => ({
+    x: s.cx - s.headW / 2,
+    y: s.headTop,
+    w: s.headW,
+    h: s.headH,
+  })
+  let plateOnHead = 0
+  for (const p of plates) {
+    for (const s of seats) {
+      if (s.meta.id === p.id) continue
+      if (rectsOverlap(p, headOf(s))) {
+        plateOnHead++
+        violations.push(`${p.id} plate covers ${s.meta.id}'s head`)
+      }
+    }
+  }
+
+  const boxes = seats.map((s) => ({
+    id: s.meta.id,
+    x: s.cx - s.avatarH * 0.19,
+    y: s.headTop,
+    w: s.avatarH * 0.38,
+    h: s.avatarH,
+  }))
+  let worstOverlap = 0
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      worstOverlap = Math.max(worstOverlap, overlapShare(boxes[i]!, boxes[j]!))
+    }
+  }
+  if (worstOverlap > 0.2) violations.push(`avatar bbox overlap ${(worstOverlap * 100).toFixed(1)} % > 20 %`)
+
+  let minSameRow = Infinity
+  for (const row of ['front', 'back'] as const) {
+    const xs = seats.filter((s) => s.row === row).map((s) => s.cx).sort((a, b) => a - b)
+    for (let i = 1; i < xs.length; i++) minSameRow = Math.min(minSameRow, xs[i]! - xs[i - 1]!)
+  }
+  if (Number.isFinite(minSameRow) && minSameRow < 180) violations.push(`same-row pitch ${minSameRow.toFixed(1)} px < 180`)
+
+  let minGap = Infinity
+  for (const s of seats) {
+    const p = plates.find((q) => q.id === s.meta.id)
+    if (!p) continue
+    minGap = Math.min(minGap, s.headTop - (p.y + p.h))
+  }
+
+  for (const p of plates) {
+    if (p.x < 1 || p.y < 1 || p.x + p.w > bounds.w - 1 || p.y + p.h > bounds.h - 1) {
+      violations.push(`${p.id} plate leaves the canvas`)
+    }
+  }
+
+  return {
+    plates: plates.length,
+    plateOverlaps,
+    plateOnHead,
+    avatarOverlapPct: Math.round(worstOverlap * 1000) / 10,
+    minSameRowPx: Number.isFinite(minSameRow) ? Math.round(minSameRow * 10) / 10 : 0,
+    minPlateHeadGap: Number.isFinite(minGap) ? Math.round(minGap * 10) / 10 : 0,
+    violations,
+  }
 }
 
-// --------------------------------------------------------------- zone plaques
-
-export interface ZoneLabel {
-  id: string
-  text: string
-  /** the floor this plaque hangs on */
-  floor: 1 | 2 | 3
-  /** world anchor */
-  x: number
-  z: number
-}
-
-/**
- * One plaque per zone per floor (design §3.1: "plakat nama zona ditempel di
- * dinding"). L1 carries the LOBBY plaque west of the MASUK gap on the front
- * band plus the entrance plaque; L2/L3 hang their team plaque on the north
- * wall, clear of the dark band itself and of the furniture that hugs that
- * wall (the bookshelf/whiteboard on L2, the sprint board and rack on L3), so
- * the plate never looks glued to the wall's dark edge.
- */
-const ZONE_LABELS: ZoneLabel[] = [
-  { id: 'zone-lobby', floor: 1, text: 'L1 LOBBY', x: -7, z: 9.55 },
-  { id: 'zone-edu', floor: 2, text: 'L2 TIM EDU', x: 0, z: -6.8 },
-  { id: 'zone-dev', floor: 3, text: 'L3 TIM DEV', x: 3.5, z: -8.1 },
-]
-
-/** The entrance plaque, kept from the old 3D door labels (L1 only). */
-const DOOR_LABELS: ZoneLabel[] = [{ id: 'door-masuk', floor: 1, text: 'MASUK', x: 0, z: 9.55 }]
-
-/** Every fixed in-world plaque of one floor, drawn before the agent plates reserve space. */
-export function labelsOf(floor: 1 | 2 | 3): ZoneLabel[] {
-  return [...ZONE_LABELS, ...DOOR_LABELS].filter((l) => l.floor === floor)
-}
-
-/** Every plaque in the building (verify scripts iterate per floor). */
-export const WORLD_LABELS: ZoneLabel[] = [...ZONE_LABELS, ...DOOR_LABELS]
-
-/** Plaque rect for a text whose centre is at (cx, cy) in CSS px. */
-export function plaqueRect(text: string, cx: number, cy: number): Rect {
-  const w = textWidth(text, 1) + 2 * PLATE_PAD
-  return { x: Math.round(cx - w / 2), y: Math.round(cy - PLAQUE_H / 2), w, h: PLAQUE_H }
+/** Build the label descriptors from seats + a status map. */
+export function labelAgentsFor(
+  seats: readonly SideSeat[],
+  statuses: ReadonlyMap<string, { status: string; shape?: SideLabelAgent['shape']; colour: string }>,
+): SideLabelAgent[] {
+  return seats.map((s) => {
+    const st = statuses.get(s.meta.id)
+    const offline = !st || st.status === 'offline'
+    return {
+      id: s.meta.id,
+      name: s.meta.name,
+      cx: s.cx,
+      headTop: s.headTop,
+      headW: s.headW,
+      headH: s.headH,
+      dot: offline ? '#556073' : st!.colour,
+      shape: offline ? 'square' : st!.shape ?? 'circle',
+      offline,
+    }
+  })
 }

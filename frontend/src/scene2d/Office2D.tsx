@@ -1,21 +1,37 @@
 /**
- * The 2D office canvas: one <canvas> with pan/zoom and a per-frame painter.
+ * The 2D office canvas — side view (elevation) with pan + zoom.
  *
- * Replaces the three.js scene behind the same props. The viewport is integer
- * zoom 1..4 over one floor at a time (TILE=16; L1 28×20, L2 20×16, L3 24×18);
- * the backing store is sized to the CSS box times devicePixelRatio and the
- * frame is blitted with an integer factor so pixel-art stays nearest-neighbour
- * crisp on fractional DPRs.
+ * One floor at a time, camera fixed at 150 px/unit at zoom 2 (1000×688 stage),
+ * zoom 1 is half scale for phones. Horizontal pan only; vertical is locked
+ * because there are exactly two rows. The static stage is cached per
+ * (floor × theme); the dynamic pass draws desks, vector avatars, the live
+ * board, clock and lift car.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusPayload, Agent, Comm } from '../lib/types'
 import type { AgentMeta } from '../lib/agents'
-import { agentsFor } from '../lib/roster'
-import { LIFT } from '../lib/rooms'
+import { agentsFor, officeTZ } from '../lib/roster'
+import { FLOORS, LIFT } from '../lib/rooms'
 import type { MoveIntent, RigCommand } from '../lib/view'
 import { SPOT_VIEW } from '../lib/view'
-import { pickTargets, placeAgents, renderFrame, staticLayerFor } from './render'
-import { TILE, clampCenter, clampZoom, fitZoom, nearestAt, screenToWorld, type Viewport } from './viewport'
+import { clockInTimeZone } from '../lib/theme'
+import type { ThemeName } from './palette'
+import { pickTargets, placeAgents, renderFrame } from './render'
+import { labelAgentsFor, layoutSideLabels, sideGate } from './labels'
+import {
+  SIDE_AVATAR_H,
+  SIDE_H,
+  SIDE_ROOM_H,
+  SIDE_W,
+  clampSideCam,
+  screenToDesign,
+  sideSeats,
+  sideTransform,
+  sideWallGate,
+  worldXToDesign,
+  type SideViewport,
+} from './side'
+import { clampZoom, fitZoom } from './viewport'
 
 export interface OfficeProps {
   status: StatusPayload | null
@@ -24,35 +40,28 @@ export interface OfficeProps {
   onNear: (id: string | null) => void
   onMove: () => void
   onPick: (id: string) => void
+  theme: ThemeName
   dpr?: [number, number]
 }
 
-const PAN_SPEED = 6 // world units per second while a key/pad is held
+const PAN_SPEED = 380 // design px per second while a key/pad is held
 
-function initialVp(command: RigCommand): Viewport {
+function initialVp(command: RigCommand): SideViewport {
   const floor = command.floor ?? 1
-  const spot = SPOT_VIEW[floor][command.spot] ?? SPOT_VIEW[floor].lobby ?? { x: 0, z: 0, zoom: 2 }
-  return { x: spot.x, z: spot.z, zoom: spot.zoom, floor }
+  return { camX: SIDE_W / 2, zoom: fitZoom(floor, 1000, 688), floor }
 }
 
-/**
- * The zoom control speaks in honest percentages: zoom 1 draws 1 world px per
- * CSS px, so it is 100 % (a 448×320 floor), zoom 2 is 200 %. Calling zoom 1
- * "50 %" made the phone default look like a fractional zoom when it was not.
- */
 function zoomPercent(zoom: number): string {
   return `${zoom * 100}%`
 }
 
-/** The canvas fills its wrapper; wrapper size is what pan-clamp uses. */
-export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }: OfficeProps) {
+export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, theme }: OfficeProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
-  const vpRef = useRef<Viewport>(initialVp(command))
+  const vpRef = useRef<SideViewport>(initialVp(command))
   const [zoomLabel, setZoomLabel] = useState(vpRef.current.zoom)
-  /** a "tampak" command arrived before the canvas had a size — fit after resize */
-  const fitPending = useRef(SPOT_VIEW[vpRef.current.floor][command.spot]?.fit === true)
+  const fitPending = useRef(SPOT_VIEW[vpRef.current.floor][command.spot]?.fit !== false)
   const viewRef = useRef({ w: 0, h: 0, dpr: 1 })
   const tRef = useRef(0)
   const readyRef = useRef(false)
@@ -61,6 +70,9 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
   const dragRef = useRef<{ x: number; y: number; id: number; moved: number } | null>(null)
   const pinchRef = useRef<{ d: number } | null>(null)
   const nearRef = useRef<string | null>(null)
+  const themeRef = useRef<ThemeName>(theme)
+  themeRef.current = theme
+  const perfRef = useRef<{ samples: number[]; frames: number; last: number }>({ samples: [], frames: 0, last: 0 })
 
   const still = useMemo(() => {
     const q = new URLSearchParams(window.location.search)
@@ -81,54 +93,39 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
   const frame = useRef<{ metas: AgentMeta[]; byId: Map<string, Agent>; now: number; comms: Comm[] }>({
     metas,
     byId,
-    now: status?.now ?? Date.now() / 1000,
+    now: status?.now ?? 0,
     comms: status?.comms ?? [],
   })
   useEffect(() => {
-    frame.current = { metas, byId, now: status?.now ?? Date.now() / 1000, comms: status?.comms ?? [] }
+    frame.current = { metas, byId, now: status?.now ?? 0, comms: status?.comms ?? [] }
   }, [metas, byId, status])
 
   // spot / focus commands from the HUD, roster and deep links
   useEffect(() => {
+    const floor = command.floor ?? vpRef.current.floor
     if (command.focus) {
       fitPending.current = false
       vpRef.current = {
-        x: command.focus.x,
-        z: command.focus.z,
-        zoom: command.tight ? 4 : 3,
+        camX: worldXToDesign(command.focus.x, FLOORS[command.focus.floor].w),
+        zoom: 2,
         floor: command.focus.floor,
       }
     } else {
-      const floor = command.floor ?? vpRef.current.floor
-      const sv = SPOT_VIEW[floor][command.spot] ?? SPOT_VIEW[floor].lobby ?? { x: 0, z: 0, zoom: 2 }
-      vpRef.current = { x: sv.x, z: sv.z, zoom: sv.zoom, floor }
-      fitPending.current = sv.fit === true
-      if (fitPending.current) {
-        const { w, h } = viewRef.current
-        if (w > 0 && h > 0) {
-          vpRef.current = { x: 0, z: 0, zoom: fitZoom(floor, w, h), floor }
-          fitPending.current = false
-        }
+      const sv = SPOT_VIEW[floor][command.spot]
+      vpRef.current = { camX: SIDE_W / 2, zoom: sv ? 2 : 2, floor }
+      fitPending.current = true
+      const { w, h } = viewRef.current
+      if (w > 0 && h > 0) {
+        vpRef.current = { camX: SIDE_W / 2, zoom: fitZoom(floor, w, h), floor }
+        fitPending.current = false
       }
     }
     setZoomLabel(vpRef.current.zoom)
   }, [command])
 
   const zoomBy = useCallback((delta: number) => {
-    const { w, h } = viewRef.current
     const zoom = clampZoom(vpRef.current.zoom + delta)
-    if (w <= 0 || h <= 0) {
-      vpRef.current = { ...vpRef.current, zoom }
-      setZoomLabel(zoom)
-      return
-    }
-    const world = screenToWorld(vpRef.current, w, h, w / 2, h / 2)
-    vpRef.current = {
-      x: world.x - (w / 2 - w / 2) / (TILE * zoom),
-      z: world.z - (h / 2 - h / 2) / (TILE * zoom),
-      zoom,
-      floor: vpRef.current.floor,
-    }
+    vpRef.current = { ...vpRef.current, zoom, camX: clampSideCam(vpRef.current.camX, viewRef.current.w, viewRef.current.h, zoom) }
     setZoomLabel(zoom)
   }, [])
 
@@ -145,12 +142,13 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
     canvas.width = Math.max(1, Math.round(w * dpr))
     canvas.height = Math.max(1, Math.round(h * dpr))
     viewRef.current = { w, h, dpr }
-    // first size (or a pending "tampak"): fit the whole floor, never crop it
     if (fitPending.current) {
-      vpRef.current = { x: 0, z: 0, zoom: fitZoom(vpRef.current.floor, w, h), floor: vpRef.current.floor }
+      const zoom = fitZoom(vpRef.current.floor, w, h)
+      vpRef.current = { camX: SIDE_W / 2, zoom, floor: vpRef.current.floor }
       fitPending.current = false
-      setZoomLabel(vpRef.current.zoom)
+      setZoomLabel(zoom)
     }
+    vpRef.current = { ...vpRef.current, camX: clampSideCam(vpRef.current.camX, w, h, vpRef.current.zoom) }
   }, [])
 
   // the render loop, mounted once; reads the latest data from refs
@@ -167,17 +165,15 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
     const applyPan = (dt: number) => {
       const mi = moveIntent.current
       let kx = 0
-      let kz = 0
       const k = keysRef.current
-      if (k.has('w') || k.has('arrowup')) kz += 1
-      if (k.has('s') || k.has('arrowdown')) kz -= 1
       if (k.has('a') || k.has('arrowleft')) kx -= 1
       if (k.has('d') || k.has('arrowright')) kx += 1
       kx += mi.x
-      kz += mi.z
-      if (kx !== 0 || kz !== 0) {
-        vpRef.current.x += kx * PAN_SPEED * dt
-        vpRef.current.z -= kz * PAN_SPEED * dt
+      if (kx !== 0) {
+        vpRef.current = {
+          ...vpRef.current,
+          camX: clampSideCam(vpRef.current.camX - kx * PAN_SPEED * dt, viewRef.current.w, viewRef.current.h, vpRef.current.zoom),
+        }
         onMove()
       }
     }
@@ -195,10 +191,11 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
       applyPan(dt)
       const { w, h, dpr } = viewRef.current
       if (w > 0 && h > 0) {
-        vpRef.current = clampCenter(vpRef.current, w, h)
         const f = frame.current
+        const clock = clockInTimeZone(f.now || 0, officeTZ()) ?? { hour: 12, minute: 0 }
+        const t0 = performance.now()
         renderFrame(ctx, {
-          static: staticLayerFor(vpRef.current.floor),
+          theme: themeRef.current,
           metas: f.metas,
           byId: f.byId,
           now: f.now,
@@ -207,18 +204,33 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
           viewW: w,
           viewH: h,
           dpr,
-          stale: false,
           still: still || reducedMotion,
           t: tRef.current,
+          hour: clock.hour,
+          minute: clock.minute,
         })
+        const cost = performance.now() - t0
+        const perf = perfRef.current
+        perf.samples.push(cost)
+        if (perf.samples.length > 180) perf.samples.shift()
+        perf.frames++
+        perf.last = cost
 
-        // proximity: nearest agent to the viewport centre, on this floor —
-        // an in-transit delegate counts on the floor their journey is on
-        const targets = pickTargets(placeAgents(f.metas, f.byId, f.now, f.comms, tRef.current)).filter(
-          (p) => p.floor === vpRef.current.floor,
-        )
-        const centre = screenToWorld(vpRef.current, w, h, w / 2, h / 2)
-        const near = nearestAt(targets, centre.x, centre.z, 2.5)
+        // proximity: nearest agent to the viewport centre, on this floor
+        const placed = placeAgents(f.metas, f.byId, f.now, f.comms, tRef.current)
+        const targets = pickTargets(placed).filter((p) => p.floor === vpRef.current.floor)
+        const tr = sideTransform(w, h, vpRef.current)
+        const centre = screenToDesign(tr, w / 2, h / 2)
+        let near: string | null = null
+        let best = Infinity
+        for (const p of targets) {
+          const d = Math.hypot(p.designX - centre.x, p.designY - p.h / 2 - centre.y)
+          if (d < best) {
+            best = d
+            near = p.id
+          }
+        }
+        if (best > 160) near = null
         if (near !== nearRef.current) {
           nearRef.current = near
           onNear(near)
@@ -227,24 +239,32 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
 
       if (!readyRef.current) {
         readyRef.current = true
-        ;(window as unknown as { __office2dReady?: boolean }).__office2dReady = true
-        ;(window as unknown as { __office2dVp?: () => Viewport }).__office2dVp = () => vpRef.current
-        // verify-office probe hook: per-floor desk/agent/lift facts, no privacy data
-        ;(window as unknown as { __office2dFloors?: () => unknown }).__office2dFloors = () => {
-          const metas = frame.current.metas
-          const byFloor = (fl: number) => metas.filter((m) => m.desk.floor === fl)
+        const w2 = window as unknown as Record<string, unknown>
+        w2.__office2dReady = true
+        w2.__office2dVp = () => vpRef.current
+        w2.__office2dTheme = () => themeRef.current
+        w2.__office2dPerf = () => perfReport(perfRef.current)
+        // verify-office probe hook: per-floor facts, no privacy data
+        w2.__office2dFloors = () => {
+          const metasNow = frame.current.metas
+          const byFloor = (fl: number) => metasNow.filter((m) => m.desk.floor === fl)
           return {
             floor: vpRef.current.floor,
             zoom: vpRef.current.zoom,
+            theme: themeRef.current,
+            camera: 'side',
             floors: [1, 2, 3].map((fl) => ({
               floor: fl,
               desks: byFloor(fl).length,
-              agents: byFloor(fl).filter((m) => (frame.current.byId.get(m.id)?.status ?? 'offline') !== 'offline')
-                .length,
-              lift: { x: (LIFT[fl as 1 | 2 | 3].shaft.x1 + LIFT[fl as 1 | 2 | 3].shaft.x2) / 2, z: (LIFT[fl as 1 | 2 | 3].shaft.z1 + LIFT[fl as 1 | 2 | 3].shaft.z2) / 2 },
+              agents: byFloor(fl).filter((m) => (frame.current.byId.get(m.id)?.status ?? 'offline') !== 'offline').length,
+              lift: {
+                x: (LIFT[fl as 1 | 2 | 3].shaft.x1 + LIFT[fl as 1 | 2 | 3].shaft.x2) / 2,
+                z: (LIFT[fl as 1 | 2 | 3].shaft.z1 + LIFT[fl as 1 | 2 | 3].shaft.z2) / 2,
+              },
             })),
           }
         }
+        w2.__office2dLayout = (fl: 1 | 2 | 3 = vpRef.current.floor) => layoutReport(fl, frame.current.metas)
       }
     }
     raf = requestAnimationFrame(loop)
@@ -262,9 +282,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase()
-      if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
-        e.preventDefault()
-      }
+      if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault()
       keysRef.current.add(k)
       if (k === '+' || k === '=') zoomBy(1)
       if (k === '-') zoomBy(-1)
@@ -278,7 +296,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
     }
   }, [zoomBy])
 
-  // pointer: drag to pan, tap to pick, two fingers to pinch-zoom
+  // pointer: drag to pan (horizontal), tap to pick, pinch to zoom
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -291,9 +309,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
       } else if (pointersRef.current.size === 2) {
         dragRef.current = null
         const [a, b] = [...pointersRef.current.values()]
-        const a0 = a!
-        const b0 = b!
-        pinchRef.current = { d: Math.hypot(a0.x - b0.x, a0.y - b0.y) }
+        pinchRef.current = { d: Math.hypot(a!.x - b!.x, a!.y - b!.y) }
       }
     }
     const move = (e: PointerEvent) => {
@@ -305,22 +321,13 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
 
       if (pointersRef.current.size >= 2 && pinchRef.current) {
         const [a, b] = [...pointersRef.current.values()]
-        const a0 = a!
-        const b0 = b!
-        const d = Math.hypot(a0.x - b0.x, a0.y - b0.y)
+        const d = Math.hypot(a!.x - b!.x, a!.y - b!.y)
         if (pinchRef.current.d > 0 && d > 0) {
-          const factor = d / pinchRef.current.d
-          const { w, h } = viewRef.current
-          const cx = (a0.x + b0.x) / 2
-          const cy = (a0.y + b0.y) / 2
-          const rect = canvas.getBoundingClientRect()
-          const world = screenToWorld(vpRef.current, w, h, cx - rect.left, cy - rect.top)
-          const zoom = clampZoom(Math.round(vpRef.current.zoom * factor))
+          const zoom = clampZoom(vpRef.current.zoom * (d / pinchRef.current.d))
           vpRef.current = {
-            x: world.x - (cx - rect.left - w / 2) / (TILE * zoom),
-            z: world.z - (cy - rect.top - h / 2) / (TILE * zoom),
+            ...vpRef.current,
             zoom,
-            floor: vpRef.current.floor,
+            camX: clampSideCam(vpRef.current.camX, viewRef.current.w, viewRef.current.h, zoom),
           }
           setZoomLabel(zoom)
           onMove()
@@ -334,10 +341,10 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
       d.moved += Math.abs(dx) + Math.abs(dy)
       if (d.moved > 4) {
         const { w, h } = viewRef.current
-        const zoom = vpRef.current.zoom
-        if (w > 0 && h > 0 && zoom > 0) {
-          vpRef.current.x -= dx / (TILE * zoom)
-          vpRef.current.z -= dy / (TILE * zoom)
+        const tr = sideTransform(w, h, vpRef.current)
+        vpRef.current = {
+          ...vpRef.current,
+          camX: clampSideCam(vpRef.current.camX - dx / tr.s, w, h, vpRef.current.zoom),
         }
         onMove()
       }
@@ -353,11 +360,29 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
         const rect = canvas.getBoundingClientRect()
         const { w, h } = viewRef.current
         if (w > 0 && h > 0) {
-          const world = screenToWorld(vpRef.current, w, h, e.clientX - rect.left, e.clientY - rect.top)
-          const targets = pickTargets(placeAgents(frame.current.metas, frame.current.byId, frame.current.now, frame.current.comms, tRef.current)).filter(
-            (p) => p.floor === vpRef.current.floor,
-          )
-          const hit = nearestAt(targets, world.x, world.z, 0.9)
+          const tr = sideTransform(w, h, vpRef.current)
+          const pt = screenToDesign(tr, e.clientX - rect.left, e.clientY - rect.top)
+          const placed = placeAgents(frame.current.metas, frame.current.byId, frame.current.now, frame.current.comms, tRef.current)
+          const targets = pickTargets(placed).filter((p) => p.floor === vpRef.current.floor)
+          let hit: string | null = null
+          let best = Infinity
+          for (const p of targets) {
+            const inside = Math.abs(pt.x - p.designX) <= p.w / 2 && pt.y >= p.designY - p.h && pt.y <= p.designY + 8
+            const dist = Math.hypot(pt.x - p.designX, pt.y - (p.designY - p.h / 2))
+            if (inside && dist < best) {
+              best = dist
+              hit = p.id
+            }
+          }
+          if (!hit) {
+            for (const p of targets) {
+              const dist = Math.hypot(pt.x - p.designX, pt.y - (p.designY - p.h / 2))
+              if (dist < 46 && dist < best) {
+                best = dist
+                hit = p.id
+              }
+            }
+          }
           onPick(hit ?? '')
         }
       }
@@ -382,7 +407,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
 
   return (
     <div className="scene2d" ref={wrapRef}>
-      <canvas ref={canvasRef} className="scene2d-canvas" role="application" aria-label="Kantor agen 2D" />
+      <canvas ref={canvasRef} className="scene2d-canvas" role="application" aria-label="Kantor agen 2D, tampak samping" />
       <div className="zoom-ctrl" aria-label="Zoom">
         <button type="button" onClick={() => zoomBy(-1)} aria-label="Perkecil">
           −
@@ -394,6 +419,44 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
       </div>
     </div>
   )
+}
+
+/** Rolling frame-cost report (measured, in this browser). */
+function perfReport(perf: { samples: number[]; frames: number; last: number }) {
+  const s = [...perf.samples].sort((a, b) => a - b)
+  const avg = s.length ? s.reduce((n, v) => n + v, 0) / s.length : 0
+  const p95 = s.length ? s[Math.min(s.length - 1, Math.floor(s.length * 0.95))]! : 0
+  return {
+    frames: perf.frames,
+    samples: s.length,
+    avgRenderMs: Math.round(avg * 100) / 100,
+    p95RenderMs: Math.round(p95 * 100) / 100,
+    lastRenderMs: Math.round(perf.last * 100) / 100,
+    estimatedFps: avg > 0 ? Math.round(1000 / Math.max(16.7, avg) / 0.01) / 100 : null,
+  }
+}
+
+/** The side-view layout + gates, exposed for the browser probe. */
+function layoutReport(floor: 1 | 2 | 3, metas: AgentMeta[]) {
+  const seats = sideSeats(metas.filter((m) => m.desk.floor === floor))
+  const labels = labelAgentsFor(
+    seats,
+    new Map(seats.map((s) => [s.meta.id, { status: 'working', shape: 'circle' as const, colour: '#F2B434' }])),
+  )
+  const { plates } = layoutSideLabels(labels, { w: SIDE_W, h: SIDE_H })
+  return {
+    floor,
+    rows: {
+      front: seats.filter((s) => s.row === 'front').map((s) => ({ id: s.meta.id, x: s.cx })),
+      back: seats.filter((s) => s.row === 'back').map((s) => ({ id: s.meta.id, x: s.cx })),
+    },
+    avatarH: { front: SIDE_AVATAR_H, back: SIDE_AVATAR_H * 0.94 },
+    roomH: SIDE_ROOM_H,
+    ratio: Math.round((SIDE_ROOM_H / SIDE_AVATAR_H) * 100) / 100,
+    gate: sideGate(seats, plates, { w: SIDE_W, h: SIDE_H }),
+    wall: sideWallGate(),
+    seats: seats.map((s) => ({ id: s.meta.id, row: s.row, slot: s.slot, x: s.cx, floorY: s.floorY, avatarH: s.avatarH })),
+  }
 }
 
 export default Office2D

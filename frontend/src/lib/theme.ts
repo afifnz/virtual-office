@@ -61,6 +61,14 @@ export function isValidTimeZone(tz: string): boolean {
 
 /** Local hour in `tz` (0–23), or null when the zone is unusable. */
 export function hourInTimeZone(nowISO: string | number | Date, tz: string): number | null {
+  return clockInTimeZone(nowISO, tz)?.hour ?? null
+}
+
+/** Local hour + minute in `tz`, or null when the zone/clock is unusable. */
+export function clockInTimeZone(
+  nowISO: string | number | Date,
+  tz: string,
+): { hour: number; minute: number } | null {
   if (!isValidTimeZone(tz)) return null
   const d = toDate(nowISO)
   if (!d) return null
@@ -68,10 +76,13 @@ export function hourInTimeZone(nowISO: string | number | Date, tz: string): numb
     const parts = new Intl.DateTimeFormat('en-GB', {
       timeZone: tz,
       hour: '2-digit',
+      minute: '2-digit',
       hourCycle: 'h23',
     }).formatToParts(d)
     const hour = Number(parts.find((p) => p.type === 'hour')?.value)
-    return Number.isFinite(hour) ? hour % 24 : null
+    const minute = Number(parts.find((p) => p.type === 'minute')?.value)
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+    return { hour: hour % 24, minute: minute % 60 }
   } catch {
     return null
   }

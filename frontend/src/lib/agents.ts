@@ -11,8 +11,6 @@ export interface Look {
   shirt: string
   pants: string
   accent: string
-  /** use the hand-sculpted head (frontend/src/scene/ndoroKakung.ts) */
-  sculptedHead?: boolean
   skirt?: boolean
   glasses?: boolean
   headphones?: string
@@ -59,7 +57,7 @@ export const AGENTS: AgentMeta[] = [
     desc: 'Pintu masuk semua permintaan pengguna lewat Telegram dan chat. Urusan produktivitas: memori, cron, email, review mingguan.',
     look: {
       skin: '#d9a880', hair: '#241c18', style: 'crop', shirt: '#2f3d57', pants: '#2a2521',
-      accent: '#b4553f', sculptedHead: true, mustache: true, build: 1.06, tall: 1.02,
+      accent: '#b4553f', mustache: true, build: 1.06, tall: 1.02,
     },
     desk: { x: -6.9, z: 6.4, rot: Math.PI, floor: 1 },
   },

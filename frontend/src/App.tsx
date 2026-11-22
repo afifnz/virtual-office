@@ -182,6 +182,7 @@ export default function App() {
           onNear={setNearId}
           onMove={onMove}
           onPick={onPick}
+          theme={theme.mode}
           dpr={mobile ? [1, 1.5] : [1, 1.8]}
         />
       </div>
