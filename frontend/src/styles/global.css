@@ -342,7 +342,7 @@ ul {
   top: 0;
   left: 0;
   right: 0;
-  min-height: var(--hud-h);
+  height: var(--hud-h);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -350,6 +350,12 @@ ul {
   padding: 6px 12px;
   background: var(--navy-800);
   border-bottom: 2px solid var(--line);
+}
+
+/* the stale banner hangs below the bar instead of pushing the canvas down */
+.hud.is-open {
+  height: auto;
+  min-height: var(--hud-h);
 }
 
 .hud-row {
@@ -484,7 +490,11 @@ ul {
 }
 
 .stale {
-  flex: 1 1 100%;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 29;
   background: #5a3a1a;
   color: #ffd9a8;
   font-size: 11px;
@@ -618,17 +628,45 @@ ul {
 }
 
 .roster-team h3 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  margin: 0;
   font-size: 10px;
   letter-spacing: 0.14em;
   color: var(--muted);
-  padding: 10px 6px 5px;
 }
-.roster-team h3 span {
+
+/* team header = accordion toggle (design §S7: accordion per tim) */
+.roster-team .team-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 8px 6px 4px;
+  text-align: left;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.roster-team .team-toggle:hover {
+  color: var(--ink);
+  background: var(--navy-700);
+}
+.roster-team .team-toggle span {
   margin-left: auto;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.roster-team .team-toggle b {
+  color: var(--muted);
+  font-size: 9px;
+  width: 10px;
+  text-align: right;
+}
+.roster-team.is-folded .team-toggle {
+  padding-bottom: 8px;
 }
 
 .team-bar {
@@ -1367,7 +1405,8 @@ ul {
 
 @media (max-width: 760px) {
   :root {
-    --hud-h: 52px;
+    /* two HUD rows on a phone: brand row + room buttons */
+    --hud-h: 96px;
     --toolbar-h: 56px;
   }
 
