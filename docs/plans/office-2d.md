@@ -512,7 +512,7 @@ Aman paralel: {T1.1, T1.2, T1.4, T2.5} di awal; {T1.9/T2.1, T2.3, T2.4} setelah 
 - [x] T1.5 `sprites.ts` + cache
 - [x] T1.6 `render.ts` layer statis+dinamis
 - [x] T1.7 `Office2D.tsx` + Scene lazy baru
-- [ ] T1.8 wiring App + hapus `src/scene/` + label/textures — build tanpa chunk three
+- [x] T1.8 wiring App + hapus `src/scene/` + label/textures — build tanpa chunk three
 - [ ] T1.9 shot desktop/mobile/offline + verdict vision + bukti scrollTop
 - [ ] T2.1 tema pixel panel desktop (overflow roster selamat)
 - [ ] T2.2 mobile sheet/accordion + toolbar + zoom terjangkau

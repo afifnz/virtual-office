@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { MoveIntent } from '../lib/view'
 
-/** On-screen movement pad: one tap moves while held, 56 px targets. */
+/** On-screen movement pad: one tap pans the view while held, 56 px targets. */
 export function DPad({ intent }: { intent: React.MutableRefObject<MoveIntent> }) {
   const held = useRef<string | null>(null)
 
@@ -44,11 +44,11 @@ export function DPad({ intent }: { intent: React.MutableRefObject<MoveIntent> })
   )
 
   return (
-    <div className="dpad" aria-label="Kontrol gerak">
-      {btn('fwd', 'Maju', '▲', 'up')}
-      {btn('left', 'Ke kiri', '◀', 'left')}
-      {btn('right', 'Ke kanan', '▶', 'right')}
-      {btn('back', 'Mundur', '▼', 'down')}
+    <div className="dpad" aria-label="Geser tampilan">
+      {btn('fwd', 'Geser ke atas', '▲', 'up')}
+      {btn('left', 'Geser ke kiri', '◀', 'left')}
+      {btn('right', 'Geser ke kanan', '▶', 'right')}
+      {btn('back', 'Geser ke bawah', '▼', 'down')}
     </div>
   )
 }
