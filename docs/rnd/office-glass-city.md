@@ -31,8 +31,10 @@ Angka kunci (label **terukur** vs **estimasi** disebut eksplisit):
 | Pasangan kontras terburuk seluruh tema | 5,00:1 (status `offline` di Neon) · 5,04:1 (`blocked` di tema Terang) | **terukur** | idem, 78 pasangan |
 | Chunk scene saat ini | 46.417 B (15.320 B gzip) | **terukur** | `frontend/dist/assets/Office2D-*.js` |
 | Operasi gambar per avatar vector | 53–63 path/isi + 28–32 gradien (tergantung look) | **terukur** | dihitung saat render, `render_mockups.py` |
-| Bangun 8 avatar @54 px (Pillow, supersample 4×) | 202 ms per set | **terukur** (CPU mockup) | `avatar()` di `render_mockups.py`; angka canvas di browser belum diukur |
-| Kamera view samping: px per unit / per agen | 88,7 px/unit · 120 px/agen | **terukur** | `side_report()` di `render_mockups.py` |
+| Bangun 8 avatar @88 px (Pillow, supersample 4×) | 202 ms per set (54 px) · ±1,6× luas di 88 px | **terukur** (CPU mockup) | `avatar()` di `render_mockups.py`; angka canvas di browser belum diukur |
+| Kamera view samping | **140 px/unit tetap** (bukan fit-to-width) · avatar 88 px · ruangan 308 px | **terukur** | `side_report()` + `side_metrics()` di `render_mockups.py` |
+| Rasio avatar:ruangan (verdict bos) | **1:3,50** (dulu 1:5,3) | **terukur** | idem, `side_metrics()` |
+| Dinding kosong di atas meja | **24,2 %** area · run terpanjang 24,7 % | **terukur** | `side_wall_gate()` |
 | fps 60 desktop / 30 HP dengan band kota | — | **estimasi** (belum diukur di perangkat) | target Fase 0, harus diukur sebelum lanjut |
 
 ---
@@ -251,7 +253,7 @@ Ini sub-bab yang diminta eksplisit oleh bos. Ringkasnya: avatar **tidak lagi** 1
 | Aspek | Sekarang (pixel) | Usulan (vector) | Berubah? |
 |---|---|---|---|
 | Sumber bentuk | `sprites.ts` — 514 baris `fillRect` 1 px | modul baru `avatar.ts` — path + `createLinearGradient` | ya |
-| Ukuran di layar | 12×16 world px → 24×32 CSS px @ zoom 2 | 1,4×0,9 unit → 32×54 CSS px @ zoom 2 (tinggi 54 px termasuk kepala) | ya (sedikit lebih besar, disengaja) |
+| Ukuran di layar | 12×16 world px → 24×32 CSS px @ zoom 2 | 1,4×0,9 unit → 32×54 CSS px di denah · **53×88 px di view samping** (naik setelah verdict bos) | ya, jauh lebih besar, disengaja |
 | Ancor kaki | kaki di `desk.z`, dipakai `pickTargets` | **sama** — kaki tetap di `desk.z`, radius pick 0,9 unit | tidak |
 | Cache | `getSprite(key)` per (look, pose, frame) | **sama**, key diperluas dengan `style` vector | tidak (pola tetap) |
 | Label nama | font 5×7 `pixelfont.ts`, `plateScale(zoom)` | teks anti-aliased (`ctx.fillText`) 9,5 px, `measureText` | ya |
@@ -299,11 +301,11 @@ Diukur di mesin ini (CPU, supersample 3× sebagai proxy anti-aliasing):
 
 | Operasi | Waktu | Catatan |
 |---|---|---|
-| Bangun 8 avatar @54 px (Pillow, mockup) | **202 ms** (sekali) | sekali per (look, pose, frame) saat pertama muncul; angka browser belum diukur |
+| Bangun 8 avatar @88 px (Pillow, mockup) | **202 ms** di 54 px (sekali); 88 px ±1,6× luas | sekali per (look, pose, frame) saat pertama muncul; angka browser belum diukur |
 | Bangun 8 avatar @108 px (Pillow, mockup) | 535 ms (sekali) | untuk zoom 4 (retina) |
 | Blit 8 sprite yang sudah di-cache | **0,06 ms** per frame | setara biaya sekarang |
 
-Konsekuensi: **jangan** menggambar path avatar di dalam loop render. Simpan di cache sprite yang sudah ada (`getSprite`), key = `avatar:{hash(look)}:{pose}:{frame}:{dprBucket}`. Ruang cache maksimum: 13 look × 6 pose × 2 frame × 2 bucket = 312 sprite; pada 32×54 px @DPR 2 ≈ 2,9 MB — masih wajar, dan bisa di-cap dengan LRU 64 entri.
+Konsekuensi: **jangan** menggambar path avatar di dalam loop render. Simpan di cache sprite yang sudah ada (`getSprite`), key = `avatar:{hash(look)}:{pose}:{frame}:{dprBucket}`. Ruang cache maksimum: 13 look × 6 pose × 2 frame × 2 bucket = 312 sprite; pada 53×88 px @DPR 2 ≈ 7,5 MB — masih wajar, dan bisa di-cap dengan LRU 64 entri.
 
 Estimasi bundle: chunk scene sekarang **46.417 B (15.320 B gzip)**. Modul avatar vector menggantikan `sprites.ts` (19,9 KB sumber); perkiraan **+2–4 KB raw / +1–1,5 KB gzip** — estimasi, belum diukur dengan build.
 
@@ -315,18 +317,18 @@ Delapan look L3 yang sama, atas = rekonstruksi 12×16 pixel sekarang, bawah = av
 
 Mockup tiga arah memakai avatar vector ini di 8 meja L3 — bisa dinilai bos tanpa membuka Figma.
 
-#### 5.6.5 Bukti angka: 54 px, 655 warna, 97 % tepi blending
+#### 5.6.5 Bukti angka: 88 px, 1077 warna, 100 % tepi blending
 
 Klaim "vector" tidak cukup; bos meminta angka. `avatar_proof()` di `render_mockups.py`
 mengukur satu agen **pada mockup yang benar-benar dirender** dan mencetak hasilnya:
 
 | Metrik | Terukur | Ambang yang dipakai | Kesimpulan |
 |---|---|---|---|
-| Tinggi avatar di mockup (lane 2/1/0) | **54 / 51 / 49 px** | 48–56 px | ukuran tampil akhir, bukan hasil upscale |
-| Warna unik di dalam siluet | **655** | pixel-art ≤ 12 · vector ≥ 40 | jauh di atas ambang vector |
-| Warna unik di crop mockup | **≈1000** | — | termasuk latar (gradien ikut bergeser) |
-| Piksel tepi siluet yang **blending** | **319/328 = 97 %** | pixel-art = 0 % | ada anti-aliasing nyata di tepi |
-| Piksel alpha parsial | **966** | > 0 | tepi sub-piksel |
+| Tinggi avatar di mockup (lane 2/1/0) | **88 / 84 / 81 px** | 75–90 px | ukuran tampil akhir, bukan hasil upscale |
+| Warna unik di dalam siluet | **1077** | pixel-art ≤ 12 · vector ≥ 40 | jauh di atas ambang vector |
+| Warna unik di crop mockup | **1904** | — | termasuk latar (gradien ikut bergeser) |
+| Piksel tepi siluet yang **blending** | **644/645 = 100 %** | pixel-art = 0 % | ada anti-aliasing nyata di tepi |
+| Piksel alpha parsial | **2072** | > 0 | tepi sub-piksel |
 | Operasi gambar | **53–63 path + 28–32 gradien** | — | dihitung saat render |
 
 ![Gambar 3 — Bukti zoom: crop 4x satu avatar (BAGAS) dari l3-side-day.png plus delapan look L3 pada zoom yang sama. Angka di bawah gambar dicetak oleh renderer.](docs/design/mockups/avatar-zoom-check.png,15.5)
@@ -473,7 +475,7 @@ Matriks kedua, untuk keputusan **view** (ini yang mengubah mockup secara mendasa
 |---|---|---|---|---|
 | denah top-down (sekarang) | 5 | **5** | 5 | kota tidak mungkin di belakang dinding (dinding 7 px) |
 | **(a) elevasi murni** | 2 | **4** | 3 | `z` hanya jadi urutan gambar → agen di `x` sama saling menimpa (L3 punya 3 pasangan seperti itu) |
-| **(b) elevasi 2.5D (lane + slot)** | **4** | 3 | 3 | `z` → 3 lane (offset 20 px, skala 1,00/0,95/0,90) **plus** slot horizontal ≥78 px per agen; dua baris meja terbaca, tidak ada label bertumpuk |
+| **(b) elevasi 2.5D (lane + slot)** | **4** | 3 | 3 | `z` → 3 lane (offset 24 px, skala 1,00/0,96/0,92) **plus** slot horizontal ≥86 px per agen; dua baris meja terbaca, tidak ada label bertumpuk |
 
 **Rekomendasi akhir: dua tema (Terang + Gelap) di atas scene view samping 2.5D, all-vector, dengan anggaran kaca.**
 
@@ -481,7 +483,7 @@ Alasan:
 
 1. **Keputusan bos diikuti apa adanya**: dua tema first-class, berganti otomatis menurut WIB, bukan salah satu.
 2. **View samping adalah satu-satunya cara kota benar-benar terlihat** — dan kota adalah inti permintaan. Ia juga membuat lift (naik-turun vertikal) dan kaca (bidang vertikal) terbaca alami, bukan sebagai hiasan.
-3. **Lane 2.5D + slot horizontal menyelamatkan data yang sudah ada**: `rooms.ts` tidak berubah; `z` hanya berubah perannya di renderer. Lane saja **tidak cukup** — offset vertikal tidak memisahkan dua label selebar 52 px yang pusatnya sama. Tanpa slot horizontal, tiga pasangan agen L3 (DIMAS/BAGAS, YOGA/RAKA, SARI/LARAS) tetap bertumpuk di `x` yang sama: itu terlihat di mockup (8 agen hanya tampil sebagai 4 posisi). Dengan slot ≥78 px, kedelapan agen dapat posisi sendiri dan gate mengukurnya: 0 label bertumpuk, 0 label menimpa kepala agen lain, overlap bbox avatar 0,0 %.
+3. **Lane 2.5D + slot horizontal menyelamatkan data yang sudah ada**: `rooms.ts` tidak berubah; `z` hanya berubah perannya di renderer. Lane saja **tidak cukup** — offset vertikal 24 px tidak memisahkan dua label selebar 62 px yang pusatnya sama. Tanpa slot horizontal, tiga pasangan agen L3 (DIMAS/BAGAS, YOGA/RAKA, SARI/LARAS) tetap bertumpuk di `x` yang sama: itu terlihat di mockup (8 agen hanya tampil sebagai 4 posisi). Dengan slot ≥86 px, kedelapan agen dapat posisi sendiri dan gate mengukurnya: 0 label bertumpuk, 0 label menimpa kepala agen lain, overlap bbox avatar 0,0 %.
 4. **Biaya kaca terkendali**: empat permukaan kaca di chrome + satu partisi kaca di dalam scene; blur hanya di chrome dan di band kota yang di-cache per (lantai × tema) — lihat §12.
 5. **Bisa dihentikan**: kalau view samping tidak lolos penilaian, kembali ke denah top-down cukup dengan mematikan flag renderer; token, kontras, avatar, dan TOC dokumen tidak terpengaruh.
 
@@ -516,7 +518,7 @@ Total: **12–17 hari kerja**. Titik berhenti yang disarankan: akhir Fase 1 (ava
 **Kapan harus berhenti karena hasilnya jelek** (kriteria eksplisit):
 
 - Fase 0: fps desktop < 55 dengan band aktif, atau band membuat teks kanvas sulit dibaca → kurangi tinggi band kota, jangan lanjut ke view samping.
-- Fase 1: avatar vector terbaca "boneka" pada ukuran kecil (uji 5 orang) → **sudah ditangani**: tinggi 54 px, kepala chibi 38 % tinggi, alis+mata+mulut digambar eksplisit, dua tone + outline per material. Kalau masih terbaca boneka di browser, naikkan ke 56 px, jangan lanjut ke scene.
+- Fase 1: avatar vector terbaca "boneka" pada ukuran kecil (uji 5 orang) → **sudah ditangani**: tinggi **88 px** di view samping (naik dari 54 px setelah verdict bos "avatar terlihat kecil"), kepala chibi 38 % tinggi, alis+mata+mulut digambar eksplisit, dua tone + outline per material. Kalau masih terbaca boneka di browser, naikkan skala kamera ke 150–160 px/unit, jangan lanjut ke scene.
 - Fase 2: view samping membuat posisi agen ambigu walau sudah 3 lane (uji: "siapa di meja mana?" salah > 1 dari 5 kali) → tambah lane ke 4 atau kembalikan `z` ke kedalaman penuh (opsi a) dan sembunyikan agen yang tertimpa di balik nameplate bertumpuk.
 - Fase 3: dua permukaan kaca ber-blur membuat fps HP < 30 → kaca hanya di roster, tab/HUD solid; tema Terang tetap boleh.
 
@@ -630,15 +632,15 @@ Yang diuji: `05:59 → gelap`, `06:00 → terang`, `17:59 → terang`, `18:00 �
 | **(a) elevasi murni** | `z` hanya menentukan urutan gambar | paling murah (0 perubahan data), komposisi paling "bersih" | dua agen dengan `x` sama saling menimpa → ambigu; L3 punya **3 pasangan** seperti itu |
 | **(b) elevasi 2.5D (lane + slot)** | `z` → salah satu dari 3 lane; tiap lane punya offset vertikal + skala lebih kecil, **dan** tiap agen dapat slot horizontal sendiri | kedalaman tidak hilang, tabrakan `x` benar-benar terpisah, tetap terbaca sebagai view samping | perlu aturan lane + slot + skala per lane; satu tingkat kesulitan baru di hit-test |
 
-**Rekomendasi: (b).** Bukti dari data L3 (bukan dugaan): `coder (-1,62; -0,78)` vs `coder2 (-1,62; 0)`, `planner (0; 0)` vs `reviewer (0; -0,78)`, `uiux (1,62; 0)` vs `tester (1,62; -0,78)` — tiga pasang agen menempati `x` yang sama. Dengan opsi (a) mereka bertumpuk persis dan satu agen hilang dari pandangan. **Lane saja juga belum cukup** — itu terbukti di mockup: offset vertikal 20 px tidak memisahkan dua label selebar 52 px yang pusatnya sama, sehingga 8 agen hanya tampil sebagai 4 posisi. Yang dipakai adalah lane **plus slot horizontal** (lihat §12.1).
+**Rekomendasi: (b).** Bukti dari data L3 (bukan dugaan): `coder (-1,62; -0,78)` vs `coder2 (-1,62; 0)`, `planner (0; 0)` vs `reviewer (0; -0,78)`, `uiux (1,62; 0)` vs `tester (1,62; -0,78)` — tiga pasang agen menempati `x` yang sama. Dengan opsi (a) mereka bertumpuk persis dan satu agen hilang dari pandangan. **Lane saja juga belum cukup** — itu terbukti di mockup: offset vertikal 24 px tidak memisahkan dua label selebar 62 px yang pusatnya sama, sehingga 8 agen hanya tampil sebagai 4 posisi. Yang dipakai adalah lane **plus slot horizontal** (lihat §12.1).
 
 **Aturan lane yang dipakai di mockup.**
 
-| Lane | Skala | Offset y | Agen L3 |
-|---|---|---|---|
-| 0 (belakang) | 0,90 | 0 px | WAHYU (z −6,2) |
-| 1 (tengah) | 0,95 | +20 px | DIMAS, YOGA, SARI (z −0,78) |
-| 2 (depan) | 1,00 | +40 px | BIMA, BAGAS, RAKA, LARAS (z ≥ −0,39) |
+| Lane | Skala | Offset y | Tinggi avatar | Agen L3 |
+|---|---|---|---|---|
+| 0 (belakang) | 0,92 | 0 px | 81 px | WAHYU (z −6,2) |
+| 1 (tengah) | 0,96 | +24 px | 84,5 px | DIMAS, YOGA, SARI (z −0,78) |
+| 2 (depan) | 1,00 | +48 px | 88 px | BIMA, BAGAS, RAKA, LARAS (z ≥ −0,39) |
 
 Catatan penting: pitch `z` di data hanya 0,78 unit, jauh lebih kecil dari jarak antar-lane, jadi pemetaan **tidak boleh** memakai pembagian linier `z → lane` apa adanya (semua meja island akan jatuh di satu lane). Yang dipakai: lane awal dari ambang `z`, lalu **resolver tabrakan** — pasangan dengan `x` sama digeser satu lane ke belakang. Ini deterministik dan bisa diuji.
 
@@ -646,16 +648,17 @@ Catatan penting: pitch `z` di data hanya 0,78 unit, jauh lebih kecil dari jarak 
 
 Mockup pertama membuktikan lane saja tidak cukup: 8 agen L3 hanya tampil sebagai
 **4 posisi** karena DIMAS+BAGAS, YOGA+RAKA, dan SARI+LARAS punya pusat `x` identik
-dan labelnya menumpuk. Offset vertikal 20 px tidak memisahkan dua label selebar
-52 px. Aturan tambahan (`side_slots()` di renderer mockup):
+dan labelnya menumpuk. Offset vertikal 24 px tidak memisahkan dua label selebar
+62 px. Aturan tambahan (`side_slots()` di renderer mockup):
 
 1. agen diurutkan menurut `cx` dunia lalu `lane` — urutan kiri→kanan tetap urutan `rooms.ts`;
-2. pusat agen berikutnya minimal **78 px** dari pusat sebelumnya (lebar label + napas);
-   pasangan yang bertabrakan **digeser horizontal**, bukan ditumpuk vertikal;
+2. pusat agen berikutnya minimal **86 px** dari pusat sebelumnya (label terlebar
+   62 px + napas + lebar badan 53 px); pasangan yang bertabrakan **digeser
+   horizontal**, bukan ditumpuk vertikal;
 3. kalau pita melewati kanvas, seluruh pita digeser masuk, lalu dinaikkan bila mentok.
 
-Hasil terukur di L3: `BIMA 153 · DIMAS 260 · BAGAS 338 · YOGA 416 · RAKA 494 ·
-SARI 572 · LARAS 650 · WAHYU 847` — jarak pusat minimum **78,0 px**, dan pola yang
+Hasil terukur di L3: `BIMA 93 · DIMAS 261 · BAGAS 347 · YOGA 487 · RAKA 573 ·
+SARI 714 · LARAS 800 · WAHYU 907` — jarak pusat minimum **86,0 px**, dan pola yang
 terbaca adalah dua baris meja (baris belakang menyela di antara baris depan).
 
 **Gate keras `side_gate()`** (dijalankan sebelum render, L1/L2/L3, mencetak angka):
@@ -665,7 +668,8 @@ terbaca adalah dua baris meja (baris belakang menyela di antara baris depan).
 | label ↔ label bertumpuk | **0** dari 8 label |
 | label ↔ kotak kepala agen lain | **0** |
 | overlap bbox avatar vs avatar (≤ 20 % dari yang lebih kecil) | **0,0 %** dari 28 pasang |
-| jarak pusat agen minimum | **78,0 px** |
+| jarak pusat agen minimum | **86,0 px** |
+| jarak plat ↔ kepala (terukur) | **7,0 px** (minimum) |
 
 Kalau salah satu aturan dilanggar, renderer berhenti dengan nama agennya — bukan
 sekadar peringatan, supaya mockup tidak bisa "lulus" dengan label bertumpuk.
@@ -685,13 +689,74 @@ sekadar peringatan, supaya mockup tidak bisa "lulus" dengan label bertumpuk.
 
 | Pertanyaan | Jawaban terukur |
 |---|---|
-| Tinggi band per lantai | kota 310 px · plafon 26 px · interior 260 px · floor finish 70 px · slab 22 px = **688 px** (pas kanvas) |
-| Berapa lane yang masih terbaca | **3** (offset 20 px, skala 1,00/0,95/0,90); lane ke-4 pada pitch ini mulai terbaca sebagai "baris ganda", bukan kedalaman |
-| Apakah 8 agen L3 muat | **ya** — kamera memotong span 10,82 unit (bukan 24 unit penuh) → 88,7 px/unit = **120 px per agen**; slot horizontal memberi jarak pusat **78,0 px** (minimum), overlap bbox avatar **0,0 %** |
-| Tinggi avatar & meja | avatar 54 px (× skala lane = 49/51/54) · meja 34 px dari garis lantai · monitor 24×15 px |
+| Tinggi band per lantai | kota **252 px** · soffit 26 px · ruangan **308 px** · floor finish 80 px · slab 22 px = **688 px** (pas kanvas) |
+| Berapa lane yang masih terbaca | **3** (offset 24 px, skala 1,00/0,96/0,92); lane ke-4 pada pitch ini mulai terbaca sebagai "baris ganda", bukan kedalaman |
+| Apakah 8 agen L3 muat | **ya** — kamera **140 px/unit tetap** memotong span elevasi 815 px (koridor 1,95–4,30 unit dipotong jadi 0,35 unit, ditandai break di lantai); slot horizontal memberi jarak pusat **86,0 px** (minimum), overlap bbox avatar **0,0 %** |
+| Tinggi avatar & meja | avatar **88 px** (× skala lane = 81/84,5/88) · meja 55 px dari garis lantai, lebar 75 px · monitor 21×17 px |
 | Konsekuensi kamera | view samping **adalah potongan**, bukan seluruh lantai; UI harus menyebut "potongan L3" dan pan horizontal menggantikan pan 2 arah |
 
-**Risiko yang harus dijaga.** (1) Kedalaman tetap bisa ambigu bila dua agen satu lane berdekatan — mitigasi: resolver lane + slot horizontal + nameplate berleader. (2) Nameplate bertumpuk di agen yang berdekatan — mitigasi: gate keras (`side_gate()`), sudah berjalan di mockup dan mencetak angka: 0 label↔label, 0 label↔kepala-agen-lain, overlap bbox avatar ≤ 20 % (terukur 0,0 %), jarak pusat ≥ 78 px. (3) Sprite harus digambar ulang untuk profil samping (meja, kursi, monitor, rak server) — ini biaya Fase 2, bukan tambahan di luar rencana. (4) Walkability tidak boleh ikut berubah: `layout_check` tetap memakai graf 2D.
+### 12.2 Proporsi: verdict bos, dijawab dengan angka
+
+Verdict bos atas mockup pertama, apa adanya: **"avatar terlihat kecil, sedangkan
+ruangnya tampak tinggi."** Itu benar dan bisa diukur — avatar 54 px di ruangan 286 px
+= **1:5,3**, dengan dinding di atas kepala hampir seluruhnya kosong. Perbaikannya
+tidak boleh berupa "dibesarkan sedikit", jadi setiap target di brief diterjemahkan
+ke satu angka dan dihitung ulang oleh renderer (`side_metrics()`), bukan diketik
+manual:
+
+| Target brief | Angka yang dipakai | Terukur |
+|---|---|---|
+| skala kamera 140–160 px/unit | `SIDE_PPU = 140` untuk **kedua sumbu** | **140 px/unit** |
+| avatar 75–90 px @ zoom 2 | `140 × 0,63 unit` | **88 px** (lane 2) · 84 / 81 px (lane 1/0) |
+| plafon 2,2–2,5 unit | `SIDE_CEIL_UNITS = 2,2` | **2,2 unit = 308 px** |
+| rasio avatar:ruangan 1:3–1:4 | turunan dari dua angka di atas | **1:3,50** |
+| dinding kosong ≤ 30 % tinggi ruangan | `side_wall_gate()` | **24,2 % area · run 24,7 %** |
+| 8 meja L3 tetap muat, 0 label bertabrakan | `side_slots()` + `side_gate()` | **slot 86,0 px · 0 overlap · 0 kepala tertutup** |
+
+**Kenapa kamera harus tetap, bukan fit-to-width.** Kode lama membagi 960 px dengan
+span meja 10,82 unit → 88,7 px/unit. Skala itu *keluaran* dari lebar kanvas, jadi
+avatar dan ruangan ikut mengecil bersama dan rasionya tidak pernah bisa
+diperbaiki. Sekarang skalanya konstanta; yang menyesuaikan adalah **padding**.
+Konsekuensinya span meja L3 (7,82 unit = 1095 px) tidak muat di 960 px, jadi
+koridor kosong antara pulau dev (x 1,62) dan sudut devops (x 5,0) — 3,38 unit
+tanpa apa pun — **dipotong** jadi 0,35 unit dan ditandai *break* di lantai. Itu
+konvensi gambar potongan yang lazim, dan lebih jujur daripada mengecilkan avatar
+atau memampatkan sumbu `x` (anisotropik).
+
+**Dinding diisi, bukan dibiarkan kosong.** Enam papan 116 px (plakat zona L3 · TIM
+DEV, papan status 6/8 dengan 8 titik + 4 chip, pinboard + burndown, whiteboard
+arsitektur, jam dinding yang jarumnya ikut WIB tema, rak buku berangka), satu rak
+panjang 60 px berisi buku/binder/kotak/tanaman, trunking kabel, 7 downlight, dan
+plinth di kaki dinding. Tinggi terisi per kolom: soffit 26 + trunking 14 + papan
+116 + rak 60 + plinth 20 = **236 px dari 308 px = 76,6 %** (gate mengukur 75,8 %
+setelah dikurangi celah dan tepi). Papan 116 px = **1,3 × avatar** = 0,38 × tinggi
+ruangan; papan 176 px (satu band penuh) sempat dicoba dan terbaca sebagai kartu UI
+raksasa, jadi tingginya dibelah: papan di atas, rak berisi objek di bawah.
+
+**Trade-off yang diambil sadar** (tidak bisa dipenuhi bersamaan):
+
+1. **"Sisa di atas kepala ±1 tinggi avatar" vs "rasio 1:3–1:4".** Keduanya
+   bertabrakan secara aritmetika: ruangan 1:3,5 berarti 2,5 avatar tinggi ruang
+   kosong di atas kepala. Yang dipegang adalah angka eksplisit 1:3–1:4 (dan 30 %
+   dinding kosong sebagai ukuran yang bisa digerbang); "±1 avatar" tidak mungkin
+   tanpa merusak rasio itu.
+2. **Avatar 90 px vs 8 slot.** Di 90 px badan menjadi 54 px dan label 62 px, jadi
+   slot harus ≥ 88 px (label 62 + 26 px udara; badan 54 + 34 px). Delapan slot
+   berjarak 88 px menempati 7 × 88 = **616 px** + 2 × 26 px badan + margin 40 px =
+   **708 px** — masih muat di 960 px, tetapi label mulai menempel ke badan
+   tetangga. Diambil **88 px avatar + 86 px slot**: keduanya di dalam target, dan
+   masih ada 12 px udara bersih antara dua label yang bersebelahan.
+3. **Papan besar vs jumlah papan.** Dinding 308 px tidak bisa diisi ≥ 70 % oleh
+   papan seukuran realistis (0,7 × avatar) tanpa menyisakan bidang kosong besar.
+   Solusinya dua baris (papan 116 px + rak 60 px), bukan satu papan raksasa.
+
+**Yang tidak berubah:** avatar tetap clean-vector (di 88 px: 1077 warna unik,
+100 % tepi siluet blending, tidak pernah NEAREST), dua tema tetap ikut WIB (jam
+dinding, chip tema dan HUD memakai waktu yang sama), skyline tetap satu lembar
+kaca menerus (tidak ter-tile), dan tidak ada prop mengambang — rak, meja, kursi,
+rak server, partisi, dan tanaman semuanya berdiri di garis lantai lane-nya.
+
+**Risiko yang harus dijaga.** (1) Kedalaman tetap bisa ambigu bila dua agen satu lane berdekatan — mitigasi: resolver lane + slot horizontal + nameplate berleader. (2) Nameplate bertumpuk di agen yang berdekatan — mitigasi: gate keras (`side_gate()`), sudah berjalan di mockup dan mencetak angka: 0 label↔label, 0 label↔kepala-agen-lain, overlap bbox avatar ≤ 20 % (terukur 0,0 %), jarak pusat ≥ 86 px. (3) Sprite harus digambar ulang untuk profil samping (meja, kursi, monitor, rak server) — ini biaya Fase 2, bukan tambahan di luar rencana. (4) Walkability tidak boleh ikut berubah: `layout_check` tetap memakai graf 2D.
 
 ---
 
