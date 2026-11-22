@@ -64,10 +64,10 @@ interface Screen {
 }
 
 const SCREENS: Screen[] = [
-  // 1280×800 desktop: 280 px sidebar + 52 px HUD + 56 px toolbar
-  { name: 'desktop 1280×800', canvasW: 1280 - 280, canvasH: 800 - 52 - 56 },
-  // 390×844 phone: 52 px HUD + 52 px toolbar, full-bleed width
-  { name: 'mobile 390×844', canvasW: 390, canvasH: 844 - 52 - 52 },
+  // 1280×800 desktop: 280 px sidebar + 56 px HUD + 56 px toolbar
+  { name: 'desktop 1280×800', canvasW: 1280 - 280, canvasH: 800 - 56 - 56 },
+  // 390×844 phone: 96 px HUD (brand + rooms) + 56 px bottom bar, full-bleed
+  { name: 'mobile 390×844', canvasW: 390, canvasH: 844 - 96 - 56 },
 ]
 
 /** Every agent's label descriptor at one viewport, exactly as render.ts builds it. */
