@@ -22,12 +22,14 @@ import { onward, seatPoint } from '../lib/routes'
 import type { Pt } from '../lib/nav'
 import { poseFor, blockedChipText, type Pose } from './anim'
 import {
+  DOT,
   PLATE_H,
   PLATE_PAD,
   WORLD_LABELS,
   buildStacks,
   placeStacks,
   plateMode,
+  plateScale,
   plateWidth,
   plaqueRect,
   shortName,
@@ -200,62 +202,62 @@ interface PlateOpts {
   hollow?: boolean
 }
 
-/** A nameplate/chip plate, drawn at pixel-font scale 1 (CSS px). */
-function pillPlate(text: string, opts: PlateOpts): Sprite {
-  const w = plateWidth(text, { dot: Boolean(opts.dot) })
-  const h = PLATE_H
-  const dotW = opts.dot ? 6 : 0
-  const key = `pill:${text}:${opts.bg}:${opts.border}:${opts.ink}:${opts.dot ?? ''}:${opts.hollowDot ? 1 : 0}:${opts.hollow ? 1 : 0}`
+/** A nameplate/chip plate, drawn at the zoom's pixel-font scale (CSS px). */
+function pillPlate(text: string, opts: PlateOpts, scale = 1): Sprite {
+  const w = plateWidth(text, { dot: Boolean(opts.dot), scale })
+  const h = PLATE_H * scale
+  const dotW = opts.dot ? (DOT + 2) * scale : 0
+  const key = `pill:${text}:${opts.bg}:${opts.border}:${opts.ink}:${opts.dot ?? ''}:${opts.hollowDot ? 1 : 0}:${opts.hollow ? 1 : 0}:${scale}`
   return getSprite(key, w, h, (ctx) => {
     if (opts.hollow) {
       ctx.fillStyle = opts.bg
       ctx.fillRect(0, 0, w, h)
       ctx.fillStyle = opts.border
-      ctx.fillRect(0, 0, w, 1)
-      ctx.fillRect(0, h - 1, w, 1)
-      ctx.fillRect(0, 0, 1, h)
-      ctx.fillRect(w - 1, 0, 1, h)
+      ctx.fillRect(0, 0, w, scale)
+      ctx.fillRect(0, h - scale, w, scale)
+      ctx.fillRect(0, 0, scale, h)
+      ctx.fillRect(w - scale, 0, scale, h)
     } else {
       ctx.fillStyle = opts.border
       ctx.fillRect(0, 0, w, h)
       ctx.fillStyle = opts.bg
-      ctx.fillRect(1, 1, w - 2, h - 2)
+      ctx.fillRect(scale, scale, w - 2 * scale, h - 2 * scale)
     }
     if (opts.dot) {
-      const ds = 4
+      const ds = DOT * scale
       const dy = Math.round((h - ds) / 2)
       ctx.fillStyle = opts.dot
       if (opts.hollowDot) {
-        ctx.fillRect(PLATE_PAD, dy, ds, 1)
-        ctx.fillRect(PLATE_PAD, dy + ds - 1, ds, 1)
-        ctx.fillRect(PLATE_PAD, dy, 1, ds)
-        ctx.fillRect(PLATE_PAD + ds - 1, dy, 1, ds)
+        ctx.fillRect(PLATE_PAD * scale, dy, ds, scale)
+        ctx.fillRect(PLATE_PAD * scale, dy + ds - scale, ds, scale)
+        ctx.fillRect(PLATE_PAD * scale, dy, scale, ds)
+        ctx.fillRect(PLATE_PAD * scale + ds - scale, dy, scale, ds)
       } else {
-        ctx.fillRect(PLATE_PAD, dy, ds, ds)
+        ctx.fillRect(PLATE_PAD * scale, dy, ds, ds)
       }
     }
-    drawText(ctx, text, PLATE_PAD + dotW, PLATE_PAD, 1, opts.ink)
+    drawText(ctx, text, PLATE_PAD * scale + dotW, PLATE_PAD * scale, scale, opts.ink)
   })
 }
 
-function bubblePlate(text: string): Sprite {
-  const w = plateWidth(text) + 2
-  const h = PLATE_H + 3
-  const key = `bubble:${text}`
+function bubblePlate(text: string, scale = 1): Sprite {
+  const w = plateWidth(text, { scale }) + 2 * scale
+  const h = (PLATE_H + 3) * scale
+  const key = `bubble:${text}:${scale}`
   return getSprite(key, w, h, (ctx) => {
     ctx.fillStyle = PALETTE.sand200
     ctx.fillRect(0, 0, w, h)
     ctx.fillStyle = PALETTE.navy600
-    ctx.fillRect(0, 0, w, 1)
-    ctx.fillRect(0, h - 1, w, 1)
-    ctx.fillRect(0, 0, 1, h)
-    ctx.fillRect(w - 1, 0, 1, h)
+    ctx.fillRect(0, 0, w, scale)
+    ctx.fillRect(0, h - scale, w, scale)
+    ctx.fillRect(0, 0, scale, h)
+    ctx.fillRect(w - scale, 0, scale, h)
     // tail, pointing down at the head
     ctx.fillStyle = PALETTE.sand200
-    ctx.fillRect(Math.floor(w / 2) - 1, h - 1, 3, 2)
+    ctx.fillRect(Math.floor(w / 2) - scale, h - scale, 3 * scale, 2 * scale)
     ctx.fillStyle = PALETTE.navy600
-    ctx.fillRect(Math.floor(w / 2) - 1, h, 3, 1)
-    drawText(ctx, text, PLATE_PAD, PLATE_PAD + 1, 1, SCREEN.bubbleInk)
+    ctx.fillRect(Math.floor(w / 2) - scale, h, 3 * scale, scale)
+    drawText(ctx, text, PLATE_PAD * scale, (PLATE_PAD + 1) * scale, scale, SCREEN.bubbleInk)
   })
 }
 
@@ -420,6 +422,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   blitWorld({ canvas: r.static, w: WORLD_W, h: WORLD_H }, tl.x, tl.y)
 
   const mode = plateMode(r.vp.zoom)
+  const scale = plateScale(r.vp.zoom)
 
   // desks + chairs, z-sorted (south last) so back rows sit behind front rows
   const deskOrder = [...r.metas].sort((a, b) => a.desk.z - b.desk.z)
@@ -516,38 +519,49 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     const chip = mode === 'compact' ? '' : statusChip(agent, pose)
     const counters = mode === 'detail' && !offline ? countersLine(agent) : ''
 
-    // nameplate: team accent border, status dot, name
+    // nameplate: team accent border, status dot, full first name
     sprites.set(
       `${meta.id}|name`,
-      pillPlate(shortName(meta.name, mode), {
-        bg: offline ? PALETTE.navy800 : PALETTE.navy900,
-        border: offline ? PALETTE.navy600 : teamAccent(meta.team),
-        ink: offline ? PALETTE.muted : PALETTE.ink,
-        dot,
-        hollowDot: agent?.status === 'idle' && !offline,
-        hollow: offline,
-      }),
+      pillPlate(
+        shortName(meta.name),
+        {
+          bg: offline ? PALETTE.navy800 : PALETTE.navy900,
+          border: offline ? PALETTE.navy600 : teamAccent(meta.team),
+          ink: offline ? PALETTE.muted : PALETTE.ink,
+          dot,
+          hollowDot: agent?.status === 'idle' && !offline,
+          hollow: offline,
+        },
+        scale,
+      ),
     )
     if (chip) {
       sprites.set(
         `${meta.id}|chip`,
-        pillPlate(chip, {
-          bg: pose.blocked ? STATUS.blocked : PALETTE.navy800,
-          border: pose.blocked ? PALETTE.navy900 : pose.magnifier ? STATUS.reviewing : PALETTE.navy600,
-          ink: pose.blocked ? EXTRAS.inkOnTerra : pose.magnifier ? STATUS.reviewing : PALETTE.inkDim,
-        }),
+        pillPlate(
+          chip,
+          {
+            bg: pose.blocked ? STATUS.blocked : PALETTE.navy800,
+            border: pose.blocked ? PALETTE.navy900 : pose.magnifier ? STATUS.reviewing : PALETTE.navy600,
+            ink: pose.blocked ? EXTRAS.inkOnTerra : pose.magnifier ? STATUS.reviewing : PALETTE.inkDim,
+          },
+          scale,
+        ),
       )
     }
     if (counters) {
       sprites.set(
         `${meta.id}|counters`,
-        pillPlate(counters, { bg: PALETTE.navy900, border: PALETTE.navy700, ink: PALETTE.inkDim }),
+        pillPlate(counters, { bg: PALETTE.navy900, border: PALETTE.navy700, ink: PALETTE.inkDim }, scale),
       )
     }
     if (offline && mode !== 'compact') {
-      sprites.set(`${meta.id}|zzz`, pillPlate('Z Z Z', { bg: PALETTE.navy800, border: PALETTE.muted, ink: PALETTE.muted }))
+      sprites.set(
+        `${meta.id}|zzz`,
+        pillPlate('Z Z Z', { bg: PALETTE.navy800, border: PALETTE.muted, ink: PALETTE.muted }, scale),
+      )
     }
-    if (bubble) sprites.set(`${meta.id}|bubble`, bubblePlate(bubble))
+    if (bubble) sprites.set(`${meta.id}|bubble`, bubblePlate(bubble, scale))
 
     labelAgents.push({
       id: meta.id,
@@ -562,9 +576,9 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     })
   }
 
-  stacks.push(...buildStacks(labelAgents, mode))
+  stacks.push(...buildStacks(labelAgents, mode, scale))
 
-  const placed = placeStacks(stacks, { w: cssW, h: cssH }, reserved)
+  const placed = placeStacks(stacks, { w: cssW, h: cssH }, reserved, scale)
   for (const p of placed) {
     const spr = sprites.get(`${p.id}|${p.key}`)
     if (spr) blitLabel(spr, p.x, p.y)
