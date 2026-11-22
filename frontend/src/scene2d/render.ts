@@ -1,24 +1,43 @@
 /**
- * The 2D office painter: a prerendered static layer (floor zones, walls, door
- * labels, decorative furniture) plus a per-frame dynamic layer (desks whose
- * monitor reflects live activity, chairs, agents, nameplates, status chips and
- * speech bubbles).
+ * The 2D office painter: a prerendered static layer (floor zones, walls,
+ * decorative furniture) plus a per-frame dynamic layer (desks whose monitor
+ * reflects live activity, chairs, agents, nameplates, status chips and speech
+ * bubbles).
  *
- * Everything is drawn at zoom-1 pixel scale into cached offscreen canvases and
- * blitted with an integer factor, so every pixel stays nearest-neighbour crisp
- * on any DPR. No text goes through `fillText` per frame — plates are cached
- * offscreen and invalidated only when their contents change.
+ * Two coordinate spaces, on purpose:
+ *  - the world is drawn at zoom-1 pixels and blitted with an integer factor, so
+ *    every sprite stays nearest-neighbour crisp on any DPR;
+ *  - labels are laid out in CSS pixels (`labels.ts`) so a nameplate keeps the
+ *    same readable size at every zoom and never grows wider than its desk slot.
+ *
+ * No text goes through `fillText`: plates are cached offscreen and invalidated
+ * only when their contents change.
  */
 import type { AgentMeta } from '../lib/agents'
 import type { Agent, Comm } from '../lib/types'
 import { deskObstacle } from '../lib/layout'
-import { DESK_EXIT, DOORS, FLOOR, OBSTACLES, POIS, WALLS } from '../lib/rooms'
+import { DESK_EXIT, FLOOR, OBSTACLES, POIS, WALLS } from '../lib/rooms'
 import { hashId, rosterAgents } from '../lib/roster'
 import { onward, seatPoint } from '../lib/routes'
 import type { Pt } from '../lib/nav'
 import { poseFor, blockedChipText, type Pose } from './anim'
+import {
+  PLATE_H,
+  PLATE_PAD,
+  WORLD_LABELS,
+  buildStacks,
+  placeStacks,
+  plateMode,
+  plateWidth,
+  plaqueRect,
+  shortName,
+  type LabelAgent,
+  type PlateMode,
+  type Rect,
+  type Stack,
+} from './labels'
 import { EXTRAS, PALETTE, SCREEN, STATUS } from './palette'
-import { drawText, textWidth } from './pixelfont'
+import { drawText } from './pixelfont'
 import { getSprite, type Sprite } from './sprites'
 import {
   CHIBI_W,
@@ -36,7 +55,7 @@ export type MonitorMode = 'terminal' | 'doc' | 'browser' | 'diff' | 'idle' | 'of
 // ------------------------------------------------------------------- layers
 
 const WALL_PX = 6 // thick cutaway wall band at 16 px/tile (design: 12 px @ 32)
-const CHAIR_PX = 8
+const CHAIR_PX = 10
 
 /** Which zone a floor tile belongs to: lobby z>=2, dev x<0, edu x>=0. */
 function zoneAt(tx: number, tz: number): 'lobby' | 'dev' | 'edu' {
@@ -44,22 +63,21 @@ function zoneAt(tx: number, tz: number): 'lobby' | 'dev' | 'edu' {
   return tx < 14 ? 'dev' : 'edu' // world x < 0
 }
 
-function floorColor(tx: number, tz: number, zone: 'lobby' | 'dev' | 'edu', edge: boolean): string {
-  if (edge) return PALETTE.sand300
-  if (zone === 'lobby') return (tx + tz) % 2 === 0 ? '#C4602C' : '#E07B3E'
-  return '#1F2A42' // dev plank; edu bamboo overridden below
-}
-
 function drawFloor(ctx: CanvasRenderingContext2D): void {
   for (let tz = 0; tz < FLOOR.d; tz++) {
     for (let tx = 0; tx < FLOOR.w; tx++) {
       const zone = zoneAt(tx, tz)
-      const edge = zone === 'lobby' && tz === 12
-      let c = floorColor(tx, tz, zone, edge)
-      if (zone === 'edu') c = '#D9B36B'
-      if (zone === 'dev' && tz === 0) c = '#1F2A42'
+      let c: string
+      if (zone === 'lobby') c = (tx + tz) % 2 === 0 ? '#C4602C' : '#E07B3E'
+      else if (zone === 'edu') c = '#D9B36B'
+      else c = '#1F2A42'
       ctx.fillStyle = c
       ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
+      if (zone === 'lobby' && tz === 12) {
+        // sand strip marking the Pendopo edge along the partition
+        ctx.fillStyle = PALETTE.sand300
+        ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
+      }
       // dev plank seam every tile row + amber duct along the north wall
       if (zone === 'dev') {
         ctx.fillStyle = '#16203A'
@@ -79,9 +97,6 @@ function drawFloor(ctx: CanvasRenderingContext2D): void {
             ctx.fillRect(tx * TILE + k, tz * TILE + k, 2, 2)
           }
         }
-      } else if (zone === 'lobby' && tz === 12) {
-        ctx.fillStyle = PALETTE.sand300
-        ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
       }
     }
   }
@@ -119,28 +134,6 @@ function drawWalls(ctx: CanvasRenderingContext2D): void {
   }
 }
 
-function drawDoorLabels(ctx: CanvasRenderingContext2D): void {
-  for (const door of DOORS) {
-    if (!door.label) continue
-    const px = (door.x + FLOOR.w / 2) * TILE
-    const py = (door.z + FLOOR.d / 2) * TILE
-    // plaque just north of a horizontal doorway (rot 0)
-    const labelW = textWidth(door.label, 1)
-    const w = labelW + 4
-    const h = 9
-    const x = Math.round(px - w / 2)
-    const y = Math.round(py - WALL_PX / 2 - h - 1)
-    ctx.fillStyle = PALETTE.navy800
-    ctx.fillRect(x, y, w, h)
-    ctx.fillStyle = PALETTE.navy600
-    ctx.fillRect(x, y, w, 1)
-    ctx.fillRect(x, y, 1, h)
-    ctx.fillRect(x + w - 1, y, 1, h)
-    ctx.fillRect(x, y + h - 1, w, 1)
-    drawText(ctx, door.label, x + 2, y + 1, 1, PALETTE.ink)
-  }
-}
-
 function drawFurnitureLayer(ctx: CanvasRenderingContext2D): void {
   for (const o of OBSTACLES) {
     if (o.id.startsWith('desk-')) continue // desks are drawn dynamically
@@ -164,18 +157,11 @@ export function createStaticLayer(): HTMLCanvasElement {
   ctx.imageSmoothingEnabled = false
   drawFloor(ctx)
   drawWalls(ctx)
-  drawDoorLabels(ctx)
   drawFurnitureLayer(ctx)
   return canvas
 }
 
 // ------------------------------------------------------------------- plates
-
-/** The in-world pixel font scale: 2 when zoomed out to the whole floor (zoom 1),
- *  1 otherwise, so names stay legible on a phone without ever blurring. */
-export function glyphScale(zoom: number): number {
-  return zoom === 1 ? 2 : 1
-}
 
 const OFFLINE_POSE: Pose = {
   kind: 'offline',
@@ -193,7 +179,6 @@ function monitorMode(pose: Pose): MonitorMode {
   if (pose.magnifier) return 'diff'
   if (pose.kind === 'typing') return 'terminal'
   if (pose.kind === 'reading') return pose.tool === 'web_extract' || pose.tool === 'web_search' ? 'browser' : 'doc'
-  if (pose.kind === 'walk') return 'idle'
   return 'idle'
 }
 
@@ -210,38 +195,54 @@ interface PlateOpts {
   ink: string
   /** filled status dot on the left edge */
   dot?: string
+  /** idle: the dot is a ring, not a disc — a shape cue, not only a colour */
   hollowDot?: boolean
+  /** offline: 1 px border, no fill — a hollow plate reads as "empty desk" */
+  hollow?: boolean
 }
 
-function pillPlate(text: string, g: number, opts: PlateOpts): Sprite {
-  const tw = textWidth(text, g)
-  const dot = opts.dot ? 4 * g + 2 * g : 0
-  const w = tw + dot + 4 * g
-  const h = 7 * g + 2 * g
-  const key = `pill:${text}:${g}:${opts.bg}:${opts.border}:${opts.ink}:${opts.dot ?? ''}:${opts.hollowDot ? 1 : 0}`
+/** A nameplate/chip plate, drawn at pixel-font scale 1 (CSS px). */
+function pillPlate(text: string, opts: PlateOpts): Sprite {
+  const w = plateWidth(text, { dot: Boolean(opts.dot) })
+  const h = PLATE_H
+  const dotW = opts.dot ? 6 : 0
+  const key = `pill:${text}:${opts.bg}:${opts.border}:${opts.ink}:${opts.dot ?? ''}:${opts.hollowDot ? 1 : 0}:${opts.hollow ? 1 : 0}`
   return getSprite(key, w, h, (ctx) => {
-    ctx.fillStyle = opts.border
-    ctx.fillRect(0, 0, w, h)
-    ctx.fillStyle = opts.bg
-    ctx.fillRect(g, g, w - 2 * g, h - 2 * g)
+    if (opts.hollow) {
+      ctx.fillStyle = opts.bg
+      ctx.fillRect(0, 0, w, h)
+      ctx.fillStyle = opts.border
+      ctx.fillRect(0, 0, w, 1)
+      ctx.fillRect(0, h - 1, w, 1)
+      ctx.fillRect(0, 0, 1, h)
+      ctx.fillRect(w - 1, 0, 1, h)
+    } else {
+      ctx.fillStyle = opts.border
+      ctx.fillRect(0, 0, w, h)
+      ctx.fillStyle = opts.bg
+      ctx.fillRect(1, 1, w - 2, h - 2)
+    }
     if (opts.dot) {
-      const ds = 4 * g
+      const ds = 4
+      const dy = Math.round((h - ds) / 2)
       ctx.fillStyle = opts.dot
-      ctx.fillRect(2 * g, (h - ds) / 2, ds, ds)
       if (opts.hollowDot) {
-        ctx.fillStyle = opts.bg
-        ctx.fillRect(2 * g + g, (h - ds) / 2 + g, 2 * g, 2 * g)
+        ctx.fillRect(PLATE_PAD, dy, ds, 1)
+        ctx.fillRect(PLATE_PAD, dy + ds - 1, ds, 1)
+        ctx.fillRect(PLATE_PAD, dy, 1, ds)
+        ctx.fillRect(PLATE_PAD + ds - 1, dy, 1, ds)
+      } else {
+        ctx.fillRect(PLATE_PAD, dy, ds, ds)
       }
     }
-    drawText(ctx, text, 2 * g + dot, g, g, opts.ink)
+    drawText(ctx, text, PLATE_PAD + dotW, PLATE_PAD, 1, opts.ink)
   })
 }
 
-function bubblePlate(text: string, g: number): Sprite {
-  const tw = textWidth(text, g)
-  const w = tw + 4 * g
-  const h = 7 * g + 4 * g
-  const key = `bubble:${text}:${g}`
+function bubblePlate(text: string): Sprite {
+  const w = plateWidth(text) + 2
+  const h = PLATE_H + 3
+  const key = `bubble:${text}`
   return getSprite(key, w, h, (ctx) => {
     ctx.fillStyle = PALETTE.sand200
     ctx.fillRect(0, 0, w, h)
@@ -250,9 +251,29 @@ function bubblePlate(text: string, g: number): Sprite {
     ctx.fillRect(0, h - 1, w, 1)
     ctx.fillRect(0, 0, 1, h)
     ctx.fillRect(w - 1, 0, 1, h)
-    // tail
-    ctx.fillRect(Math.floor(w / 2) - g, h - 1, 2 * g, g)
-    drawText(ctx, text, 2 * g, 2 * g, g, SCREEN.bubbleInk)
+    // tail, pointing down at the head
+    ctx.fillStyle = PALETTE.sand200
+    ctx.fillRect(Math.floor(w / 2) - 1, h - 1, 3, 2)
+    ctx.fillStyle = PALETTE.navy600
+    ctx.fillRect(Math.floor(w / 2) - 1, h, 3, 1)
+    drawText(ctx, text, PLATE_PAD, PLATE_PAD + 1, 1, SCREEN.bubbleInk)
+  })
+}
+
+/** The zone plaque: navy plate, accent-free, always the same size on screen. */
+function plaquePlate(text: string): Sprite {
+  const w = plaqueRect(text, 0, 0).w
+  const h = plaqueRect(text, 0, 0).h
+  const key = `plaque:${text}`
+  return getSprite(key, w, h, (ctx) => {
+    ctx.fillStyle = PALETTE.navy800
+    ctx.fillRect(0, 0, w, h)
+    ctx.fillStyle = PALETTE.navy600
+    ctx.fillRect(0, 0, w, 1)
+    ctx.fillRect(0, h - 1, w, 1)
+    ctx.fillRect(0, 0, 1, h)
+    ctx.fillRect(w - 1, 0, 1, h)
+    drawText(ctx, text, PLATE_PAD, PLATE_PAD - 1, 1, PALETTE.muted)
   })
 }
 
@@ -350,33 +371,56 @@ export interface RenderInput {
 
 /** Paint one full frame into a canvas whose backing store is already sized. */
 export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void {
-  const s = blitScale(r.vp.zoom, r.dpr)
+  const s = blitScale(r.vp.zoom, r.dpr) // backing px per world px
+  const k = s / r.dpr // CSS px per world px
+  const dpr = r.dpr
+  const cssW = ctx.canvas.width / dpr
+  const cssH = ctx.canvas.height / dpr
+
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.imageSmoothingEnabled = false
   ctx.fillStyle = EXTRAS.bg
   ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height)
 
   const centre = worldToPixel(r.vp.x, r.vp.z)
-  const ox = ctx.canvas.width / 2 - centre.x * s
-  const oy = ctx.canvas.height / 2 - centre.y * s
-  const toDev = (x: number, z: number) => {
+  const ox = cssW / 2 - centre.x * k
+  const oy = cssH / 2 - centre.y * k
+  /** world → CSS px */
+  const toCss = (x: number, z: number) => {
     const p = worldToPixel(x, z)
-    return { x: ox + p.x * s, y: oy + p.y * s }
+    return { x: ox + p.x * k, y: oy + p.y * k }
   }
-  const blit = (spr: Sprite, dx: number, dy: number) => {
-    ctx.drawImage(spr.canvas, Math.round(dx), Math.round(dy), spr.w * s, spr.h * s)
+  /** blit a zoom-1 world sprite at a CSS position */
+  const blitWorld = (spr: Sprite, cx: number, cy: number) => {
+    ctx.drawImage(
+      spr.canvas,
+      Math.round(cx * dpr),
+      Math.round(cy * dpr),
+      Math.round(spr.w * s),
+      Math.round(spr.h * s),
+    )
+  }
+  /** blit a 1× CSS sprite (a label plate) at a CSS position */
+  const blitLabel = (spr: Sprite, cx: number, cy: number) => {
+    ctx.drawImage(
+      spr.canvas,
+      Math.round(cx * dpr),
+      Math.round(cy * dpr),
+      Math.round(spr.w * dpr),
+      Math.round(spr.h * dpr),
+    )
   }
 
-  // stone batur platform framing the floor — a quiet exterior hint at zoom 1
-  const tl = toDev(-FLOOR.w / 2, -FLOOR.d / 2)
+  // stone batur platform framing the floor — a quiet exterior hint
+  const tl = toCss(-FLOOR.w / 2, -FLOOR.d / 2)
   ctx.fillStyle = '#1f3123'
-  ctx.fillRect(Math.round(tl.x - 4 * s), Math.round(tl.y - 4 * s), WORLD_W * s + 8 * s, WORLD_H * s + 8 * s)
+  ctx.fillRect(Math.round(tl.x - 4 * k) * dpr, Math.round(tl.y - 4 * k) * dpr, Math.round((WORLD_W + 8) * k) * dpr, Math.round((WORLD_H + 8) * k) * dpr)
   ctx.fillStyle = PALETTE.terra600
-  ctx.fillRect(Math.round(tl.x - 2 * s), Math.round(tl.y - 2 * s), WORLD_W * s + 4 * s, WORLD_H * s + 4 * s)
+  ctx.fillRect(Math.round(tl.x - 2 * k) * dpr, Math.round(tl.y - 2 * k) * dpr, Math.round((WORLD_W + 4) * k) * dpr, Math.round((WORLD_H + 4) * k) * dpr)
 
-  blit({ canvas: r.static, w: WORLD_W, h: WORLD_H }, tl.x, tl.y)
+  blitWorld({ canvas: r.static, w: WORLD_W, h: WORLD_H }, tl.x, tl.y)
 
-  const g = glyphScale(r.vp.zoom)
+  const mode = plateMode(r.vp.zoom)
 
   // desks + chairs, z-sorted (south last) so back rows sit behind front rows
   const deskOrder = [...r.metas].sort((a, b) => a.desk.z - b.desk.z)
@@ -384,18 +428,27 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     const agent = r.byId.get(meta.id)
     const pose = agent ? poseFor(agent, r.now, r.comms) : OFFLINE_POSE
     const foot = deskObstacle(meta.desk, meta.id)
-    const dx = toDev(foot.x1, foot.z1)
+    const dx = toCss(foot.x1, foot.z1)
     const dw = Math.max(1, Math.round((foot.x2 - foot.x1) * TILE))
     const dh = Math.max(1, Math.round((foot.z2 - foot.z1) * TILE))
-    const mode = monitorMode(pose)
-    const desk = getSprite(`desk:${dw}x${dh}:${mode}`, dw, dh, (c) => drawDesk(c, dw, dh, mode))
-    blit(desk, dx.x, dx.y)
+    const mon = monitorMode(pose)
+    const desk = getSprite(`desk:${dw}x${dh}:${mon}`, dw, dh, (c) => drawDesk(c, dw, dh, mon))
+    blitWorld(desk, dx.x, dx.y)
     const seat = seatPoint(meta)
-    const sd = toDev(seat[0], seat[1])
-    blit(getSprite(`chair:${CHAIR_PX}`, CHAIR_PX, CHAIR_PX, (c) => drawChair(c, CHAIR_PX)), sd.x - (CHAIR_PX / 2) * s, sd.y - (CHAIR_PX / 2) * s)
+    const sd = toCss(seat[0], seat[1])
+    const chair = getSprite(`chair:${CHAIR_PX}:${pose.offline ? 'empty' : 'taken'}`, CHAIR_PX, CHAIR_PX, (c) =>
+      drawChair(c, CHAIR_PX, !pose.offline),
+    )
+    blitWorld(chair, sd.x - (CHAIR_PX / 2) * k, sd.y - (CHAIR_PX / 2) * k)
     if (pose.offline) {
-      ctx.fillStyle = 'rgba(16, 24, 40, 0.45)'
-      ctx.fillRect(Math.round(dx.x), Math.round(dx.y), dw * s, dh * s)
+      // dim the abandoned station — the second, colour-free cue is the empty chair
+      ctx.fillStyle = 'rgba(16, 24, 40, 0.35)'
+      ctx.fillRect(
+        Math.round(dx.x * dpr),
+        Math.round(dx.y * dpr),
+        Math.round(dw * s),
+        Math.round(dh * s),
+      )
     }
   }
 
@@ -418,66 +471,104 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     .sort((a, b) => a.z - b.z)
 
   for (const item of order) {
-    const { meta, agent, pose, walking } = item
-    const head = toDev(item.x, item.z)
-    const status = agent?.status ?? 'offline'
-    const accent = (status === 'offline' ? PALETTE.muted : undefined) ?? teamAccent(meta.team)
-    const dim = pose.offline || r.stale
+    const { meta, pose, walking } = item
+    if (pose.offline) continue // the empty chair already tells the story
+    const head = toCss(item.x, item.z)
+    const frame =
+      walking
+        ? Math.floor(r.t * 6) % 4
+        : pose.kind === 'idle' || pose.kind === 'relax'
+          ? Math.floor(r.t * 1.5) % 2
+          : pose.kind === 'typing'
+            ? Math.floor(r.t * 4) % 2
+            : 0
+    const spr = agentSprite(meta.look, pose.kind, frame)
+    blitWorld(spr, head.x - (CHIBI_W / 2) * k, head.y - CHIBI_H * k)
+  }
 
-    // agent sprite (offline = empty chair, no chibi)
-    if (!pose.offline) {
-      const frame = walking ? Math.floor(r.t * 6) % 4 : pose.kind === 'idle' || pose.kind === 'relax' ? Math.floor(r.t * 1.5) % 2 : pose.kind === 'typing' ? Math.floor(r.t * 4) % 2 : 0
-      const spr = agentSprite(meta.look, pose.kind, frame)
-      blit(spr, head.x - (CHIBI_W / 2) * s, head.y - CHIBI_H * s)
-    }
+  // ------------------------------------------------------------- labels
+  // Laid out in CSS px (never scaled by the zoom) so 13 nameplates stay
+  // readable and inside their desk slot at every zoom level.
+  const reserved: Rect[] = []
+  for (const zl of WORLD_LABELS) {
+    const c = toCss(zl.x, zl.z)
+    const spr = plaquePlate(zl.text)
+    const rect = plaqueRect(zl.text, c.x, c.y)
+    const x = Math.min(Math.max(rect.x, 1), Math.max(1, cssW - rect.w - 1))
+    blitLabel(spr, x, rect.y)
+    reserved.push({ x, y: rect.y, w: rect.w, h: rect.h })
+  }
 
-    // vertical stack above the head: bubble, status chip, nameplate, counters
-    let aboveY = head.y - CHIBI_H * s - 2 * s
+  const stacks: Stack[] = []
+  const labelAgents: LabelAgent[] = []
+  const sprites = new Map<string, Sprite>()
 
-    // speech bubble while busy / blocked
-    if (pose.blocked || pose.kind === 'typing' || pose.kind === 'reading' || pose.kind === 'working') {
-      const dots = pose.blocked ? '!' : dotsFrame(r.t)
-      const bubble = bubblePlate(dots, g)
-      blit(bubble, head.x - (bubble.w * s) / 2, aboveY - bubble.h * s)
-      aboveY -= bubble.h * s + 2 * s
-    }
-
-    // status chip: blocked / reviewing / tool
-    const chipText = statusChip(agent, pose)
-    if (chipText) {
-      const chipOpts = pose.blocked
-        ? { bg: STATUS.blocked, border: PALETTE.navy900, ink: EXTRAS.inkOnTerra }
-        : pose.magnifier
-          ? { bg: PALETTE.navy800, border: STATUS.reviewing, ink: STATUS.reviewing }
-          : { bg: PALETTE.navy800, border: PALETTE.navy600, ink: PALETTE.inkDim }
-      const chip = pillPlate(chipText, g, chipOpts)
-      blit(chip, head.x - (chip.w * s) / 2, aboveY - chip.h * s)
-      aboveY -= chip.h * s + 1 * s
-    }
+  for (const item of order) {
+    const { meta, agent, pose } = item
+    const head = toCss(item.x, item.z)
+    const offline = pose.offline
+    const dot = mode === 'compact' ? undefined : statusColor(agent, pose)
+    const bubble =
+      mode !== 'compact' && !offline && (pose.blocked || pose.kind === 'typing' || pose.kind === 'reading' || pose.kind === 'working')
+        ? pose.blocked
+          ? '!'
+          : dotsFrame(r.t)
+        : ''
+    const chip = mode === 'compact' ? '' : statusChip(agent, pose)
+    const counters = mode === 'detail' && !offline ? countersLine(agent) : ''
 
     // nameplate: team accent border, status dot, name
-    const name = pillPlate(meta.name, g, {
-      bg: dim ? PALETTE.navy800 : PALETTE.navy900,
-      border: accent,
-      ink: dim ? PALETTE.muted : PALETTE.ink,
-      dot: statusColor(agent, pose),
-      hollowDot: status === 'idle',
+    sprites.set(
+      `${meta.id}|name`,
+      pillPlate(shortName(meta.name, mode), {
+        bg: offline ? PALETTE.navy800 : PALETTE.navy900,
+        border: offline ? PALETTE.navy600 : teamAccent(meta.team),
+        ink: offline ? PALETTE.muted : PALETTE.ink,
+        dot,
+        hollowDot: agent?.status === 'idle' && !offline,
+        hollow: offline,
+      }),
+    )
+    if (chip) {
+      sprites.set(
+        `${meta.id}|chip`,
+        pillPlate(chip, {
+          bg: pose.blocked ? STATUS.blocked : PALETTE.navy800,
+          border: pose.blocked ? PALETTE.navy900 : pose.magnifier ? STATUS.reviewing : PALETTE.navy600,
+          ink: pose.blocked ? EXTRAS.inkOnTerra : pose.magnifier ? STATUS.reviewing : PALETTE.inkDim,
+        }),
+      )
+    }
+    if (counters) {
+      sprites.set(
+        `${meta.id}|counters`,
+        pillPlate(counters, { bg: PALETTE.navy900, border: PALETTE.navy700, ink: PALETTE.inkDim }),
+      )
+    }
+    if (offline && mode !== 'compact') {
+      sprites.set(`${meta.id}|zzz`, pillPlate('Z Z Z', { bg: PALETTE.navy800, border: PALETTE.muted, ink: PALETTE.muted }))
+    }
+    if (bubble) sprites.set(`${meta.id}|bubble`, bubblePlate(bubble))
+
+    labelAgents.push({
+      id: meta.id,
+      name: meta.name,
+      cx: head.x,
+      topY: head.y - CHIBI_H * k,
+      offline,
+      chip,
+      bubble,
+      counters,
+      dot,
     })
-    blit(name, head.x - (name.w * s) / 2, aboveY - name.h * s)
-    aboveY -= name.h * s + 1 * s
+  }
 
-    // counters + task id, one dim line (privacy: task id only, never the title)
-    const counter = countersLine(agent, pose)
-    if (counter) {
-      const cpl = pillPlate(counter, g, { bg: PALETTE.navy900, border: PALETTE.navy700, ink: dim ? PALETTE.muted : PALETTE.inkDim })
-      blit(cpl, head.x - (cpl.w * s) / 2, aboveY - cpl.h * s)
-      aboveY -= cpl.h * s
-    }
+  stacks.push(...buildStacks(labelAgents, mode))
 
-    if (pose.offline) {
-      const zzz = pillPlate('Z Z Z', g, { bg: PALETTE.navy800, border: PALETTE.muted, ink: PALETTE.muted })
-      blit(zzz, head.x - (zzz.w * s) / 2, aboveY - zzz.h * s)
-    }
+  const placed = placeStacks(stacks, { w: cssW, h: cssH }, reserved)
+  for (const p of placed) {
+    const spr = sprites.get(`${p.id}|${p.key}`)
+    if (spr) blitLabel(spr, p.x, p.y)
   }
 
   // comms envelopes: a quick paper-plane hop from sender to recipient
@@ -489,12 +580,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     if (!from || !to) continue
     const fp = seatPoint(from)
     const tp = seatPoint(to)
-    const k = age / 1.5
-    const x = fp[0] + (tp[0] - fp[0]) * k
-    const z = fp[1] + (tp[1] - fp[1]) * k - Math.sin(k * Math.PI) * 0.6
-    const p = toDev(x, z)
+    const kk = age / 1.5
+    const x = fp[0] + (tp[0] - fp[0]) * kk
+    const z = fp[1] + (tp[1] - fp[1]) * kk - Math.sin(kk * Math.PI) * 0.6
+    const p = toCss(x, z)
     const env = getSprite('envelope', 10, 8, (c2) => drawEnvelope(c2))
-    blit(env, p.x - (env.w / 2) * s, p.y - (env.h / 2) * s)
+    blitWorld(env, p.x - (env.w / 2) * k, p.y - (env.h / 2) * k)
   }
 }
 
@@ -510,19 +601,22 @@ function dotsFrame(t: number): string {
 }
 
 function statusChip(agent: Agent | undefined, pose: Pose): string {
+  if (pose.offline) return 'offline'
   if (pose.blocked) return agent ? blockedChipText(agent) : 'butuh izin'
   if (pose.magnifier) return 'review'
   if (pose.kind === 'typing' || pose.kind === 'reading' || pose.kind === 'working') return pose.tool || 'kerja'
   if (pose.kind === 'walk') return 'delegasi'
+  if (pose.kind === 'idle' || pose.kind === 'relax') return 'idle'
   return ''
 }
 
-function countersLine(agent: Agent | undefined, pose: Pose): string {
-  if (!agent || pose.offline) return ''
+/** Counters only at zoom ≥3, where a detail plate has room for them. */
+function countersLine(agent: Agent | undefined): string {
+  if (!agent) return ''
   const m = agent.today?.messages ?? 0
   const t = agent.today?.tool_calls ?? 0
-  const task = agent.task ? `#${agent.task.slice(0, 8)}` : ''
-  const cnt = `${m}m ${t}t`
+  const task = agent.task ? `#${agent.task.slice(0, 6)}` : ''
+  const cnt = `${m}M ${t}T`
   return task ? `${cnt} ${task}` : cnt
 }
 
@@ -532,3 +626,6 @@ function countersLine(agent: Agent | undefined, pose: Pose): string {
 export function allMetas(): AgentMeta[] {
   return rosterAgents()
 }
+
+/** Re-exported for the headless checker. */
+export type { PlateMode }
