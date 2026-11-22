@@ -18,7 +18,8 @@
 ## 1. Prinsip
 
 1. **Kaca itu peran, bukan dekorasi.** Empat permukaan kaca di chrome (HUD, tab
-   lantai, roster, kontrol zoom) + **satu** partisi kaca di dalam scene. Sisanya solid.
+   lantai, roster, kontrol zoom) + **curtain wall** yang menjadi dinding belakang
+   ruangan (satu lembar, kota di baliknya). Sisanya solid.
 2. **Teks tidak pernah bergantung pada kaca.** Semua label (nameplate, chip status,
    nama di roster) duduk di atas permukaan alpha ≥ 0,90.
 3. **Kota memberi kedalaman, bukan perhatian.** Jendela kota alpha ≤ 0,65 dan selalu
@@ -150,111 +151,127 @@ Ambang: **teks 4,5:1** (karena kata status dicetak di roster), **dot/garis 3:1**
 
 Kanvas 1000×688 (HUD 56 px di atas, toolbar 56 px di bawah, sidebar 280 px).
 
-**Skala kamera adalah angka desain, bukan hasil bagi lebar.** Versi pertama
-memetakan span meja ke 960 px, dan itu persis bagaimana avatar 54 px berakhir di
-ruangan 286 px (1:5,3) — verdict bos: *"avatar terlihat kecil, sedangkan ruangnya
-tampak tinggi"*. Sekarang `SIDE_PPU = 140 px/unit` dipakai untuk **kedua sumbu**
-(tidak ada pemampatan anisotropik), dan seluruh angka di bawah turun dari situ:
+**Definisi tinggi ruangan — ini yang dua kali salah.** Angka pertama (54 px di
+ruangan 286 px) salah karena kamera memakai fit-to-width. Angka kedua (88 px di
+"ruangan" 308 px) benar secara aritmetika tapi **salah ukur**: yang diukur hanya
+lantai→soffit, sementara band skyline 252 px digambar **di atas plafon**, sehingga
+mata membaca lantai→puncak jendela ≈430–450 px dan rasionya ≈1:5,5–1:6, dengan
+separuh atas kanvas dikuasai langit. Verdict bos: *"avatar terlihat kecil, ruangnya
+tampak tinggi."*
+
+Aturan yang berlaku sekarang, dan tidak boleh ditafsirkan lain:
+
+> **Tinggi ruangan = lantai → plafon, TERMASUK band jendela.** Kota tidak lagi
+> punya band sendiri di atas plafon; ia terlihat **lewat curtain wall yang menjadi
+> dinding belakang ruangan**. Di atas plafon hanya ada slab + tepi atap ≤ 40 px.
+
+**Skala kamera adalah angka desain, bukan hasil bagi lebar.** `SIDE_PPU = 150
+px/unit` dipakai untuk **kedua sumbu** (tidak ada pemampatan anisotropik), dan
+seluruh angka di bawah turun dari situ:
 
 | Target | Angka | Terukur |
 |---|---|---|
-| Skala kamera | 140–160 px/unit | **140 px/unit** |
-| Tinggi avatar @ zoom 2 | 75–90 px | **88 px** (lane 2), 84 / 81 px (lane 1 / 0) |
-| Tinggi plafon | 2,2–2,5 unit | **2,2 unit = 308 px** lantai→soffit |
-| Rasio avatar:ruangan | 1:3–1:4 | **1:3,50** |
+| Skala kamera | 140–160 px/unit | **150 px/unit** |
+| Tinggi avatar @ zoom 2 | 135–180 px | **150 px** (baris depan), **141 px** (belakang ×0,94) |
+| Tinggi ruangan (lantai→plafon, termasuk jendela) | 520–560 px | **548 px** = 3,65 unit |
+| Rasio ruangan:avatar | 1:3–1:4 | **1:3,65** |
+| Band di atas plafon | ≤ 40 px | **40 px** (slab + coping + fascia) |
 
-| Band | Tinggi | Isi |
-|---|---|---|
-| Kota | **252 px** (dulu 310) | skyline + langit (lihat §6) |
-| Soffit | 26 px | **satu** cove cahaya menerus + **7 downlight** recessed (bukan 3 strip) |
-| Ruangan | **308 px** | lantai→soffit: dinding, papan, rak, partisi, meja, agen |
-| Floor finish | 80 px | garis lane, bayangan, meja |
-| Slab | 22 px | garis atas 1 px highlight |
+| Band | y | Tinggi | Isi |
+|---|---|---|---|
+| **Atap** | 0–40 | **40 px** | coping 8 px + tepi slab 18 px (hatch) + fascia 14 px. **Tidak ada langit di sini.** |
+| **Soffit** | 40–58 | 18 px | **satu** cove cahaya menerus + **7 downlight** recessed |
+| **Kaca (curtain wall)** | 58–543 | **485 px** | skyline kota: 1 lembar kaca alpha 0,18 + 3 mullion + 1 transom; mulai **0,30 unit di atas lantai** |
+| **Spandrel** | 543–588 | 45 px | dinding opak di bawah sill; plinth/shadow gap 566–588 |
+| **Ruangan** | 40–588 | **548 px** | **angka yang dipakai rasio**: lantai→plafon, jendela ikut dihitung |
+| **Floor plane** | 588–648 | 60 px | dua garis baris (596 / 640), meja, kaki kursi |
+| **Slab** | 648–688 | 40 px | garis atas 1 px highlight |
 
-252 + 26 + 308 + 80 + 22 = **688 px** (pas kanvas). Garis lantai per lane:
-**606 / 630 / 654 px** (lane belakang → depan).
+40 + 548 + 60 + 40 = **688 px** (pas kanvas). Garis lantai per baris:
+**596 px** (belakang) / **640 px** (depan).
 
 | Elemen | Ukuran | Catatan |
 |---|---|---|
-| Avatar | **88 px** tinggi (× skala lane: 81 / 84,5 / 88) | lihat §7 |
-| Meja (profil) | top **55 px** di atas garis lantai, tebal 10 px, 2 kaki 5 px | lebar 75 px; monitor **21×17 px** di cx+17 (bukan di depan wajah) |
-| Kursi | sandaran 39×49 px | di belakang agen |
-| Curtain wall | 1 lembar kaca menerus + **3 mullion** 3 px (4 teluk × 242 px) + 1 transom | jangan digambar per-pane: 10 pane ber-shadow = gambar ter-tile |
-| Partisi kaca | soffit → lantai (penuh) | resep §5.2 |
-| Nameplate | tinggi **21 px**, radius 10, font 10,5 | lihat §7.4 |
-| Slot agen | **≥ 86 px** antar pusat agen | §4.2 |
-| Kamera | **140 px/unit tetap**, koridor 1,95–4,30 unit dipotong jadi 0,35 unit | span elevasi 815 px; bukan fit-to-width |
-
+| Avatar | **150 px** tinggi (baris depan), **141 px** (belakang, ×0,94) | lihat §7 |
+| Meja (profil) | top **94 px** di atas garis lantai, tebal 17 px, lebar 128 px, 2 kaki 4 px | monitor **42×30 px** di cx+18 dengan stand 8 px — bukan di depan wajah |
+| Kursi | sandaran 67×84 px | di belakang agen; baris belakang satu tone lebih gelap |
+| Curtain wall | **1 lembar kaca menerus** 1000×485 px + **3 mullion** 3 px (4 teluk × 250 px) + 1 transom di 62 % | jangan digambar per-pane: 10 pane ber-shadow = gambar ter-tile |
+| Enam papan | tinggi **148 px** (≈1,0 × avatar), band y 132–280 | digantung di **rail** 124–132, **di depan kaca** |
+| Nameplate | tinggi **24 px**, radius 11, font 11,5 | lihat §7.4 |
+| Slot agen | **200 px** antar pusat agen sebaris; baris belakang digeser **100 px** | §4.1 |
+| Kamera | **150 px/unit tetap**, x dan y satu skala | bukan fit-to-width |
 
 **Kamera adalah potongan, bukan seluruh lantai.** L3 selebar 24 unit; kalau dipaksa
 masuk, hasilnya 41 px/unit dan agen bertabrakan. UI harus menyebut "potongan L3".
 
-### 4.1 Lane 2.5D (pemetaan `z` → kedalaman)
+### 4.1 Dua baris 4+4 (bukan satu baris delapan)
 
-| Lane | Skala | Offset y | Tinggi avatar | Arti |
+Delapan agen dalam satu baris tidak bisa mempertahankan slot yang terbaca pada
+ukuran avatar yang diterima bos: delapan slot × 200 px = 1400 px, lebih lebar dari
+kanvas. Karena itu agen dibagi **dua baris** menurut `z` asli `rooms.ts` — separuh
+terdekat menjadi baris depan, separuh terjauh menjadi baris belakang:
+
+| Baris | Skala | Garis lantai | Tinggi avatar | Agen (L3) |
 |---|---|---|---|---|
-| 0 | 0,92 | 0 px | 81 px | paling belakang (dekat jendela) |
-| 1 | 0,96 | +24 px | 84,5 px | tengah |
-| 2 | 1,00 | +48 px | 88 px | paling depan (dekat penonton) |
+| **Belakang** (jauh) | 0,94 | 596 px | 141 px | DIMAS, YOGA, SARI, WAHYU (z ≤ −0,78) |
+| **Depan** (dekat) | 1,00 | 640 px | 150 px | BIMA, BAGAS, RAKA, LARAS (z ≥ −0,39) |
 
-Aturan:
-1. lane awal dari ambang `z` per lantai;
-2. **resolver tabrakan**: dua agen dengan `x` sama (selisih < 0,25 unit) tidak boleh
-   satu lane — yang `z`-nya lebih jauh digeser satu lane ke belakang;
-3. urutan gambar: lane 0 → 2, lalu `x` naik; partisi kaca digambar sebelum furnitur
-   (ia duduk di belakang meja, jadi meja dan agen selalu menutupinya);
-4. `z` **tidak** lagi menjadi koordinat layar; ia hanya memilih lane + urutan.
+Aturan, dijalankan `side_rows()` + `side_slots()`:
 
-Bukti kenapa ini wajib: L3 punya tiga pasangan `x` identik (`coder`/`coder2` di
-−1,62; `planner`/`reviewer` di 0; `uiux`/`tester` di 1,62). Dengan elevasi murni
-satu agen dari tiap pasangan hilang.
+1. urutkan agen menurut `z` menurun; separuh pertama = baris depan;
+2. di dalam satu baris, urutan kiri→kanan tetap urutan `x` dunia `rooms.ts`
+   (jadi baris tidak pernah berbohong soal posisi ruangan);
+3. tiap baris memakai grid **200 px** per slot (4 slot = 600 px), baris belakang
+   digeser **setengah pitch (100 px)** sehingga kedua baris saling mengunci —
+   badan baris belakang terlihat di sela baris depan, bukan tertutup;
+4. grid digeser 30 px ke kiri dari tengah supaya rak server masih punya tempat;
+5. `z` **tidak** lagi menjadi koordinat layar; ia hanya memilih baris + urutan.
 
-### 4.2 Slot horizontal wajib (bukan hanya offset vertikal)
+Hasil terukur di L3 (8 agen):
 
-Lane saja **tidak cukup**: offset vertikal 24 px tidak memisahkan dua label selebar
-62 px yang pusatnya sama. Aturan tambahan, dijalankan `side_slots()`:
+| Baris | Slot x |
+|---|---|
+| Depan | BIMA **170** · BAGAS **370** · RAKA **570** · LARAS **770** |
+| Belakang | DIMAS **270** · YOGA **470** · SARI **670** · WAHYU **870** |
 
-1. urutkan agen menurut `cx` dunia (lalu `lane`) — urutan kiri→kanan tetap urutan
-   `rooms.ts`;
-2. tiap agen mendapat satu slot: pusat berikutnya minimal **86 px** (= label
-   terlebar 62 px + napas + lebar badan 53 px) dari pusat sebelumnya; pasangan yang
-   bertabrakan digeser ke kiri/kanan, bukan ditumpuk;
-3. bila pita melewati kanvas, seluruh pita digeser masuk lalu dinaikkan lagi bila
-   mentok — tidak ada agen yang boleh keluar dari margin 20 px.
+Jarak pusat minimum **200,0 px** sebaris dan **100,0 px** antar baris (aman: label
+terlebar 70 px, jadi dua label butuh ≥ 70 px; 100 px lolos dengan 30 px napas).
 
-Hasil terukur di L3 (8 agen): `BIMA 93 · DIMAS 261 · BAGAS 347 · YOGA 487 ·
-RAKA 573 · SARI 714 · LARAS 800 · WAHYU 907`, jarak pusat minimum **86,0 px**.
-Pola yang terbaca: baris belakang (DIMAS/YOGA/SARI, +24 px) menyela di antara
-baris depan (BIMA/BAGAS/RAKA/LARAS) — dua baris meja yang jelas, bukan satu baris
-datar.
+### 4.2 Dinding = kaca, papan digantung di depannya
 
-### 4.3 Dinding diisi informasi (bukan dibiarkan kosong)
-
-Separuh lain dari verdict bos: dinding di atas kepala hanya bidang kosong. Dinding
-sekarang punya program yang diukur, bukan dirasa — setiap band di bawah adalah rect
-yang dihitung `side_wall_gate()`:
+Dinding belakang sekarang **curtain wall**, jadi kota adalah isi dinding itu
+sendiri. Enam papan info tidak memenuhi dinding; mereka digantung pada satu rail di
+depan kaca, di zona atas, dan menyisakan kaca bersih tepat di belakang meja:
 
 | Band (y) | Isi | Tinggi |
 |---|---|---|
-| 252–278 | soffit: satu cove cahaya + **7 downlight** recessed | 26 px |
-| 300–314 | trunking kabel menerus + 7 junction box | 14 px |
-| 314–430 | **enam papan** yang saling menempel: plakat zona (L3 · TIM DEV), papan status (6/8 + 8 titik + 4 chip), pinboard + burndown A4, whiteboard arsitektur (L1/L2/L3/API, WIP 3), jam dinding (jarum ikut WIB tema), rak buku berangka | 116 px = 1,3 × avatar |
-| 430–490 | **rak panjang** menerus: buku, binder, kotak, tanaman, tumpukan kertas, foto berbingkai | 60 px |
-| 566–586 | plinth / shadow gap di kaki dinding | 20 px |
+| 40–58 | soffit: satu cove cahaya + **7 downlight** recessed | 18 px |
+| 58–124 | kaca bersih: langit + puncak menara | 66 px |
+| 124–132 | **rail** tempat papan digantung + 6 bracket | 8 px |
+| 132–280 | **enam papan** yang saling menempel: plakat zona (L3 · TIM DEV), papan status (6/8 + 8 titik + 4 chip), pinboard 9 catatan + burndown A4, whiteboard arsitektur (L1/L2/L3/API, WIP 3), jam dinding (jarum ikut WIB tema), rak buku berangka | **148 px ≈ 1,0 × avatar** |
+| 280–543 | **kaca bersih: kota tepat di belakang meja** | 263 px |
+| 543–588 | spandrel + plinth / shadow gap | 45 px |
 
 **Gate `side_wall_gate()`** (keras, dijalankan untuk L1/L2/L3):
 
 | Aturan | Hasil terukur L3 |
 |---|---|
-| area dinding+plafon kosong | **24,2 %** (batas 30 %) |
-| run kosong vertikal tertinggi (kolom 20 px) | **76 px = 24,7 %** tinggi ruangan (batas 30 %) |
+| area dinding kosong (bidang tanpa permukaan terancang) | **0,0 %** (batas 30 %) |
+| run kosong vertikal tertinggi (kolom 20 px) | **0 px = 0,0 %** tinggi ruangan (batas 30 %) |
 | kolom yang melewati batas | **0** |
+| kaca + kota (bagian dinding yang memperlihatkan skyline) | **88,5 %** |
+| panel terpasang | **27,0 %** |
 
-Kenapa dua baris (papan 116 px + rak 60 px), bukan satu papan 176 px: papan setinggi
-176 px terbaca sebagai kartu UI raksasa. Papan 116 px = **1,3 × avatar = 0,38 ×
-tinggi ruangan**, dan sisa 60 px diisi rak berisi objek — dinding terisi 236 dari
-308 px (76,6 %) tanpa ada satu pun elemen yang kelewat besar.
+Cara membaca angka "0,0 % kosong": **kaca dihitung sebagai permukaan terancang** —
+ia membawa kota, dan itulah inti perbaikan ini. Yang diukur gate adalah sisa bidang
+yang benar-benar telanjang (tidak ada kaca, tidak ada papan, tidak ada plinth,
+tidak ada furnitur). Angka pendampingnya yang lebih jujur untuk "apakah dinding
+terisi": **88,5 % dinding adalah jendela berisi kota, 27,0 % tertutup papan** —
+tidak ada satu pun strip vertikal setinggi ruangan yang dibiarkan kosong.
 
+Kenapa papan 148 px (≈1,0 × avatar) dan bukan papan 300 px: papan setinggi itu
+terbaca sebagai kartu UI raksasa dan menutup kota. 148 px = 0,27 × tinggi ruangan;
+kota tetap jadi latar utama di belakang meja.
 
 ## 5. Perlakuan kaca
 
@@ -266,7 +283,7 @@ tinggi ruangan**, dan sisa 60 px diisi rak berisi objek — dinding terisi 236 d
 | Tab lantai | `--surface-glass` | 12 px (aktif: tanpa blur) | 1 px (0,16 / 0,20) | atas 1 px (0,30 / 0,85) | 4 % |
 | Roster | `--surface-glass` @ 0,78 | 18 px | 1 px | atas 1 px | 4 % |
 | Zoom control | `--surface-glass` @ 0,80 | 12 px | 1 px | atas 1 px | 4 % |
-| Curtain wall (kanvas) | **satu** lembar alpha 0,20 | pre-render | mullion 3 px (×3) + 1 transom | 1 px atas | 3 % |
+| Curtain wall (kanvas) | **satu** lembar alpha **0,18** | pre-render | mullion 3 px (×3) + 1 transom | 1 px atas | 3 % |
 | Partisi kaca (kanvas) | alpha **0,42** | — (alpha bertingkat) | lihat §5.2 | sheen | 3 % |
 
 ### 5.2 Resep kaca di kanvas — parameter pasti
@@ -283,8 +300,10 @@ sebagai pintu/whiteboard, bukan kaca):
 | 5. Sheen diagonal | **2 px** putih pada **alpha 0,18**, dari **18 %** ke **62 %** lebar panel, kemiringan **~35°** (`dy = 0,70·dx`), di-clip ke panel |
 | 6. Refleksi lantai | strip **6 px** putih **alpha 0,30** yang memudar ke 0 |
 
-Pane curtain wall memakai isian **0,20** (bukan 0,42): pada 0,42 skyline malam
-padam dan jendela yang menyala hilang.
+Pane curtain wall memakai isian **0,18** (bukan 0,42): pada 0,42 skyline malam
+padam dan jendela yang menyala hilang. Sheen diagonalnya memakai kemiringan
+**0,16** (bukan 0,70): pada kaca setinggi 485 px, `dy = 0,70·dx` menghasilkan goresan
+300 px melintang seluruh jendela — terbaca sebagai cacat, bukan refleksi.
 
 ### 5.3 Larangan
 
@@ -297,15 +316,21 @@ padam dan jendela yang menyala hilang.
 
 ## 6. Band jendela kota (ikut tema)
 
+Kota **tidak lagi** punya band sendiri di atas plafon. Ia digambar di dalam
+bidang jendela (y 58–543) dan dibaca sebagai pemandangan di balik curtain wall:
+
 ```
-┌──────────────────────────────────────────────┐  ← 252 px (dulu 310)
+┌──────────────────────────────────────────────┐  ← 40 px  atap: coping + slab + fascia
+│▁▁▁▁▁▁▁▁▁ soffit 18 px · 7 downlight ▁▁▁▁▁▁▁▁▁│  ← 58 px  kepala jendela
 │ langit (gradien 4 stop, palet tema)          │
-│  ▁▂▃ bangunan jauh   (layer 0)               │
+│  ▁▂▃ bangunan jauh   (layer 0)               │  ← 124 px rail tempat papan
+│ [plakat][status][pinboard][arsitektur][jam]  │  ← 132–280 px enam papan
 │  ▂▄▆ bangunan tengah (layer 1)               │
-│  ▃▅▇ bangunan dekat  (layer 2)               │
+│  ▃▅▇ bangunan dekat  (layer 2)  ← mata agen  │
 │ veil (22 % malam / 8 % siang) + jendela      │
+│ haze jalan 30 px                             │  ← 543 px sill (0,30 unit di atas lantai)
 └──────────────────────────────────────────────┘
-   satu lembar kaca alpha 0,20 · mullion 3 px ×3 (4 teluk × 242 px) · 1 transom di 62 %
+   satu lembar kaca alpha 0,18 · mullion 3 px ×3 (4 teluk × 250 px) · 1 transom di 62 %
 ```
 
 | Aspek | Siang (Terang) | Malam (Gelap) |
@@ -334,7 +359,7 @@ Tiga aturan yang tidak boleh dilanggar, karena inilah yang dulu gagal:
 1. **Digambar pada ukuran akhir, bukan di-upscale.** Sprite dilukis pada permukaan
    **4× tinggi tampil** (`AV_SUPER = 4`), lalu diperkecil **satu kali** dengan
    `LANCZOS`. Tidak pernah ada `resize(..., NEAREST)` dan tidak pernah ada
-   pembesaran dari kanvas kecil. Di 88 px tampil, path dilukis di permukaan 352 px —
+   pembesaran dari kanvas kecil. Di 150 px tampil, path dilukis di permukaan 600 px —
    jadi outline 1 unit benar-benar stroke ±1 px, bukan tangga.
 2. **Satu satuan = 1/44 tinggi avatar**, jadi angka proporsi di §7.1 tidak
    bergantung pada ukuran tampil.
@@ -357,22 +382,23 @@ Tiga aturan yang tidak boleh dilanggar, karena inilah yang dulu gagal:
 
 Wajah (semua relatif ke pusat kepala `hcy = 10`):
 
-| Fitur | Posisi | Ukuran | Terbaca di 88 px |
+| Fitur | Posisi | Ukuran | Terbaca di 150 px |
 |---|---|---|---|
-| Alis | `hcy − 0,4` | 3,4 × 0,9 unit | ±1,8 px, **digambar di semua look** |
-| Mata | `hcy + 1,9`, x ±2,9 | sclera 2,7 × 3,0 + iris 1,7 + glint | ±5,4 px, jelas |
+| Alis | `hcy − 0,4` | 3,4 × 0,9 unit | ±3,1 px, **digambar di semua look** |
+| Mata | `hcy + 1,9`, x ±2,9 | sclera 2,7 × 3,0 + iris 1,7 + glint | ±9,2 px, jelas |
 | Hidung | `hcy + 2,9 … 4,6` | segitiga `shade(skin, 0,74)` | bayangan, bukan garis |
-| Mulut | `hcy + 3,9 … 6,9` | arc 12°–168°, stroke 1,1 unit | ±8 px, jelas |
+| Mulut | `hcy + 3,9 … 6,9` | arc 12°–168°, stroke 1,1 unit | ±12 px, jelas |
 
-Di layar: **88 px @ zoom 2** (sprite digambar pada permukaan 4× = 352 px, lalu
-diperkecil sekali dengan LANCZOS). Di view samping tinggi efektif = `88 px × skala
-lane` = **81 / 84,5 / 88 px** (lane 0/1/2).
+Di layar: **150 px @ zoom 2** (sprite digambar pada permukaan 4× = 600 px, lalu
+diperkecil sekali dengan LANCZOS). Di view samping tinggi efektif = `150 px × skala
+baris` = **150 px** (depan) / **141 px** (belakang).
 
-Kenapa 88 dan bukan 54: dengan kamera 140 px/unit, ruangan 2,2 unit = 308 px. Avatar
-88 px membuat rasio **1:3,50** — di dalam target 1:3–1:4 dan jauh dari 1:5,3 yang
-dibaca bos sebagai "avatar kecil, ruangan tinggi". Ukuran nameplate, meja, kursi dan
-monitor ikut naik (`SIDE_K = 88/54 = 1,63`), jadi proporsinya antar-elemen tidak
-berubah — yang berubah hanya skala relatif terhadap ruangan.
+Kenapa 150 dan bukan 88 atau 54: dengan kamera 150 px/unit dan **ruangan 548 px
+lantai→plafon (termasuk jendela)**, avatar 150 px memberi rasio **1:3,65**. Yang
+ditolak bos bukan angkanya di atas kertas, melainkan rasio yang **dirasakan** —
+karena itu band langit di atas plafon dihapus dan ruangan dibuat mengisi kanvas.
+Ukuran nameplate, meja, kursi dan monitor ikut naik (`SIDE_K = 150/54 = 2,78`), jadi
+proporsi antar-elemen tidak berubah — yang berubah skala relatif terhadap ruangan.
 
 ### 7.2 Dua tone + outline per material
 
@@ -385,7 +411,7 @@ const shade = (hex: string, k: number) => /* k<1 gelap, k>1 terang */
 ```
 
 Selain gradien, tiap material punya **satu bidang tone kedua yang keras** supaya
-beda tone terbaca di 88 px (gradien halus saja tidak cukup): panel samping kemeja
+beda tone terbaca di 150 px (gradien halus saja tidak cukup): panel samping kemeja
 `shade(shirt, 0.78)` alpha 150, pipi `shade(skin, 0.80)` alpha 105 yang di-clip ke
 mask kepala (tidak pernah meluber keluar siluet).
 
@@ -411,17 +437,17 @@ headphone), dihitung saat render oleh `render_mockups.py`.
 | `female` | mematikan stubble & mustache |
 
 Catatan penting: **jangan** menambahkan pita highlight ellips di atas tengkorak —
-di 88 px ia terbaca sebagai headband/helm, bukan rambut. Tone kedua rambut harus
-dari gradien massa rambut itu sendiri.
+ia terbaca sebagai headband/helm, bukan rambut. Tone kedua rambut harus dari gradien
+massa rambut itu sendiri.
 
 ### 7.4 Nameplate (aturan baru — selalu di atas kepala)
 
-- Tinggi **21 px**, radius 10, font 10,5 bold, isian `rgba(surface,0.92)`, border
+- Tinggi **24 px**, radius 11, font 11,5 bold, isian `rgba(surface,0.92)`, border
   1 px alpha 0,33.
 - Isi: penanda status (bentuk + warna, §3.1) + nama depan kapital.
-- **Selalu di atas kepala** dengan jarak tetap **7 px** dari atas kotak avatar
-  (terukur 7,0 px minimum di mockup).
-- Bila slot ideal sudah terpakai: naik **24 px** (tinggi + 3) per langkah, tetap di
+- **Selalu di atas kepala** dengan jarak tetap **8 px** dari atas kotak avatar
+  (terukur 8,0 px minimum di mockup).
+- Bila slot ideal sudah terpakai: naik **27 px** (tinggi + 3) per langkah, tetap di
   dalam bidang, dan **garis penghubung 1 px** digambar dari bawah plate ke kepala
   (border tema, alpha 55 %) supaya label tidak pernah terlihat "melayang".
 - **Gate keras** (`side_gate()`, dijalankan untuk L1/L2/L3 sebelum render), tiga
@@ -429,23 +455,25 @@ dari gradien massa rambut itu sendiri.
   1. **0** label yang menimpa label lain;
   2. **0** label yang menimpa kotak kepala agen **lain**;
   3. overlap bbox avatar vs avatar **≤ 20 %** dari yang lebih kecil (aturan yang
-     menangkap dua agen di lane + `x` yang sama).
-  Ditambah syarat jarak pusat agen **≥ 86 px**. Gate ini sudah berjalan di renderer
-  mockup; implementasi harus memakai gate yang sama.
-- Tinggi kepala di view samping: `floor_y − avatar_h × skala_lane`, bukan angka
+     menangkap dua agen di baris + `x` yang sama).
+  Ditambah syarat jarak pusat dua agen **sebaris ≥ 180 px** (terukur 200 px). Gate
+  ini sudah berjalan di renderer mockup; implementasi harus memakai gate yang sama.
+- Tinggi kepala di view samping: `floor_y − avatar_h × skala_baris`, bukan angka
   top-down.
 
 ### 7.5 Cache & ancor
 
 ```ts
 const key = `avatar:${hashLook(look)}:${pose}:${frame}:${dprBucket}`
-// gambar sekali ke offscreen 53×88 × dprBucket, lalu drawImage
+// gambar sekali ke offscreen 90×150 × dprBucket, lalu drawImage
 ```
 
-- Ancor kaki: `(cx, floorY_lane)`; `pickTargets` tetap memakai koordinat dunia.
+- Ancor kaki: `(cx, floorY_baris)`; `pickTargets` tetap memakai koordinat dunia.
 - Cache maksimum 312 entri; LRU 64.
-- Bangun 8 avatar @88 px ≈ 40 ms sekali (skala kuadratik dari 54 px); blit 8
-  sprite ≈ 0,06 ms/frame — biaya build tidak per frame.
+- Bangun 8 avatar @150 px belum diukur ulang di browser; biayanya naik ±2,9× luas
+  88 px (skala kuadratik terhadap tinggi). Blit 8 sprite tetap ≈ 0,06 ms/frame —
+  biaya build tidak per frame, dan itulah alasan sprite harus di-cache, bukan
+  digambar di dalam loop render.
 
 ### 7.6 Bukti terukur (dari `render_mockups.py`, bukan klaim)
 
@@ -454,12 +482,14 @@ dan menulis `docs/design/mockups/avatar-zoom-check.png` (crop 4×):
 
 | Metrik | Nilai terukur | Ambang | Arti |
 |---|---|---|---|
-| Tinggi avatar di mockup | **88 px** (lane 2), 84 px (lane 1), 81 px (lane 0) | 75–90 px | ukuran tampil akhir |
-| Rasio avatar:ruangan | **1:3,50** (88 : 308) | 1:3–1:4 | verdict bos, diukur |
-| Warna unik dalam siluet (sprite) | **1077** | pixel-art ≤ 12, vector ≥ 40 | gradien + anti-aliasing |
-| Warna unik di crop mockup | **1904** | — | termasuk latar (gradien ikut bergeser) |
-| Piksel tepi siluet yang **blending** | **644 / 645 = 100 %** | pixel-art 0 % | tidak ada upscale nearest |
-| Piksel alpha parsial | **2072** | > 0 | tepi sub-piksel nyata |
+| Tinggi avatar di mockup | **150 px** (baris depan), **141 px** (belakang ×0,94) | 135–180 px | ukuran tampil akhir |
+| Tinggi ruangan (lantai→plafon, termasuk jendela) | **548 px** | 520–560 px | angka yang dipakai rasio |
+| Rasio ruangan:avatar | **1:3,65** (548 : 150) | 1:3–1:4 | verdict bos, diukur |
+| Band di atas plafon | **40 px** | ≤ 40 px | slab + coping + fascia |
+| Warna unik dalam siluet (sprite) | **1477** | pixel-art ≤ 12, vector ≥ 40 | gradien + anti-aliasing |
+| Warna unik di crop mockup | **3515** | — | termasuk latar (gradien ikut bergeser) |
+| Piksel tepi siluet yang **blending** | **1367 / 1367 = 100 %** | pixel-art 0 % | tidak ada upscale nearest |
+| Piksel alpha parsial | **4956** | > 0 | tepi sub-piksel nyata |
 | Operasi gambar | **53–63 path/isi + 28–32 gradien** | — | dihitung saat render |
 
 Cara memeriksa ulang: `python3 docs/design/mockups/render_mockups.py` — baris
@@ -486,7 +516,7 @@ indikator lantai lift.
 | Ganti lantai (band + scene) | 180 ms | `cubic-bezier(.2,.7,.2,1)` | opacity + translateY 6 px |
 | Ganti tema (crossfade cache) | 400 ms | linear | hanya tepat di 06:00 / 18:00 |
 | Lift naik/turun | 400 ms | ease-in-out | pintu 160 ms; sekarang vertikal, jadi natural |
-| Agen pindah lane | 120 ms | ease-out | interpolasi offset y |
+| Agen pindah baris | 120 ms | ease-out | interpolasi offset y |
 | Tab aktif | 120 ms | ease-out | warna, tanpa blur |
 | Parallax kota | kontinu 0,02× pan | linear | mati saat `prefers-reduced-motion` |
 | Denyut dot `working` | 2,4 s | ease-in-out | opacity 0,75–1 |
@@ -510,7 +540,7 @@ terhadap komposit kaca, bukan terhadap putih/hitam.
 ## 11. Yang tidak berubah
 
 - `frontend/src/lib/rooms.ts`: meja, `LIFT`, `POIS`, `NAV`, `SPOTS` — nol perubahan;
-  lane dihitung di renderer dari `z`.
+  baris (depan/belakang) dihitung di renderer dari `z`.
 - `LIFT`: shaft 2,6×3,2, pintu barat, indikator `L1/L2/L3` di header (sekarang
   animasinya vertikal).
 - Tab lantai: 3 tab, `?floor=`, keyboard access, `aria-pressed`.
@@ -523,8 +553,8 @@ terhadap komposit kaca, bukan terhadap putih/hitam.
 | Gate | Perubahan |
 |---|---|
 | `verify/theme_check.ts` (baru) | 23 pemeriksaan: 05:59/06:00/17:59/18:00, tengah malam, override menang, `?theme=`, fallback tz, DST Amsterdam |
-| `verify/anim_check.ts` | `THEME_TOKENS` baru; `avatarKey` unik 13 look; lane resolver deterministik |
-| `verify/visual_check.ts` | `plateWidth` dari `measureText`; plate 21 px; gate plate 0 overlap/0 kepala tertutup; band kota tidak menutupi meja |
+| `verify/anim_check.ts` | `THEME_TOKENS` baru; `avatarKey` unik 13 look; row resolver deterministik |
+| `verify/visual_check.ts` | `plateWidth` dari `measureText`; plate 24 px; gate plate 0 overlap/0 kepala tertutup; kota **di dalam** bidang jendela (58–543), tidak ada band langit di atas plafon (≤ 40 px) |
 | `verify/office2d_probe.js` | selektor tab di `.hud-tabs .floor-tab`; tambah `?theme=` pada screenshot |
 | `verify/e2e_review.sh` | screenshot 3 lantai × 2 tema + mobile, semuanya dengan `?theme=` eksplisit |
 | Audit kontras | skrip baru: baca `tokens.json`, gagal bila ada pasangan < ambang (78 pasangan) |

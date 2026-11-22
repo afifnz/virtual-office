@@ -788,7 +788,8 @@ GLASS_SHADOW_DY = 6      # px, offset in y
 
 
 def draw_glass_panel(img: Image.Image, d: dict, box, s: int = 1, radius: int = 4,
-                     shadow: bool = True, fill_a: float = GLASS_FILL_A) -> None:
+                     shadow: bool = True, fill_a: float = GLASS_FILL_A,
+                     sheen_slope: float = 0.70) -> None:
     """A real glass partition (every number is a final-image px so the spec can
     quote them): a translucent fill over the floor, a 1 px edge lighter than
     the surface, one thin diagonal sheen, a soft drop shadow and a small floor
@@ -809,10 +810,12 @@ def draw_glass_panel(img: Image.Image, d: dict, box, s: int = 1, radius: int = 4
                                            fill=hex_rgb(d["surface"][0]) + (round(255 * fill_a),))
     comp(img, fill)
     # one thin diagonal sheen band: 2 px, white 0.18, from 18 % to 62 % of the
-    # panel width, ~35 degrees (tan 35 deg = 0.70), clipped to the panel
+    # panel width, ~35 degrees (tan 35 deg = 0.70), clipped to the panel. A tall
+    # panel passes a shallower slope — a 300 px slash across a curtain wall
+    # reads as a scratch, not as a reflection.
     band = Image.new("RGBA", (int(round(w)), int(round(h))), (0, 0, 0, 0))
     bx0, bx1 = w * 0.18, w * 0.62
-    dy = (bx1 - bx0) * 0.70
+    dy = (bx1 - bx0) * sheen_slope
     ImageDraw.Draw(band).line([(bx0, h / 2 + dy / 2), (bx1, h / 2 - dy / 2)],
                               fill=(255, 255, 255, round(255 * GLASS_SHEEN_A)),
                               width=max(1, round(2 * s)))
@@ -1452,203 +1455,148 @@ def draw_callout(img, d, text, xy, to) -> None:
 
 
 # ------------------------------------------------------------- side elevation
-# The scene as a SIDE view — an elevation / building section seen from the
-# front: the floor is a horizontal band, glass walls are vertical planes, desks
-# and chairs are seen in profile, avatars are seen from the front, and a large
-# window with the city skyline sits behind them. The top-down renderer above
-# stays untouched; these renders are additions (l3-side-*.png).
+# The scene as a SIDE view — a building section seen from the front: the floor
+# is a horizontal band, the CURTAIN WALL *is the back wall of the room*, and the
+# city is seen THROUGH it, behind the desks. The top-down renderer above stays
+# untouched; these renders are additions (l3-side-*.png).
 #
-# Depth is the 3-lane 2.5D map (option b): world (x, z) per desk, x → screen x,
-# z → depth lane. Lane 0 is the BACK (highest floor line, smallest sprites,
-# painted first); lane 2 is the FRONT (lowest floor line, full scale, painted
-# last) — nearer reads lower and larger, so depth reads without breaking the
-# side-view illusion.
-# ---- section scale: ONE isotropic camera, and the verdict that set it --------
-# Bos on the first pass: "avatar terlihat kecil, sedangkan ruangnya tampak
-# tinggi."  Measured, that was avatar 54 px against a 286 px wall = **1:5,3**.
-# The fix has to be arithmetic, not taste, so every number below is the answer
-# to one of the four targets:
+# Verdict history — this is the third pass, and the first two failed for two
+# different reasons:
+#   pass 1: avatar 54 px in a 286 px room = 1:5,3      → "avatar terlihat kecil"
+#   pass 2: avatar 88 px in a 308 px soffit→floor wall = 1:3,50 *on paper* — but
+#           a 252 px skyline band was painted ABOVE the ceiling, so the height
+#           the eye measures is floor → TOP OF THE WINDOW (≈430-450 px) and the
+#           perceived ratio was ≈1:5,5-1:6, with half the canvas given to sky.
+#   pass 3 (this one): the skyline moves INSIDE the room (it is what you see
+#           through the glass), the room fills the canvas, only 40 px of slab +
+#           roof edge sit above the ceiling, and the avatar grows to 150 px.
 #
-#   SIDE_PPU  140 px/unit   (target 140-160)
-#   SIDE_AVATAR_H = 140 x 0,63 = **88 px** avatar  (target 75-90)
-#   SIDE_CEIL_UNITS 2,2 x 140 = **308 px** room    (target 2,2-2,5 unit)
-#   88 : 308 = **1:3,50**                          (target 1:3-1:4)
+# So the number the document quotes is the one the eye uses:
 #
-# 0,63 unit is the section's *figure* height (a 44-unit chibi at this scale),
-# not a metre: the elevation is a legible stylised section, so the number the
-# doc quotes is the px one, and the unit is only there to keep the camera
-# isotropic (x and y share one ppu — no anisotropic squash).
-SIDE_PPU = 140                # px per world unit, BOTH axes (was a fit: 88,7)
-SIDE_AVATAR_UNITS = 0.63      # section figure height in world units
-SIDE_AVATAR_H = round(SIDE_PPU * SIDE_AVATAR_UNITS)       # 88 px @ zoom 2
+#   SIDE_PPU         150 px/unit  (x and y share one scale — no squash)
+#   SIDE_AVATAR_H    150 px = 1,00 unit
+#   SIDE_ROOM_H      548 px = 3,65 unit, floor finish → ceiling plane,
+#                    INCLUDING the window band (never soffit-only again)
+#   548 : 150      = 1:3,65      (target 1:3-1:4)
+#   above ceiling    40 px slab + coping + fascia (target ≤ 40)
+#
+# Depth is two rows of four (not one row of eight): the near half of the z range
+# is the FRONT row (scale 1,00, lowest floor line), the far half the BACK row
+# (scale 0,94, LANE_DY px higher on screen, staggered half a pitch). Eight
+# agents in one row cannot keep a readable slot at any avatar size the boss
+# accepts; two rows also *are* the 2.5D read.
+SIDE_PPU = 150                # px per world unit, BOTH axes
+SIDE_AVATAR_UNITS = 1.00      # section figure height in world units
+SIDE_AVATAR_H = round(SIDE_PPU * SIDE_AVATAR_UNITS)       # 150 px
 SIDE_K = SIDE_AVATAR_H / 54.0                            # desk/chair/prop scale
-SIDE_CEIL_UNITS = 2.2         # floor finish → soffit underside
-SIDE_ROOM_H = round(SIDE_PPU * SIDE_CEIL_UNITS)          # 308 px
 
-LANE_PITCH_UNITS = 3.0        # one depth lane per 3 world units of z
-LANE_DY = 24                  # px a lane's floor line sits below the lane above
-LANE_SCALE = (0.92, 0.96, 1.00)   # back → front sprite scale (nearest = 1.00)
-SIDE_MARGIN = 20              # px margin each side of the 1000 px scene canvas
-# The empty corridor between the dev island (max x 1,62) and the devops corner
-# (x 5,0) is 3,38 unit of nothing. At 140 ppu that alone would push WAHYU off
-# the 960 px canvas, so the elevation elides it — an architectural break, drawn
-# as a floor break mark — and keeps 0,35 unit of it either side of the mark.
-SIDE_GAP_FROM = 1.95          # world x where the elided corridor starts
-SIDE_GAP_TO = 4.30            # world x where it ends
-SIDE_GAP_KEEP = 0.35          # units of corridor kept after the break
-SIDE_CITY_H = 252             # city skyline band behind the curtain wall (was 310)
-SIDE_CEIL_H = 26              # soffit band (one continuous light cove)
-SIDE_SLAB_H = 22              # floor slab band
-SIDE_WALL_TOP = SIDE_CITY_H + SIDE_CEIL_H             # 278: soffit underside
-SIDE_FINISH_TOP = SIDE_WALL_TOP + SIDE_ROOM_H         # 586: wall → floor finish
-SIDE_SLAB_TOP = (CANVAS[3] - CANVAS[1]) - SIDE_SLAB_H     # 666: slab band starts
-SIDE_FLOOR_BASE = SIDE_SLAB_TOP - 2 * LANE_DY - 12    # 606: lane-0 floor line
-SIDE_DESK_TOP = round(34 * SIDE_K)    # 55: tabletop top edge above the lane floor
-SIDE_DESK_THICK = round(6 * SIDE_K)   # 10: tabletop thickness in profile
+SIDE_ROOF_H = 40              # 0..40   slab + coping + fascia (above the ceiling)
+SIDE_SOFFIT_H = 18            # 40..58  ceiling soffit with the recessed lights
+SIDE_CEIL_Y = SIDE_ROOF_H     # 40      ceiling plane — the top of the room
+SIDE_ROOM_H = 548             # 40..588 floor finish → ceiling, window included
+SIDE_CEIL_UNITS = SIDE_ROOM_H / SIDE_PPU                 # 3,653 unit
+SIDE_FINISH_TOP = SIDE_CEIL_Y + SIDE_ROOM_H              # 588
+SIDE_FINISH_H = 60            # 588..648 floor plane the two rows stand on
+SIDE_SLAB_TOP = SIDE_FINISH_TOP + SIDE_FINISH_H          # 648
+SIDE_SLAB_H = (CANVAS[3] - CANVAS[1]) - SIDE_SLAB_TOP    # 40
+assert (SIDE_ROOF_H + SIDE_ROOM_H + SIDE_FINISH_H + SIDE_SLAB_H
+        == CANVAS[3] - CANVAS[1]), "the section bands must fill the canvas"
 
+# The curtain wall: from 0,30 unit above the floor finish up to the soffit.
+SIDE_GLASS_TOP = SIDE_CEIL_Y + SIDE_SOFFIT_H             # 58
+SIDE_SILL_UNITS = 0.30
+SIDE_GLASS_BOT = SIDE_FINISH_TOP - round(SIDE_SILL_UNITS * SIDE_PPU)   # 543
 
-def _squeeze_x(wx: float) -> float:
-    """World x → *elevation* x: the elided corridor is compressed to
-    SIDE_GAP_KEEP units. Monotonic and piecewise-linear, so world coordinates
-    on either side of the break keep their true spacing at 140 px/unit."""
-    if wx <= SIDE_GAP_FROM:
-        return wx
-    span = SIDE_GAP_TO - SIDE_GAP_FROM
-    if wx >= SIDE_GAP_TO:
-        return wx - span + SIDE_GAP_KEEP
-    return SIDE_GAP_FROM + (wx - SIDE_GAP_FROM) / span * SIDE_GAP_KEEP
+LANE_DY = 44                  # px a row's floor line sits above the row in front
+ROW_SCALE = (0.94, 1.00)      # back → front sprite scale (front = full size)
+SIDE_PITCH = 200              # px between two slots of the same row (4 per row)
+SIDE_MARGIN = 20
+SIDE_GRID_SHIFT = 30          # grid sits 30 px left of centre: the rack needs room
+SIDE_FRONT_FLOOR = SIDE_SLAB_TOP - 8                     # 640: front feet line
+SIDE_BACK_FLOOR = SIDE_FRONT_FLOOR - LANE_DY             # 596: back feet line
+SIDE_DESK_TOP = round(34 * SIDE_K)                       # 94: tabletop above floor
+SIDE_DESK_THICK = round(6 * SIDE_K)                      # 17: tabletop thickness
 
 
-def side_camera(fid: str = "L3") -> dict:
-    """Section camera at a FIXED 140 px/unit on both axes (no fit-to-width).
+def side_rows(fid: str) -> dict[str, int]:
+    """Two depth rows, 4 + 4, from the real z of rooms.ts.
 
-    The scale is a design number, not an output of the span: the old code
-    divided 960 px by the occupied span, which is exactly how a 54 px avatar
-    ended up in a 286 px room. Now `x_of` is a straight 140 px/unit map of the
-    (corridor-compressed) world, centred in the canvas; the padding absorbs the
-    slack, and an assert fails loudly if a floor ever needs more than the canvas.
+    Agents are ordered by z (nearest first) and the near half becomes row 1 (the
+    front), the far half row 0 (the back). For L3 that is exactly the data's own
+    split: BIMA/RAKA/LARAS/BAGAS sit at z ≥ −0,39, DIMAS/YOGA/SARI at z = −0,78
+    and WAHYU in the devops corner at z = −6,2.
     """
-    xs = [x for _, x, _, _, _ in DESKS_BY_FLOOR[fid]]
-    eff = [_squeeze_x(x) for x in xs]
-    lo_e, hi_e = min(eff), max(eff)
-    cw = CANVAS[2] - CANVAS[0]
-    span_px = (hi_e - lo_e) * SIDE_PPU
-    assert span_px + 2 * SIDE_MARGIN <= cw, (
-        f"{fid}: {span_px:.0f} px of content does not fit the {cw} px canvas at "
-        f"{SIDE_PPU} px/unit — elide more corridor, never shrink the avatar")
-    pad = max(SIDE_MARGIN, (cw - span_px) / 2)
-    return {"lo": lo_e - pad / SIDE_PPU, "hi": hi_e + pad / SIDE_PPU,
-            "ppu": SIDE_PPU, "pad": pad, "eff_lo": lo_e, "eff_hi": hi_e,
-            "world_lo": min(xs), "world_hi": max(xs),
-            "x_of": lambda wx: pad + (_squeeze_x(wx) - lo_e) * SIDE_PPU}
-
-
-def side_lanes(fid: str) -> dict[str, int]:
-    """3-lane depth map: lane = clamp(round((z - Z_MIN)/LANE_PITCH_UNITS), 0, 2)
-    with Z_MIN = the floor's minimum desk z, plus an x-collision resolver.
-
-    The resolver exists because an island's 0.78-unit z spread is below one
-    LANE_PITCH_UNITS step: the raw formula can leave a same-x front-row/back-row
-    pair in one lane, which the section cannot read. When two agents share
-    screen x and a lane, the farther one (smaller z) steps one lane back — or
-    the nearer one steps forward when the back lane is already taken — so the
-    lane data still mirrors the z data and every same-x pair is separated."""
-    desks = DESKS_BY_FLOOR[fid]
-    zmin = min(z for _, _, z, _, _ in desks)
-    zof = {did: z for did, _, z, _, _ in desks}
-    xof = {did: x for did, x, _, _, _ in desks}
-    lane = {did: max(0, min(2, round((z - zmin) / LANE_PITCH_UNITS)))
-            for did, _, z, _, _ in desks}
-    ids = list(zof)
-    for i, a in enumerate(ids):
-        for b in ids[i + 1:]:
-            if abs(xof[a] - xof[b]) >= 0.25 or lane[a] != lane[b]:
-                continue
-            far, near = (a, b) if zof[a] < zof[b] else (b, a)
-            if lane[far] > 0:
-                lane[far] -= 1
-            elif lane[near] < 2:
-                lane[near] += 1
-    for i, a in enumerate(ids):
-        for b in ids[i + 1:]:
-            assert abs(xof[a] - xof[b]) >= 0.25 or lane[a] != lane[b], \
-                f"{fid}: {a}/{b} share screen x and lane {lane[a]}"
-    return lane
-
-
-SIDE_PLATE_H = 21     # nameplate height in the section view (px)
-SIDE_PLATE_FONT = 10.5
-SIDE_PLATE_GAP = 7    # plate bottom edge → head top (px)
-SIDE_HEAD_BOX_H = round(SIDE_AVATAR_H * 0.40)   # 35 px: a head is 38 % of the figure
-SIDE_AV_BOX_HW = SIDE_AVATAR_H * AV_W_RATIO / 2  # 26,4: half the drawn sprite width
-SIDE_MIN_SEP = 86     # px between two agent centres: plate (~62) + air + bodies
+    order = sorted(DESKS_BY_FLOOR[fid], key=lambda t: -t[2])
+    front_n = (len(order) + 1) // 2
+    return {t[0]: (1 if i < front_n else 0) for i, t in enumerate(order)}
 
 
 def side_slots(agents: list[dict], width_px: int, margin: int) -> None:
-    """Give every agent its own horizontal slot (in place, on ``cx``).
+    """One slot per agent on a 4-wide grid per row, in place on ``cx``.
 
-    A section view cannot stack two agents on one screen x, but rooms.ts puts
-    the front and back rows of the dev island at the SAME x (only z differs),
-    so the raw projection lands DIMAS on BAGAS, YOGA on RAKA and SARI on LARAS
-    — three pairs, four visible positions. This resolver keeps the left-to-right
-    order that comes from rooms.ts and pushes each colliding pair apart to
-    SIDE_MIN_SEP (one plate width plus breathing room), so every agent owns a
-    distinct horizontal slot and two plates can never meet.
+    World spacing cannot be kept at this avatar size: the dev island's z pitch is
+    0,78 unit and its x pitch 1,62 unit, so at 150 px/unit two desks are 243 px
+    apart but the front/back pair shares one x. The section therefore uses a
+    DESIGNED grid — SIDE_PITCH px between the four slots of a row, the back row
+    staggered half a pitch so the two rows interlock (bodies visible between the
+    front agents) instead of one hiding the other. Order inside a row is still
+    the world-x order from rooms.ts, so left→right never lies about the room.
     """
-    if len(agents) < 2:
-        return
-    order = sorted(agents, key=lambda a: (a["cx"], a["lane"]))
-    lo, hi = margin + SIDE_AV_BOX_HW, width_px - margin - SIDE_AV_BOX_HW
-    avail = hi - lo
-    sep = min(SIDE_MIN_SEP, avail / (len(order) - 1))
-    xs = [max(lo, min(a["cx"], hi)) for a in order]
-    out = [xs[0]]
-    for x in xs[1:]:                       # greedy: never closer than `sep`
-        out.append(max(x, out[-1] + sep))
-    if out[-1] > hi:                       # pull the band back inside the canvas
-        shift = out[-1] - hi
-        out = [v - shift for v in out]
-        if out[0] < lo:
-            grow = lo - out[0]
-            out = [v + grow for v in out]
-    for a, x in zip(order, out):
-        a["cx"] = x
+    two_rows = len({a["row"] for a in agents}) > 1
+    for row in (0, 1):
+        grp = sorted((a for a in agents if a["row"] == row), key=lambda a: a["cx"])
+        n = len(grp)
+        if not n:
+            continue
+        pitch = SIDE_PITCH if n == 1 else min(SIDE_PITCH, (width_px - 2 * margin) / (n - 1))
+        span = pitch * (n - 1)
+        shift = SIDE_GRID_SHIFT if n >= 4 else 0.0
+        stagger = SIDE_PITCH / 2 if (two_rows and row == 0) else 0.0
+        left = (width_px - span) / 2 - shift + stagger
+        for i, a in enumerate(grp):
+            a["cx"] = left + i * pitch
+
+
+SIDE_PLATE_H = 24      # nameplate height in the section view (px)
+SIDE_PLATE_FONT = 11.5
+SIDE_PLATE_GAP = 8     # plate bottom edge → head top (px)
+SIDE_HEAD_BOX_H = round(SIDE_AVATAR_H * 0.40)   # 60 px: a head is ~40 % of the figure
+SIDE_AV_BOX_HW = SIDE_AVATAR_H * AV_W_RATIO / 2  # 45: half the drawn sprite width
+SIDE_MIN_SEP = 180     # px between two slot centres of the SAME row
 
 
 def side_layout(fid: str = "L3") -> dict:
-    """Per-agent 1x section geometry: lane, scale, screen x, floor line, head
-    top (floor_y - SIDE_AVATAR_H * lane_scale — the side-view head box anchor)."""
-    cam = side_camera(fid)
-    lanes = side_lanes(fid)
+    """Per-agent 1x section geometry: row, scale, screen x, floor line, head top
+    (floor_y − avatar_h — the side-view head box anchor)."""
+    rows = side_rows(fid)
     cw = CANVAS[2] - CANVAS[0]
     agents = []
     for did, wx, wz, rot, status in DESKS_BY_FLOOR[fid]:
-        lane = lanes[did]
-        k = LANE_SCALE[lane]
-        fy = SIDE_FLOOR_BASE + lane * LANE_DY
+        row = rows[did]
+        k = ROW_SCALE[row]
+        fy = SIDE_FRONT_FLOOR if row == 1 else SIDE_BACK_FLOOR
         agents.append({"id": did, "name": LOOKS[did]["name"], "status": status,
-                       "lane": lane, "scale": k, "cx": cam["x_of"](wx),
+                       "row": row, "lane": row, "scale": k, "cx": wx,
                        "floor_y": fy, "avatar_h": SIDE_AVATAR_H * k,
                        "head_top": fy - SIDE_AVATAR_H * k})
-    side_slots(agents, cw, SIDE_MARGIN)     # one horizontal slot per agent
-    agents.sort(key=lambda a: (a["lane"], a["cx"]))    # paint far lane first, then x
-    return {"fid": fid, "ppu": cam["ppu"], "span": (cam["lo"], cam["hi"]),
-            "cam": cam, "agents": agents, "info": []}
+    side_slots(agents, cw, SIDE_MARGIN)     # one slot per agent, 4 per row
+    agents.sort(key=lambda a: (a["row"], a["cx"]))    # paint the back row first
+    return {"fid": fid, "ppu": SIDE_PPU, "agents": agents, "info": []}
 
 
 def side_plate_boxes(d: dict, layout: dict) -> list[dict]:
-    """Nameplates for the section view — the plate_boxes() rules adapted to the
-    side geometry: the head top is floor_y - SIDE_AVATAR_H*lane_scale, plates
-    stay below the ceiling band, and a same-x pair (front/back desk row)
-    resolves by stepping the farther agent's plate up, with a leader line when
-    moved."""
+    """Nameplates for the section view: one plate per agent, 8 px above its own
+    head, never over another agent's head box and never over another plate. The
+    two-row grid leaves so much room that nothing has to be stepped up — the
+    loop below stays as the guard, and the gate re-checks the result."""
     agents, fid = layout["agents"], layout["fid"]
-    heads = {a["id"]: {"id": a["id"], "x0": a["cx"] - AV_HALF_W, "x1": a["cx"] + AV_HALF_W,
+    heads = {a["id"]: {"id": a["id"], "x0": a["cx"] - SIDE_AV_BOX_HW,
+                       "x1": a["cx"] + SIDE_AV_BOX_HW,
                        "y0": a["head_top"], "y1": a["head_top"] + SIDE_HEAD_BOX_H}
              for a in agents}
     h = SIDE_PLATE_H
     step = h + 3
-    lo, hi = SIDE_WALL_TOP + 2, SIDE_FLOOR_BASE - 8
+    lo, hi = SIDE_GLASS_TOP + 4, SIDE_FRONT_FLOOR - 8
     boxes: list[dict] = []
 
     def free(box) -> bool:
@@ -1665,7 +1613,7 @@ def side_plate_boxes(d: dict, layout: dict) -> list[dict]:
     # nearest first (largest floor y) claims the lowest slot, like plate_boxes()
     for a in sorted(agents, key=lambda t: (-t["floor_y"], t["cx"])):
         w = font(SIDE_PLATE_FONT, bold=True).getlength(a["name"]) + 20
-        ideal = a["head_top"] - SIDE_PLATE_GAP - h    # plate bottom 7 px above the head
+        ideal = a["head_top"] - SIDE_PLATE_GAP - h    # plate bottom 8 px above the head
         y = max(lo, min(ideal, hi))
         box = {"id": a["id"], "status": a["status"], "name": a["name"], "cx": a["cx"],
                "x0": a["cx"] - w / 2, "x1": a["cx"] + w / 2, "y0": y, "y1": y + h,
@@ -1704,21 +1652,21 @@ def _box_overlap(a: dict, b: dict) -> float:
 def side_gate(fid: str = "L3", limit: float = 0.20, verbose: bool = True) -> dict:
     """The section's hard gate, measured and printed as numbers.
 
-    Three rules, all on the 8 agents of the floor:
+    Four rules, all on the agents of the floor:
       1. no label rect may overlap another label rect;
       2. no label rect may overlap ANOTHER agent's head box;
       3. no two avatar bounding boxes may overlap more than `limit` (20 %) of
-         the smaller one — the rule that catches two agents sharing a lane and
-         an x, which is exactly how DIMAS/BAGAS used to merge.
+         the smaller one;
+      4. two agents of the SAME row may not sit closer than SIDE_MIN_SEP.
     Any violation raises SystemExit with the offending agents named.
     """
     layout = side_layout(fid)
     boxes = side_plate_boxes(DAY, layout)
     agents = layout["agents"]
-    heads = {a["id"]: {"x0": a["cx"] - AV_HALF_W, "x1": a["cx"] + AV_HALF_W,
+    heads = {a["id"]: {"x0": a["cx"] - SIDE_AV_BOX_HW, "x1": a["cx"] + SIDE_AV_BOX_HW,
                        "y0": a["head_top"], "y1": a["head_top"] + SIDE_HEAD_BOX_H}
              for a in agents}
-    bodies = {a["id"]: {"x0": a["cx"] - AV_BOX_HW, "x1": a["cx"] + AV_BOX_HW,
+    bodies = {a["id"]: {"x0": a["cx"] - SIDE_AV_BOX_HW, "x1": a["cx"] + SIDE_AV_BOX_HW,
                         "y0": a["head_top"], "y1": a["floor_y"]} for a in agents}
 
     lab_lab = [(a, b) for i, a in enumerate(boxes) for b in boxes[i + 1:]
@@ -1733,6 +1681,12 @@ def side_gate(fid: str = "L3", limit: float = 0.20, verbose: bool = True) -> dic
             ov = _box_overlap(bodies[a["id"]], bodies[b["id"]])
             if ov > worst:
                 worst, worst_pair = ov, (a["name"], b["name"])
+    row_gap = {}
+    for row in (0, 1):
+        xs = sorted(a["cx"] for a in agents if a["row"] == row)
+        if len(xs) > 1:
+            row_gap[row] = min(b - a for a, b in zip(xs, xs[1:]))
+    min_row = min(row_gap.values()) if row_gap else 0.0
     gaps = sorted(abs(agents[i]["cx"] - agents[j]["cx"])
                   for i in range(len(agents)) for j in range(i + 1, len(agents)))
     min_gap = gaps[0] if gaps else 0.0
@@ -1741,9 +1695,12 @@ def side_gate(fid: str = "L3", limit: float = 0.20, verbose: bool = True) -> dic
               f"label↔label overlap {len(lab_lab)} · label↔kepala-agen-lain {len(lab_head)} · "
               f"{pairs} pasang avatar, overlap bbox terbesar "
               f"{worst * 100:.1f}% (batas {limit * 100:.0f}%) · "
-              f"jarak pusat minimum {min_gap:.1f} px")
-        print("  slot x: " + " · ".join(f"{a['name']} {a['cx']:.0f}" for a in
-                                        sorted(agents, key=lambda t: t["cx"])))
+              f"pitch baris minimum {min_row:.1f} px · jarak pusat minimum {min_gap:.1f} px")
+        for row in (1, 0):
+            print(f"  baris {'depan' if row else 'belakang'}: " +
+                  " · ".join(f"{a['name']} {a['cx']:.0f}" for a in
+                             sorted((t for t in agents if t["row"] == row),
+                                    key=lambda t: t["cx"])))
     if lab_lab or lab_head:
         bad = {b["name"] for b in lab_lab[0]} if lab_lab else set()
         raise SystemExit(f"side gate FAILED on {fid}: {len(lab_lab)} label overlap, "
@@ -1752,30 +1709,29 @@ def side_gate(fid: str = "L3", limit: float = 0.20, verbose: bool = True) -> dic
         raise SystemExit(f"side gate FAILED on {fid}: avatar bbox overlap "
                          f"{worst * 100:.0f}% > {limit * 100:.0f}% "
                          f"({worst_pair[0]}/{worst_pair[1]})")
-    if len(agents) > 1 and min_gap < SIDE_MIN_SEP - 0.5:
-        raise SystemExit(f"side gate FAILED on {fid}: two agents only {min_gap:.1f} px apart "
-                         f"(minimum {SIDE_MIN_SEP})")
+    if len(agents) > 1 and min_row < SIDE_MIN_SEP - 0.5:
+        raise SystemExit(f"side gate FAILED on {fid}: two agents of one row only "
+                         f"{min_row:.1f} px apart (minimum {SIDE_MIN_SEP})")
     return {"labels": len(boxes), "label_overlap": len(lab_lab), "label_head": len(lab_head),
-            "max_avatar_overlap": worst, "min_gap": min_gap,
+            "max_avatar_overlap": worst, "min_gap": min_gap, "min_row_gap": min_row,
             "plate_gap": min(b["head_top"] - b["y1"] for b in boxes)}
 
 
 def side_wall_gate(layout: dict, limit: float = 0.30, verbose: bool = True) -> dict:
-    """The "dinding kosong" rule, measured on the room band (soffit → floor
-    finish) instead of argued about:
+    """The "dinding kosong" rule, measured on the room band (ceiling plane →
+    floor finish) instead of argued about:
 
-      * empty AREA  = band area with no content at all (no module, prop, plate,
-        avatar or desk), as a % of the band;
-      * empty RUN   = the tallest uncovered vertical run in any 20 px column,
-        as a % of the room height — this is the ">30 % of the room height"
-        number from the brief, so a single bare strip fails even when the
-        average looks fine.
-
-    Content comes from `layout["info"]` (everything the wall programme, the
-    props and the furniture actually drew) plus the plates. Both numbers are
-    printed; either one over 30 % fails the render.
+      * empty AREA = band area with no designed surface at all. The curtain wall
+        counts as a designed surface — it carries the city, which is the whole
+        point of this pass — so what this number now measures is the leftover
+        bare wall, and the 30 % ceiling still applies to it;
+      * empty RUN  = the tallest uncovered vertical run in any 20 px column, as
+        a % of the room height (a single bare strip fails even when the average
+        looks fine);
+      * glass %    = how much of the band is window onto the city (the number
+        the boss's "kota harus terlihat lewat jendela" resolves to).
     """
-    y0, y1 = SIDE_WALL_TOP, SIDE_FINISH_TOP
+    y0, y1 = SIDE_CEIL_Y, SIDE_FINISH_TOP
     h = y1 - y0
     w = CANVAS[2] - CANVAS[0]
     mask = Image.new("L", (w, h), 0)
@@ -1791,7 +1747,7 @@ def side_wall_gate(layout: dict, limit: float = 0.30, verbose: bool = True) -> d
             md.rectangle([rx0, ry0 - y0, rx1 - 1, ry1 - 1 - y0], fill=255)
     px = mask.load()
     empty = run_max = 0
-    over = 0
+    over_cols = 0
     for cx in range(w):
         run = 0
         col_max = 0
@@ -1804,33 +1760,34 @@ def side_wall_gate(layout: dict, limit: float = 0.30, verbose: bool = True) -> d
                 col_max = max(col_max, run)
         run_max = max(run_max, col_max)
         if col_max > h * limit:
-            over += 1
+            over_cols += 1
     empty_pct = 100.0 * empty / (w * h)
     run_pct = 100.0 * run_max / h
+    glass_pct = 100.0 * (SIDE_GLASS_BOT - SIDE_GLASS_TOP) / h
+    mounted_pct = 100.0 * (WALL_BAND[1] - WALL_BAND[0]) / h
     if verbose:
         print(f"side wall {layout['fid']}: ruang {h} px · area kosong {empty_pct:.1f}% "
               f"(batas {limit * 100:.0f}%) · run kosong tertinggi {run_max} px = "
-              f"{run_pct:.1f}% tinggi ruangan · kolom 20 px yang melewati batas {over}")
+              f"{run_pct:.1f}% tinggi ruangan · kolom 20 px yang melewati batas {over_cols} · "
+              f"kaca+kota {glass_pct:.1f}% · panel terpasang {mounted_pct:.1f}%")
     if empty_pct > limit * 100 or run_pct > limit * 100:
         raise SystemExit(
             f"side wall gate FAILED on {layout['fid']}: {empty_pct:.1f}% empty area, "
             f"{run_pct:.1f}% tallest empty run (limit {limit * 100:.0f}%) — "
             f"fill the wall or lower the ceiling, never shrink the avatar")
     return {"room_h": h, "empty_pct": empty_pct, "max_run": run_max,
-            "max_run_pct": run_pct, "cols_over": over}
+            "max_run_pct": run_pct, "cols_over": over_cols,
+            "glass_pct": glass_pct, "mounted_pct": mounted_pct}
 
 
 def side_metrics(fid: str = "L3", verbose: bool = True) -> dict:
-    """(a)…(f) of the boss's brief, measured on the built layout, not typed in."""
-    layout = side_layout(fid)
+    """(a)…(h) of the boss's brief, measured on the built layout, not typed in."""
     # draw once at 1x into a throwaway canvas so `layout["info"]` holds the same
     # content rects the real render uses (PIL, no file written)
     layout = draw_side_scene(Image.new("RGB", (CANVAS[2] - CANVAS[0], CANVAS[3] - CANVAS[1]),
                                        hex_rgb(DAY["page"])), DAY, fid, s=1)
     people = side_wall_gate(layout, verbose=True)
     gate = side_gate(fid, verbose=False)
-    gaps = sorted(abs(a["cx"] - b["cx"]) for i, a in enumerate(layout["agents"])
-                  for b in layout["agents"][i + 1:])
     plates = side_plate_boxes(DAY, layout)
     plate_w = max(b["x1"] - b["x0"] for b in plates) if plates else 0
     a_front = max(layout["agents"], key=lambda a: a["avatar_h"])
@@ -1839,9 +1796,12 @@ def side_metrics(fid: str = "L3", verbose: bool = True) -> dict:
         "avatar_px": a_front["avatar_h"], "avatar_px_min": a_back["avatar_h"],
         "room_px": SIDE_ROOM_H, "room_units": SIDE_CEIL_UNITS,
         "ratio": SIDE_ROOM_H / a_front["avatar_h"],
+        "roof_px": SIDE_CEIL_Y,
         "wall_empty_pct": people.get("empty_pct", 0.0),
+        "glass_pct": people.get("glass_pct", 0.0),
         "wall_run_px": people.get("max_run", 0), "wall_run_pct": people.get("max_run_pct", 0.0),
-        "plate_gap": gate["plate_gap"], "min_slot": gaps[0] if gaps else 0.0,
+        "plate_gap": gate["plate_gap"], "min_slot": gate["min_row_gap"],
+        "min_gap": gate["min_gap"],
         "plate_w": plate_w, "ppu": SIDE_PPU,
         "label_overlap": gate["label_overlap"], "label_head": gate["label_head"],
         "avatar_overlap": gate["max_avatar_overlap"],
@@ -1849,20 +1809,23 @@ def side_metrics(fid: str = "L3", verbose: bool = True) -> dict:
 
     if verbose:
         print(f"side metrics {fid}:")
-        print(f"  (a) avatar {out['avatar_px']:.0f} px tinggi (lane 2) · "
-              f"{out['avatar_px_min']:.0f} px (lane 0)")
-        print(f"  (b) ruangan lantai→plafon {out['room_px']} px = "
-              f"{out['room_units']:g} unit @ {out['ppu']} px/unit")
-        print(f"  (c) rasio avatar:ruangan 1:{out['ratio']:.2f}")
-        print(f"  (d) dinding/plafon kosong {out['wall_empty_pct']:.1f}% area · "
-              f"run kosong tertinggi {out['wall_run_px']} px ({out['wall_run_pct']:.1f}%)")
-        print(f"  (e) jarak plat↔kepala {out['plate_gap']} px (minimum, terukur)")
-        print(f"  (f) slot minimum {out['min_slot']:.1f} px · plat terlebar "
-              f"{out['plate_w']:.0f} px · overlap label {out['label_overlap']} · "
-              f"label↔kepala {out['label_head']} · overlap avatar "
+        print(f"  (a) tinggi avatar {out['avatar_px']:.0f} px (baris depan) · "
+              f"{out['avatar_px_min']:.0f} px (baris belakang)")
+        print(f"  (b) tinggi ruangan lantai→plafon {out['room_px']} px = "
+              f"{out['room_units']:.2f} unit @ {out['ppu']} px/unit "
+              f"(termasuk band jendela {SIDE_GLASS_TOP}..{SIDE_GLASS_BOT})")
+        print(f"  (c) rasio ruangan:avatar 1:{out['ratio']:.2f}")
+        print(f"  (d) band di atas plafon {out['roof_px']} px (batas 40)")
+        print(f"  (e) area dinding kosong {out['wall_empty_pct']:.1f}% (batas 30%) · "
+              f"kaca+kota {out['glass_pct']:.1f}% · run kosong tertinggi "
+              f"{out['wall_run_px']} px ({out['wall_run_pct']:.1f}%)")
+        print(f"  (f) jarak plat↔kepala {out['plate_gap']} px (minimum, terukur)")
+        print(f"  (g) gate label: {out['label_overlap']} overlap · "
+              f"{out['label_head']} kepala tertutup · overlap avatar "
               f"{out['avatar_overlap'] * 100:.1f}%")
+        print(f"  (h) jarak slot minimum {out['min_slot']:.1f} px sebaris · "
+              f"{out['min_gap']:.1f} px antar-baris · plat terlebar {out['plate_w']:.0f} px")
     return out
-
 
 
 def draw_side_plates(img: Image.Image, d: dict, layout: dict) -> None:
@@ -1880,11 +1843,11 @@ def draw_side_plates(img: Image.Image, d: dict, layout: dict) -> None:
     for b in boxes:
         x, y = b["x0"], b["y0"]
         w, h = b["x1"] - b["x0"], b["y1"] - b["y0"]
-        rr(dr, (x, y, x + w, y + h), 10, fill=over(d["surface_solid"], 0.92, "#000000"))
-        rr(dr, (x, y, x + w, y + h), 10, outline=d["border"] + "55", width=1)
-        dr.line([(x + 10, y + 1), (x + w - 10, y + 1)], fill="#FFFFFF30", width=1)
-        status_marker(dr, d, b["status"], x + 10, y + h / 2, r=3.4)
-        dr.text((x + 18, y + 5), b["name"], font=f, fill=d["ink"])
+        rr(dr, (x, y, x + w, y + h), 11, fill=over(d["surface_solid"], 0.92, "#000000"))
+        rr(dr, (x, y, x + w, y + h), 11, outline=d["border"] + "55", width=1)
+        dr.line([(x + 11, y + 1), (x + w - 11, y + 1)], fill="#FFFFFF30", width=1)
+        status_marker(dr, d, b["status"], x + 11, y + h / 2, r=3.8)
+        dr.text((x + 20, y + 6), b["name"], font=f, fill=d["ink"])
 
 
 def _plant_side(dr, cx: float, fy: float, s: int, k: float = 1.0) -> None:
@@ -1899,23 +1862,25 @@ def _plant_side(dr, cx: float, fy: float, s: int, k: float = 1.0) -> None:
 
 
 # ---------------------------------------------------------------- wall programme
-# The boss's other half of the verdict: the wall above the desks was a blank
-# sheet. These bands are the measured answer — every one of them is a rect the
-# `side_wall_gate()` counts, so "the wall is filled" is a number, not a claim:
+# The boss's other half of the verdict: the wall above the desks must not be a
+# blank sheet. It is now a CURTAIN WALL, so the boards hang on a rail in front
+# of the glass — they do not fill the wall, they punctuate the view:
 #
-#   252..278  soffit + one light cove + 7 recessed downlights (ceiling band)
-#   300..314  cable trunking rail, full width, with junction boxes
-#   314..430  six mounted boards (plaque, status, pinboard, whiteboard, clock,
-#             shelf) that abut: 1 px joints, no gap column at all
-#   430..490  a continuous shelf run with books/binders/boxes/plants on it
-#   566..586  skirting / plinth shadow gap along the wall base
-WALL_BAND = (314, 430)     # the six boards: 116 px = 1,3 x the avatar
-LEDGE_BAND = (430, 490)    # the shelf run under them: books, binders, plants
-TRUNK_BAND = (300, 314)
-PLINTH_BAND = (566, 586)
-# x spans of the six modules; they TILE the whole wall with no gap (a gap would
+#     0..40    roof: coping + slab edge + fascia (nothing else above the ceiling)
+#    40..58    ceiling soffit: one light cove + 7 recessed downlights
+#    58..124   clear glass — sky and the tops of the towers
+#   124..132   the rail the boards hang from (brackets every 200 px)
+#   132..280   six mounted modules: plaque, status board, pinboard, whiteboard,
+#              clock, framed bookshelf (148 px ≈ 1,0 × the avatar)
+#   280..543   clear glass — the city at eye level, behind the desks
+#   543..566   spandrel
+#   566..588   skirting / plinth shadow gap
+WALL_BAND = (132, 280)     # the six boards: 148 px ≈ 1,0 × the avatar
+RAIL_BAND = (124, 132)
+PLINTH_BAND = (566, 588)
+# x spans of the six modules; they TILE the whole band with no gap (a gap would
 # be a full-height bare strip, which is exactly what the wall gate forbids)
-WALL_MODULES = ((0, 182), (182, 432), (432, 652), (652, 814), (814, 886), (886, 1000))
+WALL_MODULES = ((10, 190), (190, 436), (436, 654), (654, 812), (812, 884), (884, 990))
 
 
 def _wall_panel(d, dr, box, s, radius=3, fill=None, border_a=0.30, dy=2):
@@ -1936,69 +1901,71 @@ def _wall_panel(d, dr, box, s, radius=3, fill=None, border_a=0.30, dy=2):
 def wall_program(img: Image.Image, d: dict, dr, s: int, layout: dict) -> list[tuple]:
     """Draw the wall programme into the section and return its 1x content rects.
 
-    Two rows, not one giant panel: the six boards are 116 px (1,3 × avatar — a
-    1,2 m board next to a 1,7 m person), and under them runs a 60 px ledge with
-    books, binders, boxes and plants. A single 176 px band read as six oversized
-    UI cards; boards + a shelf run read as a wall somebody works in front of.
+    Six boards on one rail, each with its own job, and a lot of glass left
+    around them: the city is the wall now, and the boards must not bury it.
     """
     light = d["mode"] == "light"
     ink, muted, accent = d["ink"], d["muted"], d["accent"]
     rects: list[tuple] = []
-    panel_fill = over(d["surface_solid"], 0.92, d["wall"])
+    panel_fill = over(d["surface_solid"], 0.94, d["wall"])
     wood = shade(d["desk"], 0.78)
     wood_hi = shade(d["desk"], 1.06)
     book_cols = ("#B4553F", "#8A6A3E", "#6B7F5A", "#6D5B8E", "#3E6B8A", "#9C5A6B", "#4F6B57")
-
-    # ---- 1 · cable trunking rail (cable management, full width)
-    ty0, ty1 = TRUNK_BAND
-    dr.rectangle([0, ty0 * s, 1000 * s, ty1 * s], fill=hex_rgb(shade(d["wall"], 0.84)))
-    dr.rectangle([0, ty0 * s, 1000 * s, (ty0 + 1) * s], fill=(255, 255, 255, 90))
-    dr.rectangle([0, (ty1 - 1) * s, 1000 * s, ty1 * s], fill=(0, 0, 0, 26))
-    for jx in (6, 170, 334, 498, 662, 826, 994):
-        dr.rectangle([(jx - 5) * s, (ty0 - 3) * s, (jx + 5) * s, (ty1 + 3) * s],
-                     fill=hex_rgb(shade(d["wall"], 0.74)),
-                     outline=hex_rgb(shade(d["wall"], 0.6)) + (255,), width=max(1, s))
-    rects.append((0, ty0 - 3, 1000, ty1 + 3))
-
-    band_y0, band_y1 = WALL_BAND
+    y0, y1 = WALL_BAND
     mods = WALL_MODULES
 
-    # ---- 2a · zone plaque · L3 · TIM DEV (pixel font is allowed here, §8)
-    x0, x1 = mods[0]
-    _wall_panel(d, dr, (x0, band_y0, x1, band_y1), s, fill=panel_fill)
-    dr.rectangle([x0 * s, band_y0 * s, x1 * s, (band_y0 + 7) * s], fill=hex_rgb(accent))
-    pixel_text(dr, "L3", int((x0 + 12) * s), int((band_y0 + 14) * s), 4 * s, accent)
-    dr.text(((x1 - 12) * s, (band_y0 + 16) * s), "TIM", font=font(8.5 * s, bold=True, mono=True),
-            fill=muted, anchor="ra")
-    dr.text(((x1 - 12) * s, (band_y0 + 28) * s), "DEV", font=font(8.5 * s, bold=True, mono=True),
-            fill=muted, anchor="ra")
-    dr.line([(x0 + 12) * s, (band_y0 + 48) * s, (x1 - 12) * s, (band_y0 + 48) * s],
-            fill=hex_rgb(d["border"]) + (70,), width=max(1, s))
-    dr.text(((x0 + 12) * s, (band_y0 + 56) * s), "LANTAI 3", font=font(9 * s, bold=True), fill=ink)
-    dr.text(((x0 + 12) * s, (band_y0 + 72) * s), floor_meta("L3"), font=font(8 * s, mono=True),
-            fill=muted)
-    dr.text(((x0 + 12) * s, (band_y0 + 96) * s), "ZONA TIM DEV", font=font(7.5 * s, mono=True),
-            fill=muted)
-    rects.append((x0, band_y0, x1, band_y1))
+    # ---- 0 · the rail the six boards hang from (they sit in front of the glass)
+    ry0, ry1 = RAIL_BAND
+    dr.rectangle([0, ry0 * s, 1000 * s, ry1 * s], fill=hex_rgb(shade(d["wall"], 0.74)))
+    dr.rectangle([0, ry0 * s, 1000 * s, (ry0 + 1) * s], fill=(255, 255, 255, 90))
+    for bx in (44, 244, 444, 644, 844, 958):
+        dr.rectangle([(bx - 3) * s, (ry0 - 4) * s, (bx + 3) * s, (ry1 + 2) * s],
+                     fill=hex_rgb(shade(d["wall"], 0.62)))
+    rects.append((0, ry0 - 4, 1000, ry1 + 2))
+    sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rectangle([(WALL_MODULES[0][0] + 4) * s, (y1 - 2) * s,
+                                  (WALL_MODULES[-1][1] - 4) * s, (y1 + 8) * s],
+                                 fill=(0, 0, 0, 60 if light else 90))
+    comp(img, sh.filter(ImageFilter.GaussianBlur(3 * s)))
 
-    # ---- 2b · status board (papan status)
+    # ---- 1 · zone plaque · L3 · TIM DEV (pixel font is allowed here, §8)
+    x0, x1 = mods[0]
+    _wall_panel(d, dr, (x0, y0, x1, y1), s, fill=panel_fill)
+    dr.rectangle([x0 * s, y0 * s, x1 * s, (y0 + 8) * s], fill=hex_rgb(accent))
+    pixel_text(dr, "L3", int((x0 + 12) * s), int((y0 + 20) * s), 4 * s, accent)
+    dr.text(((x1 - 12) * s, (y0 + 22) * s), "TIM", font=font(9.5 * s, bold=True, mono=True),
+            fill=muted, anchor="ra")
+    dr.text(((x1 - 12) * s, (y0 + 36) * s), "DEV", font=font(9.5 * s, bold=True, mono=True),
+            fill=muted, anchor="ra")
+    dr.line([(x0 + 12) * s, (y0 + 58) * s, (x1 - 12) * s, (y0 + 58) * s],
+            fill=hex_rgb(d["border"]) + (70,), width=max(1, s))
+    dr.text(((x0 + 12) * s, (y0 + 66) * s), "LANTAI 3", font=font(11 * s, bold=True), fill=ink)
+    dr.text(((x0 + 12) * s, (y0 + 86) * s), floor_meta("L3"), font=font(9 * s, mono=True),
+            fill=muted)
+    dr.text(((x0 + 12) * s, (y0 + 114) * s), "ZONA TIM DEV", font=font(8.5 * s, mono=True),
+            fill=muted)
+    dr.rectangle([(x0 + 12) * s, (y0 + 132) * s, (x0 + 74) * s, (y0 + 136) * s],
+                 fill=hex_rgb(accent) + (110,))
+    rects.append((x0, y0, x1, y1))
+
+    # ---- 2 · status board (papan status)
     x0, x1 = mods[1]
-    _wall_panel(d, dr, (x0, band_y0, x1, band_y1), s, fill=panel_fill)
-    dr.text(((x0 + 12) * s, (band_y0 + 8) * s), "PAPAN STATUS",
-            font=font(8 * s, bold=True, mono=True), fill=muted)
-    dr.line([(x0 + 12) * s, (band_y0 + 21) * s, (x1 - 12) * s, (band_y0 + 21) * s],
+    _wall_panel(d, dr, (x0, y0, x1, y1), s, fill=panel_fill)
+    dr.text(((x0 + 12) * s, (y0 + 10) * s), "PAPAN STATUS",
+            font=font(9 * s, bold=True, mono=True), fill=muted)
+    dr.line([(x0 + 12) * s, (y0 + 26) * s, (x1 - 12) * s, (y0 + 26) * s],
             fill=hex_rgb(d["border"]) + (60,), width=max(1, s))
     rows = floor_rows("L3")
-    dr.text(((x0 + 12) * s, (band_y0 + 26) * s), f"{active_count(rows)}/{len(rows)}",
-            font=font(19 * s, bold=True), fill=ink)
-    dr.text(((x0 + 66) * s, (band_y0 + 38) * s), "aktif", font=font(8.5 * s), fill=muted)
+    dr.text(((x0 + 12) * s, (y0 + 32) * s), f"{active_count(rows)}/{len(rows)}",
+            font=font(26 * s, bold=True), fill=ink)
+    dr.text(((x0 + 76) * s, (y0 + 52) * s), "aktif", font=font(10 * s), fill=muted)
     for i, (nm, st, _t) in enumerate(rows):        # 8 agent dots, plate colours
-        cx = (x0 + 20 + i * 25) * s
-        cy = (band_y0 + 64) * s
-        dr.ellipse([cx - 4.5 * s, cy - 4.5 * s, cx + 4.5 * s, cy + 4.5 * s],
+        cx = (x0 + 20 + i * 26) * s
+        cy = (y0 + 84) * s
+        dr.ellipse([cx - 5.5 * s, cy - 5.5 * s, cx + 5.5 * s, cy + 5.5 * s],
                    fill=hex_rgb(over(d["status"][st], 0.22, panel_fill)),
                    outline=hex_rgb(d["status"][st]), width=max(1, s))
-        dr.text((cx, (band_y0 + 72) * s), nm[0], font=font(6.5 * s, bold=True, mono=True),
+        dr.text((cx, (y0 + 94) * s), nm[0], font=font(7 * s, bold=True, mono=True),
                 fill=muted, anchor="ma")
     counts = [(st, sum(1 for _n, stt, _t in rows if stt == st))
               for st in ("working", "reviewing", "idle", "blocked")]
@@ -2007,76 +1974,79 @@ def wall_program(img: Image.Image, d: dict, dr, s: int, layout: dict) -> list[tu
         if not n:
             continue
         label = f"{n} {st}"
-        w = font(7.5 * s).getlength(label) / s + 13
-        dr.rounded_rectangle([cx * s, (band_y0 + 86) * s, (cx + w) * s, (band_y0 + 100) * s],
+        w = font(8 * s).getlength(label) / s + 14
+        dr.rounded_rectangle([cx * s, (y0 + 112) * s, (cx + w) * s, (y0 + 130) * s],
                              radius=4 * s, fill=hex_rgb(over(d["status"][st], 0.16, panel_fill)))
-        dr.ellipse([(cx + 4) * s, (band_y0 + 90) * s, (cx + 9) * s, (band_y0 + 95) * s],
+        dr.ellipse([(cx + 4) * s, (y0 + 117) * s, (cx + 10) * s, (y0 + 123) * s],
                    fill=hex_rgb(d["status"][st]))
-        dr.text(((cx + 12) * s, (band_y0 + 88) * s), label, font=font(7.5 * s), fill=ink)
-        cx += w + 4
-    rects.append((x0, band_y0, x1, band_y1))
+        dr.text(((cx + 14) * s, (y0 + 115) * s), label, font=font(8 * s), fill=ink)
+        cx += w + 5
+    rects.append((x0, y0, x1, y1))
 
-    # ---- 2c · pinboard with the week's notes
+    # ---- 3 · pinboard with the week's notes + the printed burndown
     x0, x1 = mods[2]
     cork = over("#C8A97A", 0.30, d["wall"]) if light else over("#6B5433", 0.55, d["wall"])
-    _wall_panel(d, dr, (x0, band_y0, x1, band_y1), s, fill=cork, border_a=0.34)
-    notes = ((x0 + 12, band_y0 + 10, "#F2D06B", 2), (x0 + 56, band_y0 + 16, "#EFA6A0", 3),
-             (x0 + 100, band_y0 + 8, "#A8D5B5", 2), (x0 + 14, band_y0 + 62, "#9EC5E8", 3),
-             (x0 + 58, band_y0 + 68, "#F2D06B", 2))
+    _wall_panel(d, dr, (x0, y0, x1, y1), s, fill=cork, border_a=0.34)
+    notes = ((x0 + 12, y0 + 8, "#F2D06B", 2), (x0 + 54, y0 + 8, "#EFA6A0", 3),
+             (x0 + 96, y0 + 8, "#A8D5B5", 2), (x0 + 12, y0 + 54, "#9EC5E8", 3),
+             (x0 + 54, y0 + 54, "#F2D06B", 2), (x0 + 96, y0 + 54, "#EFA6A0", 2),
+             (x0 + 12, y0 + 100, "#A8D5B5", 2), (x0 + 54, y0 + 100, "#9EC5E8", 2),
+             (x0 + 96, y0 + 100, "#F2D06B", 3))
     for nx, ny, col, lines in notes:
-        dr.rectangle([nx * s, (ny + 2) * s, (nx + 34) * s, (ny + 36) * s], fill=(0, 0, 0, 24))
-        dr.rectangle([nx * s, ny * s, (nx + 34) * s, (ny + 34) * s],
+        dr.rectangle([nx * s, (ny + 2) * s, (nx + 38) * s, (ny + 40) * s], fill=(0, 0, 0, 24))
+        dr.rectangle([nx * s, ny * s, (nx + 38) * s, (ny + 38) * s],
                      fill=hex_rgb(over(col, 0.92, panel_fill)))
-        dr.ellipse([(nx + 15) * s, (ny + 2) * s, (nx + 19) * s, (ny + 6) * s],
+        dr.ellipse([(nx + 17) * s, (ny + 2) * s, (nx + 21) * s, (ny + 6) * s],
                    fill=hex_rgb(accent) + (200,))
         for i in range(lines):
-            dr.line([(nx + 4) * s, (ny + 12 + i * 6) * s, (nx + 29) * s, (ny + 12 + i * 6) * s],
+            dr.line([(nx + 4) * s, (ny + 14 + i * 7) * s, (nx + 33) * s, (ny + 14 + i * 7) * s],
                     fill=hex_rgb(ink) + (110,), width=max(1, s))
-    ax, ay = x0 + 152, band_y0 + 26          # a printed A4 with a tiny burndown
-    dr.rectangle([(ax + 2) * s, (ay + 2) * s, (ax + 44) * s, (ay + 76) * s], fill=(0, 0, 0, 22))
-    dr.rectangle([ax * s, ay * s, (ax + 44) * s, (ay + 74) * s], fill="#FFFFFF")
-    dr.text(((ax + 4) * s, (ay + 4) * s), "BURNDOWN", font=font(5.5 * s, bold=True, mono=True),
+    ax, ay = x0 + 150, y0 + 16          # a printed A4 with a tiny burndown
+    dr.rectangle([(ax + 2) * s, (ay + 2) * s, (ax + 52) * s, (ay + 100) * s], fill=(0, 0, 0, 22))
+    dr.rectangle([ax * s, ay * s, (ax + 50) * s, (ay + 98) * s], fill="#FFFFFF")
+    dr.text(((ax + 5) * s, (ay + 5) * s), "BURNDOWN", font=font(6.5 * s, bold=True, mono=True),
             fill="#41506A")
-    pts = [(ax + 5, ay + 24), (ax + 14, ay + 34), (ax + 23, ay + 42), (ax + 32, ay + 54),
-           (ax + 39, ay + 62)]        # remaining work goes DOWN, not up
-    dr.line([(px * s, py * s) for px, py in pts], fill="#1D4ED8", width=max(1, s))
-    for px, py in pts:
-        dr.ellipse([(px - 1) * s, (py - 1) * s, (px + 1) * s, (py + 1) * s], fill="#1D4ED8")
-    rects.append((x0, band_y0, x1, band_y1))
+    pts = [(ax + 6, ay + 30), (ax + 16, ay + 44), (ax + 26, ay + 55), (ax + 36, ay + 72),
+           (ax + 44, ay + 84)]        # remaining work goes DOWN, not up
+    dr.line([(px_ * s, py_ * s) for px_, py_ in pts], fill="#1D4ED8", width=max(1, s))
+    for px_, py_ in pts:
+        dr.ellipse([(px_ - 1.5) * s, (py_ - 1.5) * s, (px_ + 1.5) * s, (py_ + 1.5) * s],
+                   fill="#1D4ED8")
+    rects.append((x0, y0, x1, y1))
 
-    # ---- 2d · whiteboard with the week's architecture sketch
+    # ---- 4 · whiteboard with the week's architecture sketch
     x0, x1 = mods[3]
     board = "#FBFDFF" if light else over("#DCE4F0", 0.16, d["wall"])
-    _wall_panel(d, dr, (x0, band_y0, x1, band_y1), s, fill=board, border_a=0.34)
-    dr.text(((x0 + 10) * s, (band_y0 + 7) * s), "ARSITEKTUR",
-            font=font(7.5 * s, bold=True, mono=True), fill=muted)
+    _wall_panel(d, dr, (x0, y0, x1, y1), s, fill=board, border_a=0.34)
+    dr.text(((x0 + 10) * s, (y0 + 8) * s), "ARSITEKTUR",
+            font=font(8.5 * s, bold=True, mono=True), fill=muted)
     sk = ink if light else "#DCE4F0"
-    for bx, by, lbl in ((x0 + 12, band_y0 + 24, "L1"), (x0 + 58, band_y0 + 24, "L2"),
-                        (x0 + 12, band_y0 + 60, "L3"), (x0 + 58, band_y0 + 60, "API")):
-        dr.rounded_rectangle([bx * s, by * s, (bx + 36) * s, (by + 18) * s], radius=2 * s,
+    for bx, by, lbl in ((x0 + 12, y0 + 26, "L1"), (x0 + 58, y0 + 26, "L2"),
+                        (x0 + 12, y0 + 70, "L3"), (x0 + 58, y0 + 70, "API")):
+        dr.rounded_rectangle([bx * s, by * s, (bx + 38) * s, (by + 22) * s], radius=2 * s,
                              outline=hex_rgb(over(accent, 0.75, board)), width=max(1, s))
-        dr.text(((bx + 18) * s, (by + 9) * s), lbl, font=font(7 * s, bold=True, mono=True),
+        dr.text(((bx + 19) * s, (by + 11) * s), lbl, font=font(8 * s, bold=True, mono=True),
                 fill=hex_rgb(over(accent, 0.8, board)), anchor="mm")
-    dr.line([((x0 + 48) * s, (band_y0 + 33) * s), ((x0 + 58) * s, (band_y0 + 33) * s)],
+    dr.line([((x0 + 50) * s, (y0 + 37) * s), ((x0 + 58) * s, (y0 + 37) * s)],
             fill=hex_rgb(over(sk, 0.55, board)), width=max(1, s))
-    dr.line([((x0 + 76) * s, (band_y0 + 42) * s), ((x0 + 76) * s, (band_y0 + 60) * s)],
+    dr.line([((x0 + 78) * s, (y0 + 48) * s), ((x0 + 78) * s, (y0 + 70) * s)],
             fill=hex_rgb(over(sk, 0.55, board)), width=max(1, s))
-    dr.line([((x0 + 30) * s, (band_y0 + 42) * s), ((x0 + 30) * s, (band_y0 + 60) * s)],
+    dr.line([((x0 + 31) * s, (y0 + 48) * s), ((x0 + 31) * s, (y0 + 70) * s)],
             fill=hex_rgb(over(sk, 0.55, board)), width=max(1, s))
-    dr.text(((x0 + 12) * s, (band_y0 + 88) * s), "cache 6 · LRU 64",
-            font=font(6.5 * s, mono=True), fill=muted)
-    dr.rounded_rectangle([(x1 - 42) * s, (band_y0 + 6) * s, (x1 - 8) * s, (band_y0 + 19) * s],
+    dr.text(((x0 + 12) * s, (y0 + 106) * s), "cache 6 · LRU 64",
+            font=font(7.5 * s, mono=True), fill=muted)
+    dr.rounded_rectangle([(x1 - 46) * s, (y0 + 6) * s, (x1 - 8) * s, (y0 + 21) * s],
                          radius=4 * s, fill=hex_rgb(accent) + (48,))
-    dr.text(((x1 - 25) * s, (band_y0 + 8) * s), "WIP 3", font=font(7 * s, bold=True, mono=True),
+    dr.text(((x1 - 27) * s, (y0 + 8) * s), "WIP 3", font=font(8 * s, bold=True, mono=True),
             fill=accent, anchor="ma")
-    dr.rectangle([x0 * s, (band_y1 - 6) * s, x1 * s, (band_y1 - 2) * s],
+    dr.rectangle([x0 * s, (y1 - 7) * s, x1 * s, (y1 - 3) * s],
                  fill=hex_rgb(shade(d["wall"], 0.8)))          # marker tray
-    rects.append((x0, band_y0, x1, band_y1))
+    rects.append((x0, y0, x1, y1))
 
-    # ---- 2e · wall clock (ikut WIB, sama dengan HUD)
+    # ---- 5 · wall clock (ikut WIB, sama dengan HUD)
     x0, x1 = mods[4]
-    _wall_panel(d, dr, (x0, band_y0, x1, band_y1), s, fill=panel_fill)
-    ccx, ccy, r = (x0 + x1) / 2, band_y0 + 36, 18
+    _wall_panel(d, dr, (x0, y0, x1, y1), s, fill=panel_fill)
+    ccx, ccy, r = (x0 + x1) / 2, y0 + 44, 22
     dr.ellipse([(ccx - r) * s, (ccy - r) * s, (ccx + r) * s, (ccy + r) * s],
                fill=hex_rgb(d["desk_top"]), outline=hex_rgb(d["border"]) + (120,),
                width=max(1, round(1.5 * s)))
@@ -2084,112 +2054,57 @@ def wall_program(img: Image.Image, d: dict, dr, s: int, layout: dict) -> list[tu
         ang = math.pi * 2 * k / 12
         r0 = r - 4
         dr.line([((ccx + math.sin(ang) * r0) * s, (ccy - math.cos(ang) * r0) * s),
-                 ((ccx + math.sin(ang) * (r0 - 3)) * s, (ccy - math.cos(ang) * (r0 - 3)) * s)],
+                 ((ccx + math.sin(ang) * (r0 - 4)) * s, (ccy - math.cos(ang) * (r0 - 4)) * s)],
                 fill=hex_rgb(muted) + (170,), width=max(1, s))
     _tname, tclock = THEME_META[d["id"]]
     hh, mm = (int(v) for v in tclock.split(":"))
-    for ang, ln, wd in ((-math.pi * 2 * mm / 60, r - 5, 1.3),
-                        (-math.pi * 2 * ((hh % 12) + mm / 60) / 12, r - 9, 1.9)):
+    for ang, ln, wd in ((-math.pi * 2 * mm / 60, r - 6, 1.4),
+                        (-math.pi * 2 * ((hh % 12) + mm / 60) / 12, r - 10, 2.1)):
         dr.line([(ccx * s, ccy * s),
                  ((ccx + math.sin(ang) * ln) * s, (ccy - math.cos(ang) * ln) * s)],
                 fill=hex_rgb(ink), width=max(1, round(wd * s)))
     dr.ellipse([(ccx - 1.5) * s, (ccy - 1.5) * s, (ccx + 1.5) * s, (ccy + 1.5) * s],
                fill=hex_rgb(accent))
-    dr.text((ccx * s, (ccy + 26) * s), tclock, font=font(8.5 * s, bold=True, mono=True),
+    dr.text((ccx * s, (ccy + 32) * s), tclock, font=font(9.5 * s, bold=True, mono=True),
             fill=ink, anchor="ma")
-    dr.text((ccx * s, (ccy + 40) * s), "WIB", font=font(7.5 * s, mono=True), fill=muted,
+    dr.text((ccx * s, (ccy + 48) * s), "WIB", font=font(8 * s, mono=True), fill=muted,
             anchor="ma")
-    rects.append((x0, band_y0, x1, band_y1))
+    dr.line([((x0 + 14) * s, (y0 + 124) * s), ((x1 - 14) * s, (y0 + 124) * s)],
+            fill=hex_rgb(d["border"]) + (60,), width=max(1, s))
+    dr.text((ccx * s, (y0 + 130) * s), "GMT+7", font=font(7 * s, mono=True), fill=muted,
+            anchor="ma")
+    rects.append((x0, y0, x1, y1))
 
-    # ---- 2f · wall bookshelf: a real frame (2 side posts + 2 shelves), books
+    # ---- 6 · wall bookshelf: a real frame (2 side posts + 2 shelves), books
     #          inside it — the fix for "rak buku terbaca sebagai bar warna"
     x0, x1 = mods[5]
-    _wall_panel(d, dr, (x0, band_y0, x1, band_y1), s, fill=panel_fill, dy=3)
-    for px_ in (x0 + 2, x1 - 6):
-        dr.rectangle([px_ * s, band_y0 * s, (px_ + 4) * s, band_y1 * s], fill=hex_rgb(wood))
-        dr.rectangle([px_ * s, band_y0 * s, (px_ + 1) * s, band_y1 * s], fill=hex_rgb(wood_hi))
-    dr.rectangle([x0 * s, band_y0 * s, x1 * s, (band_y0 + 4) * s], fill=hex_rgb(wood))
-    shelves = (band_y0 + 58, band_y1 - 4)
+    _wall_panel(d, dr, (x0, y0, x1, y1), s, fill=panel_fill, dy=3)
+    for px_ in (x0 + 2, x1 - 7):
+        dr.rectangle([px_ * s, y0 * s, (px_ + 5) * s, y1 * s], fill=hex_rgb(wood))
+        dr.rectangle([px_ * s, y0 * s, (px_ + 1) * s, y1 * s], fill=hex_rgb(wood_hi))
+    dr.rectangle([x0 * s, y0 * s, x1 * s, (y0 + 5) * s], fill=hex_rgb(wood))
+    shelves = (y0 + 72, y1 - 5)
     for sy in shelves:
-        dr.rectangle([(x0 + 4) * s, (sy - 3) * s, (x1 - 4) * s, sy * s], fill=hex_rgb(wood))
-        dr.rectangle([(x0 + 4) * s, (sy - 3) * s, (x1 - 4) * s, (sy - 2) * s],
+        dr.rectangle([(x0 + 5) * s, (sy - 4) * s, (x1 - 5) * s, sy * s], fill=hex_rgb(wood))
+        dr.rectangle([(x0 + 5) * s, (sy - 4) * s, (x1 - 5) * s, (sy - 3) * s],
                      fill=hex_rgb(wood_hi))
     for row, sy in enumerate(shelves):
-        bx = x0 + 8
-        top = (band_y0 + 4) if row == 0 else shelves[row - 1]
-        room = sy - 3 - top
+        bx = x0 + 10
+        top = (y0 + 5) if row == 0 else shelves[row - 1]
+        room = sy - 4 - top
         k = 0
-        while bx < x1 - 12:
-            bw = 6 + (k * 3 + row) % 4
-            bh = max(10, room - (2 + (k * 5 + row * 3) % 6))
-            dr.rectangle([bx * s, (sy - 3 - bh) * s, (bx + bw) * s, (sy - 3) * s],
+        while bx < x1 - 14:
+            bw = 7 + (k * 3 + row) % 5
+            bh = max(12, room - (2 + (k * 5 + row * 3) % 8))
+            dr.rectangle([bx * s, (sy - 4 - bh) * s, (bx + bw) * s, (sy - 4) * s],
                          fill=hex_rgb(book_cols[(k + row * 2) % len(book_cols)]))
-            dr.rectangle([bx * s, (sy - 3 - bh) * s, (bx + 1) * s, (sy - 3) * s],
+            dr.rectangle([bx * s, (sy - 4 - bh) * s, (bx + 1) * s, (sy - 4) * s],
                          fill=(255, 255, 255, 60))
             bx += bw + 1
             k += 1
-    rects.append((x0, band_y0, x1, band_y1))
+    rects.append((x0, y0, x1, y1))
 
-    # ---- 3 · the ledge under the boards: one shelf board, books, binders,
-    #          boxes and a plant standing on it, all the way across
-    ly0, ly1 = LEDGE_BAND
-    surf = ly1 - 5                      # the board's top face
-    dr.rectangle([0, surf * s, 1000 * s, ly1 * s], fill=hex_rgb(wood))
-    dr.rectangle([0, surf * s, 1000 * s, (surf + 1) * s], fill=hex_rgb(wood_hi))
-    for i in range(5):                  # shadow under the board
-        dr.line([(0, (ly1 + i) * s), (1000 * s, (ly1 + i) * s)],
-                fill=(0, 0, 0, 30 - i * 5), width=max(1, s))
-    bx, i = 4.0, 0
-    while bx < 992:
-        kind = i % 9
-        if kind in (0, 1, 2, 3):                       # a run of books
-            w = 7 + (i * 3) % 5
-            h = 38 + (i * 7) % 16
-            dr.rectangle([bx * s, (surf - h) * s, (bx + w) * s, surf * s],
-                         fill=hex_rgb(book_cols[(i + kind) % len(book_cols)]))
-            dr.rectangle([bx * s, (surf - h) * s, (bx + 1) * s, surf * s],
-                         fill=(255, 255, 255, 60))
-            rects.append((bx, surf - h, bx + w, surf))
-            bx += w + 1
-        elif kind == 4:                                 # three binders, one leaning
-            for j, (w, h) in enumerate(((9, 46), (8, 42), (9, 48))):
-                dr.rectangle([(bx + j * 10) * s, (surf - h) * s, (bx + j * 10 + w) * s, surf * s],
-                             fill=hex_rgb(book_cols[(i + j + 3) % len(book_cols)]))
-            rects.append((bx, surf - 48, bx + 27, surf))
-            bx += 30
-        elif kind == 5:                                 # a storage box
-            w, h = 30, 30
-            dr.rectangle([bx * s, (surf - h) * s, (bx + w) * s, surf * s],
-                         fill=hex_rgb(shade(d["desk"], 0.92)),
-                         outline=hex_rgb(shade(d["desk"], 0.7)) + (255,), width=max(1, s))
-            dr.rectangle([bx * s, (surf - h) * s, (bx + w) * s, (surf - h + 8) * s],
-                         fill=hex_rgb(over(accent, 0.25, d["wall"])))
-            rects.append((bx, surf - h, bx + w, surf))
-            bx += w + 4
-        elif kind == 6:                                 # a potted plant
-            w, h = 24, 40
-            _plant_side(dr, (bx + w / 2) * s, surf * s, s, k=0.95)
-            rects.append((bx, surf - h, bx + w, surf))
-            bx += w + 3
-        elif kind == 7:                                 # stack of papers
-            for j in range(4):
-                dr.rectangle([(bx + j * 0.6) * s, (surf - 4 - j * 3) * s,
-                              (bx + 22) * s, (surf - j * 3) * s],
-                             fill="#FFFFFF" if light else "#D8E0EE")
-            rects.append((bx, surf - 16, bx + 22, surf))
-            bx += 25
-        else:                                           # a framed photo
-            w, h = 26, 34
-            dr.rectangle([bx * s, (surf - h) * s, (bx + w) * s, surf * s],
-                         fill=hex_rgb(shade(d["desk"], 0.6)))
-            dr.rectangle([(bx + 3) * s, (surf - h + 3) * s, (bx + w - 3) * s,
-                          (surf - 3) * s], fill=hex_rgb(over(accent, 0.35, "#B9CBDD")))
-            rects.append((bx, surf - h, bx + w, surf))
-            bx += w + 4
-        i += 1
-    rects.append((0, ly0, 1000, ly1))
-
-    # ---- 4 · skirting / plinth shadow gap along the wall base
+    # ---- 7 · skirting / plinth shadow gap along the wall base (in the spandrel)
     py0, py1 = PLINTH_BAND
     dr.rectangle([0, py0 * s, 1000 * s, py1 * s], fill=hex_rgb(shade(d["wall"], 0.9)))
     for i in range(4):
@@ -2199,168 +2114,203 @@ def wall_program(img: Image.Image, d: dict, dr, s: int, layout: dict) -> list[tu
             width=max(1, s))
     rects.append((0, py0, 1000, py1))
 
-    # ---- 5 · the low bookshelf (rak rendah) at the west end, with a frame and
-    #          a thin shadow so it is furniture, not a colour bar
-    sx, sw = _corridor_anchors(layout)["rak"]
-    ry1 = SIDE_FLOOR_BASE + 2
-    ry0 = ry1 - 98
-    sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ImageDraw.Draw(sh).rectangle([(sx - sw / 2 + 3) * s, ry0 * s, (sx + sw / 2 + 5) * s, ry1 * s],
-                                 fill=(0, 0, 0, 34 if light else 50))
-    comp(img, sh.filter(ImageFilter.GaussianBlur(3 * s)))
-    dr.rectangle([(sx - sw / 2) * s, ry0 * s, (sx + sw / 2) * s, ry1 * s], fill=hex_rgb(wood))
-    dr.rectangle([(sx - sw / 2 + 3) * s, (ry0 + 4) * s, (sx + sw / 2 - 3) * s, ry1 * s],
-                 fill=hex_rgb(over(d["surface_solid"], 0.55, d["wall"])))
-    for post in (-1, 1):
-        px_ = sx + post * (sw / 2 - 2) - 2
-        dr.rectangle([px_ * s, ry0 * s, (px_ + 4) * s, ry1 * s], fill=hex_rgb(wood))
-        dr.rectangle([px_ * s, ry0 * s, (px_ + 1) * s, ry1 * s], fill=hex_rgb(wood_hi))
-    dr.rectangle([(sx - sw / 2) * s, ry0 * s, (sx + sw / 2) * s, (ry0 + 4) * s],
-                 fill=hex_rgb(wood))
-    for row in range(2):
-        sy = ry0 + 48 + row * 46
-        dr.rectangle([(sx - sw / 2 + 3) * s, (sy - 3) * s, (sx + sw / 2 - 3) * s, sy * s],
-                     fill=hex_rgb(wood))
-        bx = sx - sw / 2 + 7
-        k = 0
-        while bx < sx + sw / 2 - 10:
-            bw = 7 + (k * 3 + row) % 4
-            bh = 26 + (k * 7 + row * 5) % 12
-            dr.rectangle([bx * s, (sy - 3 - bh) * s, (bx + bw) * s, (sy - 3) * s],
-                         fill=hex_rgb(book_cols[(k + row + 2) % len(book_cols)]))
-            dr.rectangle([bx * s, (sy - 3 - bh) * s, (bx + 1) * s, (sy - 3) * s],
-                         fill=(255, 255, 255, 60))
-            bx += bw + 2
-            k += 1
-    rects.append((sx - sw / 2, ry0, sx + sw / 2, ry1))
-
-    # ---- 6 · seven recessed downlights in the soffit band
+    # ---- 8 · seven recessed downlights in the soffit band
     glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
     lamp = "#FFFFFF" if light else "#F6EBCB"
     for dx in (96, 240, 384, 528, 672, 816, 952):
-        dr.rounded_rectangle([(dx - 9) * s, (SIDE_CITY_H + 9) * s, (dx + 9) * s,
-                              (SIDE_CITY_H + 12) * s], radius=1 * s, fill=hex_rgb(lamp))
-        gd.ellipse([(dx - 17) * s, (SIDE_CITY_H + 11) * s, (dx + 17) * s,
-                    (SIDE_CITY_H + 22) * s], fill=hex_rgb(lamp) + (70,))
-        rects.append((dx - 17, SIDE_CITY_H + 9, dx + 17, SIDE_CITY_H + 22))
+        dr.rounded_rectangle([(dx - 10) * s, (SIDE_CEIL_Y + 8) * s, (dx + 10) * s,
+                              (SIDE_CEIL_Y + 11) * s], radius=1 * s, fill=hex_rgb(lamp))
+        gd.ellipse([(dx - 18) * s, (SIDE_CEIL_Y + 9) * s, (dx + 18) * s,
+                    (SIDE_CEIL_Y + 22) * s], fill=hex_rgb(lamp) + (70,))
+        rects.append((dx - 18, SIDE_CEIL_Y + 8, dx + 18, SIDE_CEIL_Y + 24))
     comp(img, glow.filter(ImageFilter.GaussianBlur(3 * s)))
     return rects
 
-def _corridor_anchors(layout: dict) -> dict:
-    """Prop anchors derived from the SLOTS (not from world x), so the wall
-    programme can never land on an agent: the low shelf at the west end, the
-    glass partition + plant in the corridor break, the server rack east."""
+
+def _prop_anchors(layout: dict) -> dict:
+    """Prop anchors derived from the SLOTS (not from world x), so the furniture
+    can never land on an agent: low shelf at the west end, server rack east,
+    plant in the west corner."""
     slots = sorted(layout["agents"], key=lambda a: a["cx"])
     cw = CANVAS[2] - CANVAS[0]
     first, last = slots[0], slots[-1]
-    part = (slots[-2]["cx"] + last["cx"]) / 2 if len(slots) >= 2 else None
-    return {"rak": (max(44.0, first["cx"] - 48), 40.0),
-            "rack": (min(cw - 46.0, last["cx"] + 46), 46.0),
-            "part": part, "plant": (part + 13) if part else None}
+    return {"rak": (max(60.0, first["cx"] - 89), 76.0),
+            "rack": (min(cw - 56.0, last["cx"] + 77), 44.0),
+            "plant": max(22.0, first["cx"] - 157)}
 
 
 def draw_side_scene(img: Image.Image, d: dict, fid: str = "L3", s: int = 1) -> dict:
     """The side elevation into `img` — a standalone (1000 x 688)*s scene canvas.
-    Returns the 1x layout (used for the plates, which are drawn at 1x)."""
+    Returns the 1x layout (used for the plates, which are drawn at 1x).
+
+    Band order, top to bottom: 40 px roof · 18 px soffit · the CURTAIN WALL
+    (58..543, the city behind it) · spandrel · floor finish · slab. The boards
+    hang in front of the glass at 132..280; everything below that is the view.
+    """
     layout = side_layout(fid)
     cw, ch = (CANVAS[2] - CANVAS[0]) * s, (CANVAS[3] - CANVAS[1]) * s
     dr = ImageDraw.Draw(img, "RGBA")
     light = d["mode"] == "light"
 
-    # 1 · the city skyline band behind the curtain wall (top of the canvas)
-    draw_city(img, (0, 0, CANVAS[2] - CANVAS[0], SIDE_CITY_H), d, seed=5, s=s)
+    # 1 · roof: 40 px of slab + coping + fascia above the ceiling, nothing else
+    roof = Image.new("L", img.size, 0)
+    ImageDraw.Draw(roof).rectangle([0, 0, cw, SIDE_CEIL_Y * s], fill=255)
+    paint_grad(img, roof, shade(d["wall"], 1.10), shade(d["wall"], 0.78))
+    dr.rectangle([0, 0, cw, 8 * s], fill=hex_rgb(shade(d["wall"], 1.16)))        # coping
+    dr.rectangle([0, 8 * s, cw, 26 * s], fill=hex_rgb(shade(d["wall"], 0.72)))   # slab edge
+    for hx in range(-24, int(cw) + 24, 18 * s):                                  # hatch
+        dr.line([(hx, 26 * s), (hx + 18 * s, 8 * s)], fill=(255, 255, 255, 20),
+                width=max(1, s))
+    dr.rectangle([0, 26 * s, cw, SIDE_CEIL_Y * s],
+                 fill=hex_rgb(shade(d["wall"], 0.94)))                            # fascia
+    dr.line([(0, 8 * s), (cw, 8 * s)], fill=(255, 255, 255, 80), width=max(1, s))
+    dr.line([(0, SIDE_CEIL_Y * s - 1), (cw, SIDE_CEIL_Y * s - 1)],
+            fill=hex_rgb(shade(d["wall"], 0.56)), width=max(1, s))
 
-    # 2 · the curtain wall in front of the city: ONE continuous glass sheet
-    #     (the old code drew 10 separate panes, each with its own drop shadow
-    #     and edge highlight — that is what read as a tiled image), then a real
-    #     curtain-wall rhythm on top: 4 wide bays, thin mullions and one
-    #     horizontal transom, all low-contrast so the skyline stays readable.
-    gx0, gx1 = 16, (CANVAS[2] - CANVAS[0]) - 16
-    draw_glass_panel(img, d, (gx0 * s, 0, gx1 * s, SIDE_CITY_H * s), s,
-                     radius=0, shadow=False, fill_a=0.20)
+    # 2 · the city, seen THROUGH the curtain wall — inside the room, behind the
+    #     desks. Drawn before the glass so the glass tints it.
+    # the glass runs the full width of the section: a cut through a glass tower
+    # has no opaque pier at the frame edge, only the frame itself
+    gx0, gx1 = 0, CANVAS[2] - CANVAS[0]
+    draw_city(img, (gx0, SIDE_GLASS_TOP, gx1, SIDE_GLASS_BOT), d, seed=5, s=s)
+    layout["info"].append((gx0, SIDE_GLASS_TOP, gx1, SIDE_GLASS_BOT))
+    haze_h = 30                     # street haze so the skyline has no cut edge
+    ramp = Image.linear_gradient("L").resize((gx1 - gx0, haze_h))
+    strip = Image.new("RGBA", (gx1 - gx0, haze_h), hex_rgb(d["city"]["horizon"]))
+    strip.putalpha(ramp.point(lambda v: int(v * (0.38 if d["mode"] == "light" else 0.55))))
+    img.paste(strip, (gx0, SIDE_GLASS_BOT - haze_h), strip)
+
+    # 3 · the curtain wall itself: ONE continuous glass sheet (never ten panes
+    #     with ten shadows — that is what read as a tiled image), then a real
+    #     curtain-wall rhythm on top: 4 bays, thin mullions, one transom.
+    draw_glass_panel(img, d, (gx0 * s, SIDE_GLASS_TOP * s, gx1 * s, SIDE_GLASS_BOT * s), s,
+                     radius=0, shadow=False, fill_a=0.18, sheen_slope=0.16)
     bay = (gx1 - gx0) / 4
-    mull = hex_rgb(shade(d["wall"], 0.86)) + (215,)
-    mull_hi = (255, 255, 255, 70)
+    mull = hex_rgb(shade(d["wall"], 0.82)) + (225,)
+    mull_hi = (255, 255, 255, 60)
     for k in range(1, 4):
         mx = (gx0 + k * bay) * s
-        dr.rectangle([mx - 1.5 * s, 0, mx + 1.5 * s, SIDE_CITY_H * s], fill=mull)
-        dr.rectangle([mx - 1.5 * s, 0, mx - 0.5 * s, SIDE_CITY_H * s], fill=mull_hi)
-    ty_ = int(SIDE_CITY_H * 0.62) * s                       # one transom, 62 % down
+        dr.rectangle([mx - 1.5 * s, SIDE_GLASS_TOP * s, mx + 1.5 * s, SIDE_GLASS_BOT * s],
+                     fill=mull)
+        dr.rectangle([mx - 1.5 * s, SIDE_GLASS_TOP * s, mx - 0.5 * s, SIDE_GLASS_BOT * s],
+                     fill=mull_hi)
+    ty_ = (SIDE_GLASS_TOP + 0.62 * (SIDE_GLASS_BOT - SIDE_GLASS_TOP)) * s
     dr.rectangle([gx0 * s, ty_ - 1 * s, gx1 * s, ty_ + 1 * s],
-                 fill=hex_rgb(shade(d["wall"], 0.9)) + (170,))
-    for ex in (gx0, gx1):                                   # side jambs
-        dr.rectangle([ex * s - 2.5 * s, 0, ex * s + 2.5 * s, SIDE_CITY_H * s], fill=mull)
-    dr.rectangle([0, 0, cw, 1 * s], fill=(255, 255, 255, 120))   # 1 px top-edge highlight
+                 fill=hex_rgb(shade(d["wall"], 0.86)) + (170,))
+    for ex in (gx0, gx1):                                    # frame at the cut
+        dr.rectangle([ex * s - 3 * s, SIDE_GLASS_TOP * s, ex * s + 3 * s,
+                      SIDE_GLASS_BOT * s], fill=mull)
+    dr.rectangle([gx0 * s, SIDE_GLASS_BOT * s - 2 * s, gx1 * s, SIDE_GLASS_BOT * s],
+                 fill=mull)                                  # sill
 
-    # 3 · ceiling band: a 26 px soffit with ONE continuous light cove, closed by
-    #     a window head at the top and a soffit edge below. The 7 recessed
-    #     downlights are drawn by the wall programme.
-    ct, cb = SIDE_CITY_H * s, SIDE_WALL_TOP * s
+    # 4 · ceiling: an 18 px soffit with one continuous light cove, closed by a
+    #     window head at the bottom. The 7 downlights come from the programme.
+    ct, cb = SIDE_CEIL_Y * s, (SIDE_CEIL_Y + SIDE_SOFFIT_H) * s
     soffit = Image.new("L", img.size, 0)
     ImageDraw.Draw(soffit).rectangle([0, ct, cw, cb], fill=255)
-    paint_grad(img, soffit, shade(d["wall"], 1.02), shade(d["wall"], 0.86))
-    dr.rectangle([0, ct, cw, ct + 1 * s], fill=hex_rgb(shade(d["wall"], 0.62)))  # window head
+    paint_grad(img, soffit, shade(d["wall"], 1.04), shade(d["wall"], 0.82))
     lamp = "#FFFFFF" if light else "#F6EBCB"
-    glow = Image.new("RGBA", img.size, (0, 0, 0, 0))      # a soft cove, not a bar
-    ImageDraw.Draw(glow).rectangle([0, ct + 4 * s, cw, ct + 11 * s],
+    glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow).rectangle([0, ct + 3 * s, cw, ct + 8 * s],
                                    fill=hex_rgb(lamp) + (140,))
     comp(img, glow.filter(ImageFilter.GaussianBlur(4 * s)))
-    dr.rectangle([0, ct + 6 * s, cw, ct + 7 * s], fill=hex_rgb(lamp) + (85,))
-    pool = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ImageDraw.Draw(pool).rectangle([0, ct + 8 * s, cw, cb + 40 * s], fill=hex_rgb(lamp) + (14,))
-    comp(img, pool.filter(ImageFilter.GaussianBlur(9 * s)))
-    dr.rectangle([0, cb - 1 * s, cw, cb], fill=hex_rgb(shade(d["wall"], 0.7)))   # soffit edge
+    dr.rectangle([0, cb - 1 * s, cw, cb], fill=hex_rgb(shade(d["wall"], 0.64)))
+    layout["info"].append((0, SIDE_CEIL_Y, 1000, SIDE_CEIL_Y + SIDE_SOFFIT_H))
 
-    # 4 · interior: back wall (308 px clear height), floor finish, lane lines, slab
-    st, ft = SIDE_SLAB_TOP * s, SIDE_FINISH_TOP * s
+    # 5 · the opaque wall that is left: two jamb strips and the spandrel below
+    #     the window (the sill wall). The rest of the wall is the window.
     wall_mask = Image.new("L", img.size, 0)
-    ImageDraw.Draw(wall_mask).rectangle([0, cb, cw, ft], fill=255)
-    paint_grad(img, wall_mask, shade(d["wall"], 1.05), shade(d["wall"], 0.88))
+    wm = ImageDraw.Draw(wall_mask)
+    wm.rectangle([0, SIDE_GLASS_BOT * s, cw, SIDE_FINISH_TOP * s], fill=255)
+    paint_grad(img, wall_mask, shade(d["wall"], 1.05), shade(d["wall"], 0.86))
+    layout["info"].append((0, SIDE_GLASS_BOT, 1000, SIDE_FINISH_TOP))
+
+    # 6 · floor finish, the two lane lines, then the slab
+    ft, st = SIDE_FINISH_TOP * s, SIDE_SLAB_TOP * s
     fin_mask = Image.new("L", img.size, 0)
     ImageDraw.Draw(fin_mask).rectangle([0, ft, cw, st], fill=255)
     paint_grad(img, fin_mask, shade(d["floor"], 1.08), shade(d["floor"], 0.9))
     dr.line([(0, ft), (cw, ft)], fill=hex_rgb(shade(d["wall"], 0.75)), width=1 * s)
-    for lane in range(3):        # the three depth lanes, etched into the finish
-        ly = (SIDE_FLOOR_BASE + lane * LANE_DY) * s
-        dr.line([(0, ly), (cw, ly)], fill=hex_rgb(shade(d["floor"], 0.8)) + (150,), width=1 * s)
+    for lane in range(2):        # the two row lines, etched into the floor plane
+        ly = (SIDE_BACK_FLOOR + lane * LANE_DY) * s
+        dr.line([(0, ly), (cw, ly)], fill=hex_rgb(shade(d["floor"], 0.78)) + (160,),
+                width=1 * s)
     slab_mask = Image.new("L", img.size, 0)
     ImageDraw.Draw(slab_mask).rectangle([0, st, cw, ch], fill=255)
     paint_grad(img, slab_mask, shade(d["wall"], 1.0), shade(d["wall"], 0.78))
-    dr.line([(0, st), (cw, st)], fill=(255, 255, 255, 110), width=1 * s)   # slab top highlight
+    dr.line([(0, st), (cw, st)], fill=(255, 255, 255, 110), width=1 * s)
 
-    # 5 · the wall programme (zone plaque, status board, pinboard, whiteboard,
-    #     clock, wall shelf, trunking, plinth, downlights) — the answer to
-    #     "jangan biarkan dinding kosong"; its rects feed side_wall_gate().
-    layout["info"] = wall_program(img, d, dr, s, layout)
+    # 7 · the wall programme (plaque, status, pinboard, whiteboard, clock,
+    #     bookshelf, rail, plinth, downlights) — its rects feed side_wall_gate()
+    layout["info"] += wall_program(img, d, dr, s, layout)
 
-    # 6 · props in profile, placed from the SLOTS so they never land on an agent
+    # 8 · props in profile, placed from the SLOTS so they never land on an agent
     if fid == "L3":
-        anc = _corridor_anchors(layout)
-        if anc["part"] is not None:      # glass partition between island and devops
-            px_ = anc["part"] * s
-            draw_glass_panel(img, d, (px_ - 8 * s, SIDE_WALL_TOP * s,
-                                      px_ + 8 * s, SIDE_FLOOR_BASE * s), s, radius=3 * s)
-        rx, ry, rh = anc["rack"][0] * s, SIDE_FLOOR_BASE * s, 110 * s
+        anc = _prop_anchors(layout)
+        wood = shade(d["desk"], 0.78)
+        book_cols = ("#B4553F", "#8A6A3E", "#6B7F5A", "#6D5B8E", "#3E6B8A", "#9C5A6B", "#4F6B57")
+        sx, sw = anc["rak"]                     # low bookshelf, west end
+        ry1 = SIDE_FRONT_FLOOR + 2
+        ry0 = ry1 - 150
         sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        ImageDraw.Draw(sh).ellipse([rx - 26 * s, ry - 3 * s, rx + 26 * s, ry + 4 * s],
+        ImageDraw.Draw(sh).rectangle([(sx - sw / 2 + 4) * s, ry0 * s,
+                                      (sx + sw / 2 + 6) * s, ry1 * s],
+                                     fill=(0, 0, 0, 34 if light else 50))
+        comp(img, sh.filter(ImageFilter.GaussianBlur(3 * s)))
+        dr.rectangle([(sx - sw / 2) * s, ry0 * s, (sx + sw / 2) * s, ry1 * s],
+                     fill=hex_rgb(wood))
+        dr.rectangle([(sx - sw / 2 + 4) * s, (ry0 + 6) * s, (sx + sw / 2 - 4) * s, ry1 * s],
+                     fill=hex_rgb(over(d["surface_solid"], 0.55, d["wall"])))
+        for post in (-1, 1):
+            px_ = sx + post * (sw / 2 - 3) - 2
+            dr.rectangle([px_ * s, ry0 * s, (px_ + 5) * s, ry1 * s], fill=hex_rgb(wood))
+            dr.rectangle([px_ * s, ry0 * s, (px_ + 1) * s, ry1 * s],
+                         fill=hex_rgb(shade(d["desk"], 1.06)))
+        dr.rectangle([(sx - sw / 2) * s, ry0 * s, (sx + sw / 2) * s, (ry0 + 5) * s],
+                     fill=hex_rgb(wood))
+        for row in range(2):
+            sy = ry0 + 74 + row * 70
+            dr.rectangle([(sx - sw / 2 + 4) * s, (sy - 4) * s, (sx + sw / 2 - 4) * s, sy * s],
+                         fill=hex_rgb(wood))
+            bx = sx - sw / 2 + 9
+            k = 0
+            while bx < sx + sw / 2 - 13:
+                bw = 8 + (k * 3 + row) % 5
+                bh = 38 + (k * 7 + row * 5) % 18
+                dr.rectangle([bx * s, (sy - 4 - bh) * s, (bx + bw) * s, (sy - 4) * s],
+                             fill=hex_rgb(book_cols[(k + row + 2) % len(book_cols)]))
+                dr.rectangle([bx * s, (sy - 4 - bh) * s, (bx + 1) * s, (sy - 4) * s],
+                             fill=(255, 255, 255, 60))
+                bx += bw + 2
+                k += 1
+        layout["info"].append((sx - sw / 2, ry0, sx + sw / 2, ry1))
+
+        rx, rw = anc["rack"]                    # server rack, east end
+        rh = 190
+        sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        ImageDraw.Draw(sh).ellipse([(rx - rw / 2 - 6) * s, (SIDE_FRONT_FLOOR - 3) * s,
+                                    (rx + rw / 2 + 6) * s, (SIDE_FRONT_FLOOR + 4) * s],
                                    fill=(0, 0, 0, 50))
         comp(img, sh.filter(ImageFilter.GaussianBlur(2 * s)))
-        rr(dr, (rx - 23 * s, ry - rh, rx + 23 * s, ry), 4 * s,
+        rr(dr, ((rx - rw / 2) * s, (SIDE_FRONT_FLOOR - rh) * s,
+                (rx + rw / 2) * s, SIDE_FRONT_FLOOR * s), 4 * s,
            fill=hex_rgb(shade(d["desk"], 0.86)), outline=shade(d["desk"], 0.6), width=max(1, s))
-        for i in range(5):
-            sy = ry - rh + 8 * s + i * 20 * s
-            dr.rectangle([rx - 18 * s, sy, rx + 6 * s, sy + 14 * s], fill=hex_rgb(d["desk_top"]))
+        for i in range(6):
+            sy = (SIDE_FRONT_FLOOR - rh + 10 + i * 30) * s
+            dr.rectangle([(rx - rw / 2 + 5) * s, sy, (rx + 2) * s, sy + 20 * s],
+                         fill=hex_rgb(d["desk_top"]))
             led = d["status"]["ok"] if i != 3 else d["status"]["blocked"]
-            for j in range(3):
-                dr.ellipse([rx + (10 + j * 5) * s, sy + 4 * s, rx + (13 + j * 5) * s, sy + 7 * s],
-                           fill=hex_rgb(led if j == 0 else d["muted"]))
-        layout["info"].append((rx - 23, ry / s - 110, rx + 23, ry / s))
-        if anc["plant"] is not None:
-            _plant_side(dr, anc["plant"] * s, SIDE_FLOOR_BASE * s, s, k=1.2)
+            for j in range(2):
+                dr.ellipse([(rx + 8 + j * 7) * s, sy + 6 * s, (rx + 12 + j * 7) * s,
+                            sy + 10 * s], fill=hex_rgb(led if j == 0 else d["muted"]))
+        layout["info"].append((rx - rw / 2, SIDE_FRONT_FLOOR - rh, rx + rw / 2, SIDE_FRONT_FLOOR))
+        _plant_side(dr, anc["plant"] * s, SIDE_FRONT_FLOOR * s, s, k=1.35)
+        layout["info"].append((anc["plant"] - 14, SIDE_FRONT_FLOOR - 62,
+                               anc["plant"] + 14, SIDE_FRONT_FLOOR))
 
-    # 7 · furniture per lane, far to near, then by x: shadow, chair back,
-    #     agent (feet on the lane floor line), then the desk over the lap
+    # 9 · furniture per row, back to front, then by x: shadow, chair back, agent
+    #     (feet on its row's floor line), then the desk over the lap
     for a in layout["agents"]:
         cx, fy, k = a["cx"] * s, a["floor_y"] * s, a["scale"]
         K = SIDE_K * k
@@ -2369,38 +2319,47 @@ def draw_side_scene(img: Image.Image, d: dict, fid: str = "L3", s: int = 1) -> d
                                    fill=(0, 0, 0, 45 if light else 60))
         comp(img, sh.filter(ImageFilter.GaussianBlur(2 * s)))
         rr(dr, (cx - 12 * K * s, fy - 46 * K * s, cx + 12 * K * s, fy - 16 * K * s),
-           4 * K * s, fill=hex_rgb(shade(d["desk"], 0.66)))       # chair back
+           4 * K * s, fill=hex_rgb(shade(d["desk"], 0.60 if a["row"] else 0.50)))  # chair back
         spr = avatar(LOOKS[a["id"]], a["avatar_h"] * s, a["status"], d["status"]["blocked"])
         comp(img, spr, (int(cx - spr.width / 2), int(fy - spr.height)))
         dw, ty = 46 * K * s, fy - SIDE_DESK_TOP * k * s           # desk in profile
+        # the back row's desk sits one step further away: same shape, one shade
+        # down, so the two rows read as depth instead of one continuous bar
+        desk_col = shade(d["desk"], 0.90 if a["row"] == 0 else 1.0)
         rr(dr, (cx - dw / 2, ty, cx + dw / 2, ty + SIDE_DESK_THICK * k * s), 2 * K * s,
-           fill=hex_rgb(d["desk"]))
+           fill=hex_rgb(desk_col))
         dr.line([(cx - dw / 2 + 2 * s, ty), (cx + dw / 2 - 2 * s, ty)],
-                fill=hex_rgb(shade(d["desk_top"], 1.25)), width=max(1, s))   # 1 px highlight
-        for side in (-1, 1):
+                fill=hex_rgb(shade(d["desk_top"], 1.25)), width=max(1, s))
+        leg_col = over(d["desk_top"], 0.45, d["muted"])   # white legs on a pale
+        for side in (-1, 1):                              # floor are invisible
             lx = cx + side * (dw / 2 - 6 * K * s)
             dr.rectangle([lx - 1.5 * K * s, ty + SIDE_DESK_THICK * k * s,
-                          lx + 1.5 * K * s, fy], fill=hex_rgb(shade(d["desk"], 0.8)))
+                          lx + 1.5 * K * s, fy], fill=hex_rgb(leg_col))
+            dr.rectangle([lx - 1.5 * K * s, ty + SIDE_DESK_THICK * k * s,
+                          lx - 0.5 * K * s, fy], fill=hex_rgb(shade(leg_col, 0.82)))
         col = d["status"][a["status"]]                            # screen = status
         # the screen is sized from the FIGURE, not from the desk: 0,24 × 0,19 of
         # the avatar height, standing on the desk to the figure's right. Sized
-        # from the desk it grew into the face — at 88 px the head is 33 px tall
-        # and the desk top sits at the chin, so anything taller covers the face.
+        # from the desk it grew into the face.
         av = a["avatar_h"]
-        mw, mh = 0.24 * av * s, 0.19 * av * s
-        mx = cx + 0.19 * av * s
-        my = ty - 0.10 * av * s - mh
-        dr.rectangle([mx + mw / 2 - 2 * s, ty - 0.10 * av * s, mx + mw / 2 + 2 * s, ty],
-                     fill=hex_rgb(shade(d["desk"], 0.7)))         # the stand
+        mw, mh = 0.28 * av * s, 0.20 * av * s
+        mx = cx + 0.12 * av * s
+        gap = 0.05 * av * s
+        my = ty - gap - mh
+        metal = over(d["desk_top"], 0.30, d["muted"])            # a stand you can
+        dr.rectangle([mx + mw / 2 - 4 * s, ty - gap, mx + mw / 2 + 4 * s, ty],
+                     fill=hex_rgb(metal))                         # actually see
+        dr.rectangle([mx + mw / 2 - 9 * s, ty - 3 * s, mx + mw / 2 + 9 * s, ty],
+                     fill=hex_rgb(shade(metal, 0.84)))            # the foot
         rr(dr, (mx, my, mx + mw, my + mh), 2 * K * s, fill=over(col, 0.16, "#0A0F18"),
            outline=shade(d["desk"], 0.55), width=max(1, s))
         dr.line([(mx + 3 * s, my + mh * 0.26), (mx + mw - 3 * s, my + mh * 0.26)],
                 fill=col + "CC", width=max(1, s))
         dr.line([(mx + 3 * s, my + mh * 0.46), (mx + mw * 0.62, my + mh * 0.46)],
                 fill=col + "77", width=max(1, s))
-        layout["info"].append((cx - dw / 2, ty / s, cx + dw / 2, a["floor_y"]))
-        layout["info"].append((a["cx"] - AV_HALF_W, a["head_top"],
-                               a["cx"] + AV_HALF_W, a["head_top"] + SIDE_HEAD_BOX_H))
+        layout["info"].append((cx - dw / 2 / s, ty / s, cx + dw / 2 / s, a["floor_y"]))
+        layout["info"].append((a["cx"] - SIDE_AV_BOX_HW, a["head_top"],
+                               a["cx"] + SIDE_AV_BOX_HW, a["floor_y"]))
     return layout
 
 
@@ -2430,7 +2389,7 @@ def render_side(d: dict, path: Path, floor: str = "L3") -> Image.Image:
 
 def render_side_mobile(d: dict, path: Path, floor: str = "L3") -> None:
     """The 390x844 phone sheet for the section view: header, the scene (the
-    occupied span, scaled to the phone width), floor chips and roster sheet."""
+    whole floor, scaled to the phone width), floor chips and roster sheet."""
     w, h = 390, 844
     label = next(lbl for f, lbl, _ in FLOORS if f == floor)
     tname, tclock = THEME_META[d["id"]]
@@ -2492,27 +2451,24 @@ def render_side_mobile(d: dict, path: Path, floor: str = "L3") -> None:
 
 def side_report(fid: str = "L3") -> None:
     """The measured section numbers the R&D document quotes."""
-    cam = side_camera(fid)
     layout = side_layout(fid)
     n = len(layout["agents"])
-    print(f"side camera {fid}: world x {cam['world_lo']:.2f}..{cam['world_hi']:.2f} "
-          f"(corridor {SIDE_GAP_FROM}..{SIDE_GAP_TO} elided to {SIDE_GAP_KEEP} unit) → "
-          f"elevation x {cam['eff_lo']:.2f}..{cam['eff_hi']:.2f} = "
-          f"{(cam['eff_hi'] - cam['eff_lo']) * SIDE_PPU:.0f} px @ {cam['ppu']:.1f} px/unit "
-          f"(FIXED, not fit-to-width)")
-    lanes: dict[int, list[str]] = {}
-    for a in layout["agents"]:
-        lanes.setdefault(a["lane"], []).append(a["name"])
-    for lane in sorted(lanes):
-        print(f"  side lane {lane} (scale {LANE_SCALE[lane]:.2f}, +{lane * LANE_DY} px, "
-              f"floor y {SIDE_FLOOR_BASE + lane * LANE_DY}, "
-              f"avatar {SIDE_AVATAR_H * LANE_SCALE[lane]:.0f} px): " + ", ".join(lanes[lane]))
-    print(f"  bands: city 0..{SIDE_CITY_H} · soffit {SIDE_CITY_H}..{SIDE_WALL_TOP} · "
-          f"room {SIDE_WALL_TOP}..{SIDE_FINISH_TOP} ({SIDE_ROOM_H} px = {SIDE_CEIL_UNITS:g} unit) · "
+    print(f"side section {fid}: {n} agen · grid {SIDE_PITCH} px/baris (4 per baris), "
+          f"stagger setengah pitch · kamera {SIDE_PPU} px/unit")
+    for row in (1, 0):
+        grp = [a for a in layout["agents"] if a["row"] == row]
+        if not grp:
+            continue
+        print(f"  baris {'depan' if row else 'belakang'} (skala {ROW_SCALE[row]:.2f}, "
+              f"lantai y {SIDE_FRONT_FLOOR if row else SIDE_BACK_FLOOR}, "
+              f"avatar {SIDE_AVATAR_H * ROW_SCALE[row]:.0f} px): " +
+              ", ".join(f"{a['name']}@{a['cx']:.0f}" for a in grp))
+    print(f"  band: atap 0..{SIDE_CEIL_Y} · soffit {SIDE_CEIL_Y}..{SIDE_GLASS_TOP} · "
+          f"kaca {SIDE_GLASS_TOP}..{SIDE_GLASS_BOT} · plafon→lantai "
+          f"{SIDE_CEIL_Y}..{SIDE_FINISH_TOP} ({SIDE_ROOM_H} px = {SIDE_CEIL_UNITS:.2f} unit) · "
           f"finish {SIDE_FINISH_TOP}..{SIDE_SLAB_TOP} · slab {SIDE_SLAB_TOP}.."
-          f"{CANVAS[3] - CANVAS[1]} · avatar {SIDE_AVATAR_H} px · desk top "
-          f"{SIDE_DESK_TOP} px, top {SIDE_DESK_THICK} px")
-
+          f"{CANVAS[3] - CANVAS[1]} · avatar {SIDE_AVATAR_H} px · meja "
+          f"{SIDE_DESK_TOP} px, tebal {SIDE_DESK_THICK} px")
 
 
 # --------------------------------------------------------------------- renders
