@@ -114,7 +114,11 @@ export default function App() {
   const onMove = useCallback(() => setPickedId((p) => p), [])
 
   return (
-    <div className={`app ${mobile ? 'is-mobile' : ''} ${rosterOpen && !mobile ? 'has-roster' : ''}`}>
+    <div
+      className={`app ${mobile ? 'is-mobile' : ''} ${rosterOpen && !mobile ? 'has-roster' : ''} ${
+        feedOpen && !mobile ? 'has-feed' : ''
+      }`}
+    >
       <div className="canvas-wrap">
         <Scene
           status={data}
