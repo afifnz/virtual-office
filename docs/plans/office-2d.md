@@ -506,7 +506,7 @@ Aman paralel: {T1.1, T1.2, T1.4, T2.5} di awal; {T1.9/T2.1, T2.3, T2.4} setelah 
 ## Progress ledger
 
 - [x] T1.1 tipe view di `lib/view.ts`, import App/DPad/focus pindah — tsc+build hijau
-- [ ] T1.2 `verify/anim_check.ts` ditulis (RED)
+- [x] T1.2 `verify/anim_check.ts` ditulis (RED)
 - [ ] T1.3 `anim.ts` + `viewport.ts` — ANIM OK
 - [ ] T1.4 `palette.ts` + `pixelfont.ts`
 - [ ] T1.5 `sprites.ts` + cache
