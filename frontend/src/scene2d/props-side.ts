@@ -196,19 +196,21 @@ export function drawKeyboardMouse(ctx: Ctx, theme: ThemeName, cx: number, deskTo
   const t = THEME_TOKENS[theme]
   // keyboard shadow + body
   softShadow(ctx, cx, deskTop + 1 * scale, 20 * scale, 1.4 * scale, theme === 'day' ? 0.3 : 0.36, 1.2 * scale)
-  ctx.fillStyle = theme === 'day' ? '#DCE3EC' : '#2A3242'
-  ctx.strokeStyle = theme === 'day' ? 'rgba(15,36,64,0.2)' : 'rgba(255,255,255,0.14)'
-  ctx.lineWidth = 0.7
+  ctx.fillStyle = theme === 'day' ? '#C9D3DF' : '#2A3242'
+  ctx.strokeStyle = theme === 'day' ? 'rgba(15,36,64,0.35)' : 'rgba(255,255,255,0.2)'
+  ctx.lineWidth = 0.8
   rr(ctx, cx - 19 * scale, deskTop - 7 * scale, 38 * scale, 7 * scale, 1.4 * scale)
   ctx.fill()
   ctx.stroke()
-  // key rows
-  ctx.fillStyle = theme === 'day' ? '#B9C5D4' : '#3C4658'
+  // key rows: dark caps so the keyboard reads at 150 px, plus a spacebar
+  ctx.fillStyle = theme === 'day' ? '#7E8FA3' : '#4A5568'
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 9; c++) {
-      ctx.fillRect(cx - 17 * scale + c * 4 * scale, deskTop - 6 * scale + r * 1.9 * scale, 3 * scale, 1.1 * scale)
+      ctx.fillRect(cx - 17 * scale + c * 4 * scale, deskTop - 6 * scale + r * 1.6 * scale, 3 * scale, 1.0 * scale)
     }
   }
+  ctx.fillStyle = theme === 'day' ? '#6E7F93' : '#566176'
+  ctx.fillRect(cx - 8 * scale, deskTop - 1.5 * scale, 16 * scale, 1.1 * scale)
   // mouse
   softShadow(ctx, cx + 27 * scale, deskTop + 1 * scale, 4.4 * scale, 1.8 * scale, theme === 'day' ? 0.2 : 0.3, 0.9 * scale)
   ctx.fillStyle = theme === 'day' ? '#D7DFE9' : '#313A4B'
@@ -378,7 +380,7 @@ export function drawServerRack(ctx: Ctx, theme: ThemeName, cx: number, floorY: n
 // ------------------------------------------------------------------ boards
 
 /** Six boards hanging on one rail in front of the glass (y 132–280). */
-export function drawBoards(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3): void {
+export function drawBoards(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3, tzName = 'WIB'): void {
   const t = THEME_TOKENS[theme]
   // rail + brackets
   ctx.fillStyle = theme === 'day' ? '#B9C5D3' : '#3A4557'
@@ -403,12 +405,12 @@ export function drawBoards(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3): void {
 
   // 2. status board — title only; dots are live (drawStatusBoard)
   const s = SIDE_BOARDS[1]!
-  label(ctx, 'PAPAN STATUS', s.x + 10, SIDE_BOARD_TOP + 9, 7.5, t.muted, 600)
+  label(ctx, 'PAPAN STATUS', s.x + 10, SIDE_BOARD_TOP + 9, 8, t.muted, 600)
   label(ctx, 'aktif', s.x + 62, SIDE_BOARD_TOP + 34, 8, t.muted, 500, 0)
 
   // 3. pinboard: 3×3 sticky notes
   const pin = SIDE_BOARDS[2]!
-  label(ctx, 'PINBOARD', pin.x + 10, SIDE_BOARD_TOP + 9, 7.5, t.muted, 600)
+  label(ctx, 'PINBOARD', pin.x + 10, SIDE_BOARD_TOP + 9, 8, t.muted, 600)
   const sticky = ['#F6E27A', '#F4B8B8', '#B9E2AE', '#A9CDEA']
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
@@ -425,10 +427,15 @@ export function drawBoards(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3): void {
 
   // 4. burndown
   const bd = SIDE_BOARDS[3]!
-  label(ctx, 'BURNDOWN', bd.x + 10, SIDE_BOARD_TOP + 9, 7.5, t.muted, 600)
+  label(ctx, 'BURNDOWN', bd.x + 10, SIDE_BOARD_TOP + 9, 8, t.muted, 600)
   ctx.strokeStyle = theme === 'day' ? 'rgba(15,36,64,0.16)' : 'rgba(255,255,255,0.14)'
   ctx.lineWidth = 1
   ctx.strokeRect(bd.x + 12, SIDE_BOARD_TOP + 30, bd.w - 24, 92)
+  ctx.strokeStyle = theme === 'day' ? 'rgba(15,36,64,0.08)' : 'rgba(255,255,255,0.07)'
+  for (let i = 1; i < 4; i++) {
+    const gy = SIDE_BOARD_TOP + 30 + (92 * i) / 4
+    ctx.beginPath(); ctx.moveTo(bd.x + 12, gy); ctx.lineTo(bd.x + bd.w - 12, gy); ctx.stroke()
+  }
   ctx.strokeStyle = t.accent
   ctx.lineWidth = 2
   ctx.beginPath()
@@ -451,7 +458,7 @@ export function drawBoards(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3): void {
 
   // 5. architecture
   const ar = SIDE_BOARDS[4]!
-  label(ctx, 'ARSITEKTUR', ar.x + 10, SIDE_BOARD_TOP + 9, 7.5, t.muted, 600)
+  label(ctx, 'ARSITEKTUR', ar.x + 10, SIDE_BOARD_TOP + 9, 8, t.muted, 600)
   ctx.fillStyle = t.accent
   rr(ctx, ar.x + ar.w - 44, SIDE_BOARD_TOP + 8, 34, 12, 3)
   ctx.fill()
@@ -501,8 +508,8 @@ export function drawBoards(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3): void {
     const a = (i / 12) * Math.PI * 2
     ctx.fillRect(ccx + Math.cos(a) * 16 - 0.7, ccy + Math.sin(a) * 16 - 0.7, 1.4, 1.4)
   }
-  label(ctx, 'WIB', ccx - 8, SIDE_BOARD_TOP + 96, 7, t.muted, 600, 0.06)
-  label(ctx, 'GMT+7', ccx - 10, SIDE_BOARD_TOP + 108, 6.5, t.muted, 500, 0)
+  label(ctx, tzName, ccx - Math.min(20, tzName.length * 2.2), SIDE_BOARD_TOP + 96, 7, t.muted, 600, 0.06)
+  label(ctx, `L${floor}`, ccx - 5, SIDE_BOARD_TOP + 110, 7, t.muted, 500, 0)
 }
 
 /** Live half of the status board: dots + counts (never cached). */
@@ -588,30 +595,48 @@ export function drawClockHands(ctx: Ctx, theme: ThemeName, hour: number, minute:
 export function drawLiftShaft(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3): void {
   const t = THEME_TOKENS[theme]
   const { x, w, top, bottom } = SIDE_LIFT
-  ctx.fillStyle = theme === 'day' ? '#DCE4EE' : '#1B2433'
+  // dark outer frame + lighter inner shaft, so the core reads against the city
+  ctx.fillStyle = theme === 'day' ? '#5A6675' : '#0A111C'
   ctx.fillRect(x, top, w, bottom - top)
-  ctx.fillStyle = theme === 'day' ? '#C7D2DF' : '#232E40'
+  ctx.fillStyle = theme === 'day' ? '#DCE4EE' : '#1B2433'
   ctx.fillRect(x + 4, top + 4, w - 8, bottom - top - 8)
-  // vertical rails
-  ctx.fillStyle = theme === 'day' ? '#9EAAB9' : '#3A4659'
-  ctx.fillRect(x + 8, top + 8, 2, bottom - top - 16)
-  ctx.fillRect(x + w - 10, top + 8, 2, bottom - top - 16)
+  // vertical rails (3 px, dark) and a cable line
+  ctx.fillStyle = theme === 'day' ? '#6E7C8C' : '#3A4659'
+  ctx.fillRect(x + 8, top + 8, 3, bottom - top - 16)
+  ctx.fillRect(x + w - 11, top + 8, 3, bottom - top - 16)
+  ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.25)' : 'rgba(255,255,255,0.12)'
+  ctx.fillRect(x + w / 2 - 1, top + 30, 2, bottom - top - 40)
   // floor markers
   for (const f of [1, 2, 3] as const) {
-    const y = 530 - (f - 1) * 100
-    ctx.fillStyle = f === floor ? t.accent : theme === 'day' ? '#8E9AAA' : '#4B576B'
-    ctx.beginPath()
-    ctx.arc(x + w / 2, y, 4, 0, Math.PI * 2)
+    const y = 540 - (f - 1) * 100
+    ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.78)' : 'rgba(0,0,0,0.55)'
+    rr(ctx, x + w / 2 - 10, y - 5, 20, 11, 3)
     ctx.fill()
-    drawText(ctx, `L${f}`, x + w / 2 - 5, y + 8, 1, f === floor ? t.accent : t.muted)
+    drawText(ctx, `L${f}`, x + w / 2 - 5, y - 3, 1, f === floor ? t.accent : t.muted)
   }
   // header with the current floor number (pixel font, allowed role)
+  ctx.fillStyle = theme === 'day' ? '#2E3A4B' : '#0B1220'
+  ctx.fillRect(x + 6, top + 2, w - 12, 18)
+  drawText(ctx, `L${floor}`, x + w / 2 - 10, top + 6, 2, t.accent)
+  // vertical LIFT label + a call panel, so the core never reads as a rack
+  ctx.save()
+  ctx.translate(x + 11, bottom - 28)
+  ctx.rotate(-Math.PI / 2)
+  ctx.font = `700 8px ${FONT}`
+  ctx.fillStyle = theme === 'day' ? '#3B4A5E' : '#93A0B6'
+  ctx.fillText('LIFT', 0, 0)
+  ctx.restore()
   ctx.fillStyle = theme === 'day' ? '#C7D2DF' : '#232E40'
-  ctx.fillRect(x + 6, top + 6, w - 12, 22)
-  drawText(ctx, `L${floor}`, x + w / 2 - 10, top + 11, 2, t.accent)
+  rr(ctx, x - 7, 496, 7, 18, 2)
+  ctx.fill()
+  ctx.fillStyle = t.accent
+  ctx.beginPath()
+  ctx.moveTo(x - 5, 501); ctx.lineTo(x - 3.5, 499); ctx.lineTo(x - 2, 501); ctx.closePath(); ctx.fill()
+  ctx.beginPath()
+  ctx.moveTo(x - 5, 509); ctx.lineTo(x - 3.5, 511); ctx.lineTo(x - 2, 509); ctx.closePath(); ctx.fill()
   // glass door at the current floor
-  const doorY = 530 - (floor - 1) * 100 - 44
-  drawGlassPanel(ctx, theme, x + 12, doorY, w - 24, 88, 6, 0.42)
+  const doorY = 540 - (floor - 1) * 100 - 40
+  drawGlassPanel(ctx, theme, x + 12, doorY, w - 24, 80, 6, 0.42)
 }
 
 /**
@@ -673,11 +698,11 @@ export function drawLiftCar(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3, y: num
   void floor
   const { x, w } = SIDE_LIFT
   const carW = w - 24
-  const carH = 84
+  const carH = 76
   const cx = x + 12
   const cy = y - carH / 2
-  // car interior
-  ctx.fillStyle = theme === 'day' ? '#E8EEF5' : '#0E1522'
+  // car interior: dark enough to read inside the light shaft
+  ctx.fillStyle = theme === 'day' ? '#2A3446' : '#0E1522'
   rr(ctx, cx, cy, carW, carH, 6)
   ctx.fill()
   ctx.fillStyle = t.lamp
@@ -694,8 +719,11 @@ export function drawLiftCar(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3, y: num
   ctx.lineWidth = 1
   ctx.strokeRect(cx - slide, cy, half - slide, carH)
   ctx.strokeRect(cx + half + slide, cy, half - slide, carH)
-  // destination plate
-  drawText(ctx, `L${target}`, cx + carW / 2 - 10, cy + 8, 2, t.accent)
+  // destination plate (amber on dark, never floating white text)
+  ctx.fillStyle = theme === 'day' ? 'rgba(10,16,26,0.82)' : 'rgba(0,0,0,0.55)'
+  rr(ctx, cx + carW / 2 - 16, cy + 6, 32, 18, 4)
+  ctx.fill()
+  drawText(ctx, `L${target}`, cx + carW / 2 - 10, cy + 10, 2, t.accent)
 }
 
 // ------------------------------------------------------------------- floor
@@ -802,6 +830,11 @@ export function drawCurtainWall(ctx: Ctx, theme: ThemeName): void {
   // 1 px top highlight
   ctx.fillStyle = 'rgba(255,255,255,0.28)'
   ctx.fillRect(0, top, 1000, 1)
+  // 3 % deterministic noise: breaks the big gradient so it reads as glass
+  ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.035)' : 'rgba(255,255,255,0.035)'
+  for (let y = top + 2; y < top + h; y += 5) {
+    for (let x = (y * 3) % 7; x < 1000; x += 6) ctx.fillRect(x, y, 1, 1)
+  }
 }
 
 /** Pixel font is allowed ONLY on these two roles (design §8). */

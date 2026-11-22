@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Scene } from './components/Scene'
 import type { MoveIntent, RigCommand } from './lib/view'
 import { Hud } from './components/Hud'
-import { FloorTabs } from './components/FloorTabs'
 import { Roster } from './components/Roster'
 import { Feed, type FeedTab } from './components/Feed'
 import { TaskBoard } from './components/TaskBoard'
@@ -43,7 +42,7 @@ function writeFloorToUrl(floor: FloorId): void {
 }
 
 export default function App() {
-  const { data, error, stale } = useStatus()
+  const { data, error, stale, lastOk } = useStatus()
   const mobile = useIsMobile()
   const touch = useIsTouch()
 
@@ -73,8 +72,8 @@ export default function App() {
     effectiveOverride(readStoredOverride(), parseThemeParam(new URLSearchParams(window.location.search).get('theme'))),
   )
   const theme = useMemo(
-    () => resolveTheme(data?.now ?? null, officeTZ(), themeOverride, prefersDark()),
-    [data?.now, themeOverride],
+    () => resolveTheme(lastOk ? data?.now ?? null : null, officeTZ(), themeOverride, prefersDark()),
+    [data?.now, lastOk, themeOverride],
   )
   useEffect(() => {
     applyTheme(theme.mode, theme.source)
@@ -174,7 +173,6 @@ export default function App() {
       }`}
     >
       <div className="canvas-wrap">
-        <FloorTabs floor={command.floor ?? 1} status={data} onFloor={goFloor} />
         <Scene
           status={data}
           command={command}
@@ -203,6 +201,8 @@ export default function App() {
         expanded={hudOpen}
         onToggleExpanded={() => setHudOpen((v) => !v)}
         stale={stale}
+        floor={command.floor ?? 1}
+        onFloor={goFloor}
         theme={theme.mode}
         themeOverride={themeOverride}
         themeSource={theme.source}

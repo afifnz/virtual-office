@@ -1,5 +1,7 @@
 import { useIsMobile } from '../hooks/useViewport'
 import type { StatusPayload } from '../lib/types'
+import type { FloorId } from '../lib/rooms'
+import { FloorTabs } from './FloorTabs'
 import { tzLabel } from '../lib/roster'
 import { compact } from '../lib/format'
 import type { ThemeMode, ThemeOverride, ThemeSource } from '../lib/theme'
@@ -24,6 +26,8 @@ interface HudProps {
   expanded: boolean
   onToggleExpanded: () => void
   stale: boolean
+  floor: FloorId
+  onFloor: (floor: FloorId) => void
   theme: ThemeMode
   themeOverride: ThemeOverride | null
   themeSource: ThemeSource
@@ -174,6 +178,8 @@ export function Hud(props: HudProps) {
               {!mobile ? <small>kantor virtual · {tzLabel()}</small> : null}
             </span>
           </div>
+
+          <FloorTabs floor={props.floor} status={props.status} onFloor={props.onFloor} variant="hud" />
 
           <ThemeControl
             theme={props.theme}

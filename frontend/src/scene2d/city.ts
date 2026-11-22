@@ -49,7 +49,7 @@ export function drawCity(
   // ---- sun / moon
   if (theme === 'day') {
     const sx = w * 0.72
-    const sy = h * 0.2
+    const sy = h * 0.1
     const halo = ctx.createRadialGradient(sx, sy, 2, sx, sy, 92)
     halo.addColorStop(0, 'rgba(255,255,255,0.95)')
     halo.addColorStop(0.35, 'rgba(255,255,255,0.35)')
@@ -64,7 +64,7 @@ export function drawCity(
     ctx.fill()
   } else {
     const mx = w * 0.78
-    const my = h * 0.16
+    const my = h * 0.1
     const halo = ctx.createRadialGradient(mx, my, 2, mx, my, 66)
     halo.addColorStop(0, 'rgba(243,197,123,0.34)')
     halo.addColorStop(1, 'rgba(243,197,123,0)')

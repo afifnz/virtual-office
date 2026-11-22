@@ -2190,3 +2190,65 @@ body {
   }
 }
 
+/* ---------- floor tabs in the HUD row (M3) ----------
+   The tabs moved out of the canvas so they never cover the window band. */
+.floor-tabs.in-hud {
+  position: static;
+  z-index: auto;
+  top: auto;
+  left: auto;
+  flex: 0 1 auto;
+  padding: 2px;
+  gap: 2px;
+  background: var(--surface-raised);
+  background-image: none;
+  box-shadow: none;
+  border-radius: 10px;
+}
+
+.floor-tabs.in-hud .floor-tab {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.floor-tabs.in-hud .floor-tab-name {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.floor-tabs.in-hud .floor-tab-meta {
+  gap: 4px;
+}
+
+.floor-tabs.in-hud .floor-tab-stat .dot {
+  width: 5px;
+  height: 5px;
+}
+
+@media (max-width: 760px) {
+  .floor-tabs.in-hud {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+  .floor-tabs.in-hud .floor-tab {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* working: the one pulsing dot, 2.4 s (design §9) */
+.dot.working {
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.working {
+    animation: none;
+  }
+}

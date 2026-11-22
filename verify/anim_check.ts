@@ -328,7 +328,7 @@ if (!dwellAt.inLift || dwellAt.liftTo !== 1 || dwellAt.floor !== 3 || dwellAt.wa
 } else ok('mid-dwell: standing in the lift on L3, liftTo = 1')
 
 const liftChipText = liftChip(dwellAt.liftTo ?? 1)
-if (!/^di lift · L[123]$/.test(liftChipText)) fail(`lift chip "${liftChipText}" must be only "di lift · L<floornum>"`)
+if (!/^DI LIFT · L[123]$/.test(liftChipText)) fail(`lift chip "${liftChipText}" must be only "DI LIFT · L<floornum>"`)
 else ok(`lift chip is generic: "${liftChipText}"`)
 
 const midC = journeyAt(xj, tA + 2.6 + tC / 2)

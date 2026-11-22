@@ -34,7 +34,6 @@ import {
   plateWidth,
   rectsOverlap,
   sideGate,
-  type SideLabelAgent,
 } from '../frontend/src/scene2d/labels'
 import {
   SIDE_AVATAR_H,

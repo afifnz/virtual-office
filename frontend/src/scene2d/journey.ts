@@ -222,7 +222,7 @@ export function journeyAt(journey: Journey, phase: number): JourneyState {
  * layout, so it can never overlap another plate.
  */
 export function liftChip(to: FloorId): string {
-  return `di lift · L${to}`
+  return `DI LIFT · L${to}`
 }
 
 /** Floors where at least one agent currently dwells in the lift (doors open). */

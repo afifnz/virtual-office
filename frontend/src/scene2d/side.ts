@@ -219,7 +219,8 @@ export function sideWallGate(): WallMetrics {
   const wallW = SIDE_W
   const glassH = SIDE_GLASS_BOTTOM - SIDE_GLASS_TOP // 485
   const glassPct = (glassH / wallH) * 100
-  const panelPct = ((SIDE_BOARD_H * 1000) / (wallW * wallH)) * 100
+  const panelPx = SIDE_BOARDS.reduce((n, b) => n + b.w, 0) * SIDE_BOARD_H
+  const panelPct = (panelPx / (wallW * wallH)) * 100
   // spandrel (45 px) + plinth is designed; the only bare band is 0
   const emptyPct = 0
   const emptyRunPct = 0
@@ -235,12 +236,12 @@ export function sideWallGate(): WallMetrics {
 
 /** The six boards' design-space x/width (also used by the painter). */
 export const SIDE_BOARDS: Array<{ id: string; x: number; w: number; h: number }> = [
-  { id: 'plaque', x: 0, w: 124, h: SIDE_BOARD_H },
+  { id: 'plaque', x: 4, w: 120, h: SIDE_BOARD_H },
   { id: 'status', x: 124, w: 214, h: SIDE_BOARD_H },
   { id: 'pinboard', x: 338, w: 194, h: SIDE_BOARD_H },
   { id: 'burndown', x: 532, w: 164, h: SIDE_BOARD_H },
   { id: 'architecture', x: 696, w: 204, h: SIDE_BOARD_H },
-  { id: 'clock', x: 900, w: 100, h: SIDE_BOARD_H },
+  { id: 'clock', x: 900, w: 96, h: SIDE_BOARD_H },
 ]
 
 /** The lift core in the east wall, shared by the painter and the probe. */

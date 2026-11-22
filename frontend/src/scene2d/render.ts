@@ -12,12 +12,12 @@ import type { AgentMeta } from '../lib/agents'
 import type { Agent, Comm } from '../lib/types'
 import { FLOORS, type FloorId } from '../lib/rooms'
 import { seatPoint } from '../lib/routes'
-import { rosterAgents } from '../lib/roster'
+import { rosterAgents, tzLabel } from '../lib/roster'
 import { poseFor, type Pose } from './anim'
 import { journeyAt, journeyClock, journeyFor, liftChip } from './journey'
 import { THEME_STATUS, THEME_TOKENS, type ThemeName } from './palette'
 import { drawAvatar, drawAvatarHands, avatarKey, type AvatarPose } from './avatar'
-import { createCityCanvas } from './city'
+import { drawCity } from './city'
 import {
   drawBoards,
   drawBookshelf,
@@ -96,14 +96,14 @@ export function clearAvatarCache(): void {
 // -------------------------------------------------------------- static layer
 
 const staticCache = new Map<string, HTMLCanvasElement>()
-const CACHE_SCALE = 1.5
+const CACHE_SCALE = 1.25
 const CACHE_MAX = 6
 
 export function clearStaticCache(): void {
   staticCache.clear()
 }
 
-export function createStaticLayer(floor: FloorId, theme: ThemeName): HTMLCanvasElement {
+export function createStaticLayer(floor: FloorId, theme: ThemeName, tzName = 'WIB'): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(SIDE_W * CACHE_SCALE)
   canvas.height = Math.round(SIDE_H * CACHE_SCALE)
@@ -117,32 +117,38 @@ export function createStaticLayer(floor: FloorId, theme: ThemeName): HTMLCanvasE
 
   drawRoof(ctx, theme)
   drawSoffit(ctx, theme)
-  // the city lives INSIDE the window band, not in a band above the ceiling
-  const city = createCityCanvas(theme, floor)
-  ctx.drawImage(city, 0, 58, SIDE_W, 485)
+  // the city lives INSIDE the window band, not in a band above the ceiling.
+  // Painted straight into the static sheet (no extra city canvas per cache).
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(0, 58, SIDE_W, 485)
+  ctx.clip()
+  ctx.translate(0, 58)
+  drawCity(ctx, theme, floor, SIDE_W, 485)
+  ctx.restore()
   drawCurtainWall(ctx, theme)
   drawSpandrel(ctx, theme)
   drawFloorPlane(ctx, theme)
 
   // boards hang in front of the glass on one rail
-  drawBoards(ctx, theme, floor)
+  drawBoards(ctx, theme, floor, tzName)
   // the lift core is part of the east wall
   drawLiftShaft(ctx, theme, floor)
 
   // floor props, standing on their row line (contact shadows included)
   drawBookshelf(ctx, theme, 58, SIDE_FLOOR_BACK, 0.92)
-  drawPlant(ctx, theme, 30, SIDE_FLOOR_FRONT, 0.95)
-  if (floor === 3) drawServerRack(ctx, theme, 866, SIDE_FLOOR_FRONT, 0.92)
-  else drawPlant(ctx, theme, 866, SIDE_FLOOR_FRONT, 0.8)
+  if (floor === 3) drawServerRack(ctx, theme, 44, SIDE_FLOOR_FRONT, 0.92)
+  else drawPlant(ctx, theme, 44, SIDE_FLOOR_FRONT, 0.95)
+  drawPlant(ctx, theme, 90, SIDE_FLOOR_FRONT, 0.75)
 
   return canvas
 }
 
-export function staticLayerFor(floor: FloorId, theme: ThemeName): HTMLCanvasElement {
-  const key = `${floor}:${theme}`
+export function staticLayerFor(floor: FloorId, theme: ThemeName, tzName = 'WIB'): HTMLCanvasElement {
+  const key = `${floor}:${theme}:${tzName}`
   let canvas = staticCache.get(key)
   if (!canvas) {
-    canvas = createStaticLayer(floor, theme)
+    canvas = createStaticLayer(floor, theme, tzName)
     if (staticCache.size >= CACHE_MAX) {
       const first = staticCache.keys().next().value
       if (first) staticCache.delete(first)
@@ -219,7 +225,7 @@ export function placeAgents(
       liftTo: j.liftTo,
       seat: null,
       designX: worldXToDesign(j.x, FLOORS[j.floor].w),
-      designY: SIDE_FLOOR_FRONT - 8,
+      designY: SIDE_FLOOR_FRONT,
       avatarH: h,
     }
   })
@@ -340,7 +346,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   ctx.fillRect(0, 0, r.viewW, r.viewH)
 
   // the cached stage, scaled by the camera
-  const stage = staticLayerFor(r.vp.floor, theme)
+  const stage = staticLayerFor(r.vp.floor, theme, tzLabel())
   ctx.drawImage(stage, t.left, t.top, SIDE_W * t.s, SIDE_H * t.s)
 
   const resolved = placeAgents(r.metas, r.byId, r.now, r.comms, r.t)
@@ -358,11 +364,11 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   drawClockHands(ctx, theme, r.hour, r.minute)
 
   // ---- lift car: open while someone dwells, otherwise closed at this floor
-  const liftY = 530 - (r.vp.floor - 1) * 100
+  const liftY = 540 - (r.vp.floor - 1) * 100
   const dwelling = onFloor.find((p) => p.inLift)
   if (dwelling) {
     const target = dwelling.liftTo ?? r.vp.floor
-    const targetY = 530 - (target - 1) * 100
+    const targetY = 540 - (target - 1) * 100
     const progress = r.still ? 0.5 : (r.t % 2.6) / 2.6
     const y = liftY + (targetY - liftY) * Math.sin(progress * Math.PI) * 0.32
     drawLiftCar(ctx, theme, r.vp.floor, y, 0.35 + 0.65 * Math.sin(progress * Math.PI), target)
@@ -370,10 +376,11 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     drawLiftCar(ctx, theme, r.vp.floor, liftY, 0, r.vp.floor)
   }
 
-  // ---- stations: back row first, then front row
+  // ---- stations: back row first, then front row. A walking agent leaves an
+  // empty desk behind (the chair stays, the monitor goes dark) — the desk must
+  // never vanish just because its agent is on a delegation.
   for (const seat of seats) {
-    const p = onFloor.find((q) => q.meta.id === seat.meta.id && !q.walking)
-    if (!p) continue
+    const p = onFloor.find((q) => q.meta.id === seat.meta.id && !q.walking) ?? null
     drawStation(ctx, theme, seat, p, r)
   }
 
@@ -387,19 +394,16 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
 
   // ---- nameplates (seated agents only; walkers get no floating plate)
   const statuses = new Map<string, { status: string; shape: 'circle' | 'ring' | 'diamond' | 'square' | 'triangle'; colour: string }>()
-  for (const p of onFloor) {
-    if (p.walking) continue
-    const key = statusOf(p.agent, p.pose)
-    statuses.set(p.meta.id, {
-      status: p.agent?.status ?? 'offline',
+  for (const seat of seats) {
+    const agent = r.byId.get(seat.meta.id)
+    const key = (agent?.status as keyof typeof THEME_STATUS.day) ?? 'offline'
+    statuses.set(seat.meta.id, {
+      status: agent?.status ?? 'offline',
       shape: shapeOf(key),
-      colour: status[key],
+      colour: status[key] ?? status.offline,
     })
   }
-  const labelAgents = labelAgentsFor(
-    seats.filter((s) => !onFloor.some((p) => p.meta.id === s.meta.id && p.walking)),
-    statuses,
-  )
+  const labelAgents = labelAgentsFor(seats, statuses)
   const bounds = { w: SIDE_W, h: SIDE_H }
   const reserved = SIDE_BOARDS.map((b) => ({ x: b.x, y: 132, w: b.w, h: b.h }))
   const { plates } = layoutSideLabels(labelAgents, bounds, reserved)
@@ -412,7 +416,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   // ---- lift chip (generic: floor only, never a message)
   if (dwelling) {
     const chip = liftChip(dwelling.liftTo ?? r.vp.floor)
-    drawChip(ctx, theme, 742, liftY - 58, chip, status.reviewing)
+    drawChip(ctx, theme, 742, liftY - 26, chip, status.reviewing)
   }
 
   // ---- comms: a small paper plane between two agents on this floor
@@ -437,11 +441,12 @@ function drawStation(
   ctx: CanvasRenderingContext2D,
   theme: ThemeName,
   seat: SideSeat,
-  p: PlacedAgent,
+  p: PlacedAgent | null,
   r: RenderInput,
 ): void {
-  const key = statusOf(p.agent, p.pose)
-  const offline = key === 'offline'
+  const agentAtDesk = r.byId.get(seat.meta.id)
+  const key = p ? statusOf(p.agent, p.pose) : ((agentAtDesk?.status as keyof typeof THEME_STATUS.day) ?? 'offline')
+  const offline = !agentAtDesk || key === 'offline'
   const scale = seat.scale
 
   // feet contact shadow
@@ -449,7 +454,7 @@ function drawStation(
 
   drawChair(ctx, theme, seat.cx, seat.floorY, scale, !offline)
 
-  if (!offline) {
+  if (!offline && p) {
     const pose = avatarPose(p.pose)
     const frame = poseFrame(p.pose, r.t, r.still)
     const sprite = avatarSprite(p.meta.look, pose, frame, seat.avatarH)
@@ -458,10 +463,10 @@ function drawStation(
 
   const deskTop = drawDesk(ctx, theme, seat.cx, seat.floorY, scale)
   drawKeyboardMouse(ctx, theme, seat.cx, deskTop, scale)
-  if (!offline) {
+  if (!offline && p) {
     drawAvatarHands(ctx, p.meta.look, avatarPose(p.pose), poseFrame(p.pose, r.t, r.still), seat.cx, seat.floorY, seat.avatarH, deskTop)
   }
-  drawMonitor(ctx, theme, seat.cx, seat.floorY, scale, key, screenOf(p.pose))
+  drawMonitor(ctx, theme, seat.cx, seat.floorY, scale, key, p ? screenOf(p.pose) : 'off')
 
   // an empty station says so without colour
   if (offline) {
@@ -469,7 +474,7 @@ function drawStation(
     ctx.globalAlpha = 0.75
     ctx.font = `600 9px ${FONT}`
     ctx.fillStyle = THEME_TOKENS[theme].muted
-    ctx.fillText('Z Z Z', seat.cx - 14, seat.headTop - 4)
+    ctx.fillText('Z Z Z', seat.cx + seat.headW / 2 + 4, seat.headTop + 10)
     ctx.restore()
   }
 }

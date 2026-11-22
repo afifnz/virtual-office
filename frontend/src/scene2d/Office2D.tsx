@@ -105,10 +105,16 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
     const floor = command.floor ?? vpRef.current.floor
     if (command.focus) {
       fitPending.current = false
+      const focusFloor = command.focus.floor
+      const seat = command.focus.id
+        ? sideSeats(frame.current.metas.filter((m) => m.desk.floor === focusFloor)).find(
+            (s) => s.meta.id === command.focus!.id,
+          )
+        : undefined
       vpRef.current = {
-        camX: worldXToDesign(command.focus.x, FLOORS[command.focus.floor].w),
+        camX: seat?.cx ?? worldXToDesign(command.focus.x, FLOORS[focusFloor].w),
         zoom: 2,
-        floor: command.focus.floor,
+        floor: focusFloor,
       }
     } else {
       const sv = SPOT_VIEW[floor][command.spot]

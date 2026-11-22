@@ -139,46 +139,46 @@ export function drawAvatar(
     drawLeg(ctx, look, u, cx + 3.2 * u, Y(32.2 + bob), Y(43.6), 0, -swing)
   } else {
     // seated: thigh forward, shin down, shoe flat on the floor line
-    const legY = 32.2 + bob
+    // seated, front-on: two legs under the desk, thighs foreshortened, shins
+    // down to the floor. The desk covers the lap, so no one-sided "sideways"
+    // leg that reads as a broken body.
+    const legY = 31.8 + bob
     for (const side of [-1, 1]) {
-      const hipX = cx + side * 3.1 * u
-      const kneeX = cx + side * 3.1 * u + 7.0 * u
-      // thigh
+      const hipX = cx + side * 3.3 * u
+      const kneeX = cx + side * 3.5 * u
       ctx.strokeStyle = shade(look.pants, 0.46)
-      ctx.lineWidth = 5.9 * u
+      ctx.lineWidth = 6.0 * u
       ctx.beginPath()
       ctx.moveTo(hipX, Y(legY))
-      ctx.lineTo(kneeX, Y(34.0 + bob))
+      ctx.lineTo(kneeX, Y(35.8 + bob))
       ctx.stroke()
       ctx.strokeStyle = shade(look.pants, 1.06)
-      ctx.lineWidth = 4.7 * u
+      ctx.lineWidth = 4.8 * u
       ctx.beginPath()
       ctx.moveTo(hipX, Y(legY))
-      ctx.lineTo(kneeX, Y(34.0 + bob))
+      ctx.lineTo(kneeX, Y(35.8 + bob))
       ctx.stroke()
-      // shin
       ctx.strokeStyle = shade(look.pants, 0.5)
       ctx.lineWidth = 4.4 * u
       ctx.beginPath()
-      ctx.moveTo(kneeX, Y(34.0 + bob))
-      ctx.lineTo(kneeX + 0.4 * u, Y(41.4))
+      ctx.moveTo(kneeX, Y(35.8 + bob))
+      ctx.lineTo(kneeX, Y(41.4))
       ctx.stroke()
       ctx.strokeStyle = shade(look.pants, 0.92)
       ctx.lineWidth = 3.4 * u
       ctx.beginPath()
-      ctx.moveTo(kneeX, Y(34.0 + bob))
-      ctx.lineTo(kneeX + 0.4 * u, Y(41.4))
+      ctx.moveTo(kneeX, Y(35.8 + bob))
+      ctx.lineTo(kneeX, Y(41.4))
       ctx.stroke()
-      // shoe
       const shoe = shade(look.pants, 0.55)
       ctx.fillStyle = shoe
       ctx.strokeStyle = shade(look.pants, 0.4)
       ctx.lineWidth = 0.7 * u
-      rr(ctx, kneeX - 1.8 * u, Y(43.4), 7.4 * u, 3.0 * u, 1.2 * u)
+      rr(ctx, kneeX - 3.4 * u, Y(40.8), 6.8 * u, 3.0 * u, 1.2 * u)
       ctx.fill()
       ctx.stroke()
       ctx.fillStyle = '#E7EAEE'
-      rr(ctx, kneeX - 1.6 * u, Y(41.6), 7.0 * u, 0.9 * u, 0.4 * u)
+      rr(ctx, kneeX - 3.2 * u, Y(43.0), 6.4 * u, 0.7 * u, 0.4 * u)
       ctx.fill()
     }
   }
@@ -234,7 +234,7 @@ export function drawAvatar(
   ctx.fillStyle = shade(look.skin, 0.9)
   ctx.strokeStyle = shade(look.skin, 0.5)
   ctx.lineWidth = 0.7 * u
-  rr(ctx, cx - 2.6 * u, Y(19.4 + bob), 5.2 * u, 3.4 * u, 1.2 * u)
+  rr(ctx, cx - 2.6 * u, Y(17.8 + bob), 5.2 * u, 4.6 * u, 1.2 * u)
   ctx.fill()
   ctx.stroke()
 
@@ -270,7 +270,7 @@ function drawLeg(
   rr(ctx, x - 2.0 * u, yFloor - 3.2 * u, 7.2 * u, 3.2 * u, 1.2 * u)
   ctx.fill()
   ctx.fillStyle = '#E7EAEE'
-  rr(ctx, x - 1.8 * u, yFloor - 1.2 * u, 6.8 * u, 0.9 * u, 0.4 * u)
+  rr(ctx, x - 1.8 * u, yFloor - 0.9 * u, 6.8 * u, 0.7 * u, 0.4 * u)
   ctx.fill()
 }
 
@@ -484,8 +484,8 @@ function drawHair(
   const cap = (squash: number, lift: number) => {
     ctx.beginPath()
     ctx.ellipse(cx, cy - ry * 0.28 * u - lift * u, rx * 1.02 * u, ry * squash * u, 0, Math.PI, Math.PI * 2)
-    ctx.lineTo(cx + rx * 1.02 * u, cy + 1.4 * u)
-    ctx.lineTo(cx - rx * 1.02 * u, cy + 1.4 * u)
+    ctx.lineTo(cx + rx * 1.02 * u, cy - 2.0 * u)
+    ctx.lineTo(cx - rx * 1.02 * u, cy - 2.0 * u)
     ctx.closePath()
     ctx.fill()
     ctx.stroke()
@@ -501,9 +501,9 @@ function drawHair(
         ctx.lineTo(cx - rx * 0.55 * u, cy - ry * 1.04 * u)
         ctx.lineTo(cx + rx * 0.55 * u, cy - ry * 1.04 * u)
         ctx.lineTo(cx + rx * 1.08 * u, cy - ry * 0.72 * u)
-        ctx.lineTo(cx + rx * 1.08 * u, cy + 0.4 * u)
-        ctx.lineTo(cx + rx * 0.72 * u, cy - ry * 0.1 * u)
-        ctx.lineTo(cx - rx * 0.72 * u, cy - ry * 0.1 * u)
+        ctx.lineTo(cx + rx * 1.08 * u, cy - 1.6 * u)
+        ctx.lineTo(cx + rx * 0.72 * u, cy - 2.4 * u)
+        ctx.lineTo(cx - rx * 0.72 * u, cy - 2.4 * u)
         ctx.closePath()
         ctx.fill()
         ctx.stroke()
@@ -573,17 +573,17 @@ function drawHair(
       ctx.stroke()
       ctx.fillStyle = shade(hair, 1.2)
       ctx.beginPath()
-      ctx.arc(cx - 0.7 * u, cy - ry * 1.1 * u, 1.0 * u, 0, Math.PI * 2)
+      ctx.arc(cx - 0.7 * u, cy - ry * 1.02 * u, 0.9 * u, 0, Math.PI * 2)
       ctx.fill()
       break
     }
     case 'curly': {
       cap(0.6, 0.15)
       for (const [dx, dy, r] of [
-        [-0.72, -0.72, 2.5],
-        [-0.2, -1.0, 2.8],
-        [0.38, -0.92, 2.4],
-        [0.82, -0.52, 2.2],
+        [-0.72, -0.68, 2.4],
+        [-0.2, -0.86, 2.6],
+        [0.38, -0.82, 2.3],
+        [0.82, -0.5, 2.1],
       ] as const) {
         ctx.beginPath()
         ctx.arc(cx + dx * rx * u, cy + dy * ry * u, r * u, 0, Math.PI * 2)
@@ -595,9 +595,9 @@ function drawHair(
     case 'messy': {
       cap(0.58, 0.1)
       for (const [dx, tip] of [
-        [-0.6, -1.35],
-        [0.02, -1.55],
-        [0.62, -1.28],
+        [-0.6, -1.04],
+        [0.02, -1.18],
+        [0.62, -1.0],
       ] as const) {
         ctx.beginPath()
         ctx.moveTo(cx + (dx - 0.22) * rx * u, cy - ry * 0.72 * u)
@@ -636,32 +636,32 @@ export function drawAvatarHands(
   ctx.save()
   ctx.lineJoin = 'round'
   for (const side of [-1, 1]) {
-    const x = cx + side * 3.4 * u
-    const dy = side === -1 ? 0.4 * u : 0
+    const x = cx + side * 3.2 * u
+    const dy = side === -1 ? 0.35 * u : 0
     // hand shadow on the keys
     ctx.fillStyle = 'rgba(0,0,0,0.42)'
     ctx.beginPath()
-    ctx.ellipse(x + 0.3 * u, y + 2.7 * u + dy, 2.4 * u, 0.7 * u, 0, 0, Math.PI * 2)
+    ctx.ellipse(x + 0.3 * u, y + 2.2 * u + dy, 2.0 * u, 0.6 * u, 0, 0, Math.PI * 2)
     ctx.fill()
     // hand
     ctx.fillStyle = shade(look.skin, 1.04)
     ctx.strokeStyle = shade(look.skin, 0.5)
     ctx.lineWidth = 0.55 * u
-    rr(ctx, x - 2.2 * u, y + dy, 4.4 * u, 2.6 * u, 1.2 * u)
+    rr(ctx, x - 1.7 * u, y + dy, 3.4 * u, 2.0 * u, 1.0 * u)
     ctx.fill()
     ctx.stroke()
     // finger notches
     ctx.strokeStyle = shade(look.skin, 0.72)
     ctx.lineWidth = 0.35 * u
-    for (const nx of [-0.9, 0.1, 1.0]) {
+    for (const nx of [-0.8, 0.0, 0.8]) {
       ctx.beginPath()
-      ctx.moveTo(x + nx * u, y + 2.1 * u + dy)
-      ctx.lineTo(x + nx * u, y + 2.5 * u + dy)
+      ctx.moveTo(x + nx * u, y + 1.6 * u + dy)
+      ctx.lineTo(x + nx * u, y + 1.95 * u + dy)
       ctx.stroke()
     }
     // cuff
     ctx.fillStyle = shade(look.shirt, 0.8)
-    rr(ctx, x - 2.3 * u, y + 2.3 * u + dy, 4.6 * u, 0.9 * u, 0.4 * u)
+    rr(ctx, x - 1.8 * u, y + 1.85 * u + dy, 3.6 * u, 0.7 * u, 0.35 * u)
     ctx.fill()
   }
   ctx.restore()
