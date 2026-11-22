@@ -600,6 +600,25 @@ export function drawClockHands(ctx: Ctx, theme: ThemeName, hour: number, minute:
 
 // -------------------------------------------------------------------- lift
 
+/**
+ * Lift labels, kept apart on purpose. The shaft header names the floor this
+ * section belongs to (`L3` + team); the car chip names where the car is going
+ * (`▸ L1`). Two bare `L3`s on the same wall read as a duplicate, so the chip
+ * carries an arrow and, while someone rides, a *different* floor than the
+ * header. `verify/render_check.ts` pins both strings.
+ */
+export function liftHeaderLabel(floor: 1 | 2 | 3): string {
+  return `L${floor}`
+}
+
+export function liftHeaderTeam(floor: 1 | 2 | 3): string {
+  return floor === 1 ? 'LOBBY' : floor === 2 ? 'TIM EDU' : 'TIM DEV'
+}
+
+export function liftCarLabel(target: 1 | 2 | 3): string {
+  return `▸ L${target}`
+}
+
 /** Steel + glass core on the east wall, with the three floor markers. */
 export function drawLiftShaft(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3): void {
   const t = THEME_TOKENS[theme]
@@ -623,10 +642,13 @@ export function drawLiftShaft(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3): voi
     ctx.fill()
     drawText(ctx, `L${f}`, x + w / 2 - 5, y - 3, 1, f === floor ? t.accent : t.muted)
   }
-  // header with the current floor number (pixel font, allowed role)
+  // header: the floor this section belongs to + its team. The number keeps the
+  // pixel font (allowed role); the team name is sans, so the header never reads
+  // as a second bare "L3" like the car chip used to.
   ctx.fillStyle = theme === 'day' ? '#2E3A4B' : '#0B1220'
   ctx.fillRect(x + 6, top + 2, w - 12, 18)
-  drawText(ctx, `L${floor}`, x + w / 2 - 10, top + 6, 2, t.accent)
+  drawText(ctx, liftHeaderLabel(floor), x + 10, top + 6, 2, t.accent)
+  label(ctx, liftHeaderTeam(floor), x + 37, top + 7, 6.5, t.muted, 700, 0)
   // vertical LIFT label + a call panel, so the core never reads as a rack
   ctx.save()
   ctx.translate(x + 11, bottom - 28)
@@ -728,11 +750,14 @@ export function drawLiftCar(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3, y: num
   ctx.lineWidth = 1
   ctx.strokeRect(cx - slide, cy, half - slide, carH)
   ctx.strokeRect(cx + half + slide, cy, half - slide, carH)
-  // destination plate (amber on dark, never floating white text)
+  // destination plate (amber on dark, never floating white text): the car says
+  // where it is going — `▸ L1` while the header still says `L3`.
+  const plateW = 40
+  const plateX = cx + carW / 2 - plateW / 2
   ctx.fillStyle = theme === 'day' ? 'rgba(10,16,26,0.82)' : 'rgba(0,0,0,0.55)'
-  rr(ctx, cx + carW / 2 - 16, cy + 6, 32, 18, 4)
+  rr(ctx, plateX, cy + 6, plateW, 18, 4)
   ctx.fill()
-  drawText(ctx, `L${target}`, cx + carW / 2 - 10, cy + 10, 2, t.accent)
+  label(ctx, liftCarLabel(target as 1 | 2 | 3), plateX + 7, cy + 9, 8.5, t.accent, 700, 0)
 }
 
 // ------------------------------------------------------------------- floor
