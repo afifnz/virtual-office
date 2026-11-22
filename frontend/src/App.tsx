@@ -13,9 +13,19 @@ import { useStatus } from './hooks/useStatus'
 import { useIsMobile, useIsTouch } from './hooks/useViewport'
 import { resolveAgentId } from './lib/agents'
 import { agentFocus } from './lib/focus'
-import { agentMeta } from './lib/roster'
+import { agentMeta, officeTZ } from './lib/roster'
 import { SPOT_FLOOR } from './lib/view'
 import type { FloorId } from './lib/rooms'
+import {
+  applyTheme,
+  effectiveOverride,
+  parseThemeParam,
+  prefersDark,
+  readStoredOverride,
+  resolveTheme,
+  writeStoredOverride,
+  type ThemeOverride,
+} from './lib/theme'
 
 /** `?floor=1|2|3` — the highest-priority deep link; absent/invalid → null. */
 function queryFloor(): FloorId | null {
@@ -57,6 +67,22 @@ export default function App() {
   const [pickedId, setPickedId] = useState<string | null>(null)
   const [chipVisible, setChipVisible] = useState(true)
   const moveIntent = useRef<MoveIntent>({ x: 0, z: 0 })
+
+  // theme: stored override → ?theme= → the office clock (never the device clock)
+  const [themeOverride, setThemeOverride] = useState<ThemeOverride | null>(() =>
+    effectiveOverride(readStoredOverride(), parseThemeParam(new URLSearchParams(window.location.search).get('theme'))),
+  )
+  const theme = useMemo(
+    () => resolveTheme(data?.now ?? null, officeTZ(), themeOverride, prefersDark()),
+    [data?.now, themeOverride],
+  )
+  useEffect(() => {
+    applyTheme(theme.mode, theme.source)
+  }, [theme])
+  const chooseTheme = useCallback((value: ThemeOverride) => {
+    setThemeOverride(value === 'auto' ? null : value)
+    writeStoredOverride(value)
+  }, [])
 
   const now = data?.now ?? Date.now() / 1000
   const agentById = useMemo(() => {
@@ -176,6 +202,10 @@ export default function App() {
         expanded={hudOpen}
         onToggleExpanded={() => setHudOpen((v) => !v)}
         stale={stale}
+        theme={theme.mode}
+        themeOverride={themeOverride}
+        themeSource={theme.source}
+        onTheme={chooseTheme}
       />
 
       {rosterOpen ? (

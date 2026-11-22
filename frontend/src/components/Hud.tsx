@@ -2,6 +2,7 @@ import { useIsMobile } from '../hooks/useViewport'
 import type { StatusPayload } from '../lib/types'
 import { tzLabel } from '../lib/roster'
 import { compact } from '../lib/format'
+import type { ThemeMode, ThemeOverride, ThemeSource } from '../lib/theme'
 
 const DOTS: Array<{ key: string; label: string }> = [
   { key: 'working', label: 'bekerja' },
@@ -23,6 +24,37 @@ interface HudProps {
   expanded: boolean
   onToggleExpanded: () => void
   stale: boolean
+  theme: ThemeMode
+  themeOverride: ThemeOverride | null
+  themeSource: ThemeSource
+  onTheme: (value: ThemeOverride) => void
+}
+
+/** Day / night / auto. `?theme=` and the stored choice both land here. */
+function ThemeControl({ theme, themeOverride, themeSource, onTheme }: Pick<HudProps, 'theme' | 'themeOverride' | 'themeSource' | 'onTheme'>) {
+  const active: ThemeOverride = themeOverride ?? 'auto'
+  const options: Array<{ value: ThemeOverride; glyph: string; label: string; title: string }> = [
+    { value: 'day', glyph: '☀', label: 'Terang', title: 'Tema terang (Daylight Atrium)' },
+    { value: 'night', glyph: '☾', label: 'Gelap', title: 'Tema gelap (Sky Lobby)' },
+    { value: 'auto', glyph: 'A', label: 'Auto', title: 'Ikut jam kantor (06:00–18:00 terang)' },
+  ]
+  return (
+    <div className="theme-ctrl" role="group" aria-label="Tema" data-mode={theme} data-source={themeSource}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          className={active === o.value ? 'is-active' : ''}
+          aria-pressed={active === o.value}
+          title={o.title}
+          onClick={() => onTheme(o.value)}
+        >
+          <span className="theme-glyph" aria-hidden="true">{o.glyph}</span>
+          <span className="theme-word">{o.label}</span>
+        </button>
+      ))}
+    </div>
+  )
 }
 
 /** Panel toggles: the desktop bottom toolbar owns them; phones use the bar. */
@@ -120,6 +152,9 @@ export function Hud(props: HudProps) {
         <span>
           hari ini <b>{compact(today.messages)}</b> pesan · <b>{compact(today.tools)}</b> alat
         </span>
+        <span className="theme-state" title={`sumber tema: ${props.themeSource}`}>
+          {props.theme === 'day' ? 'TERANG' : 'GELAP'} · {tzLabel()}
+        </span>
         <span className={`gw ${status?.gateway.state === 'running' ? 'ok' : 'warn'}`}>
           gateway {status?.gateway.state ?? '—'}
           {status?.gateway.version ? ` ${status.gateway.version}` : ''}
@@ -139,6 +174,13 @@ export function Hud(props: HudProps) {
               {!mobile ? <small>kantor virtual · {tzLabel()}</small> : null}
             </span>
           </div>
+
+          <ThemeControl
+            theme={props.theme}
+            themeOverride={props.themeOverride}
+            themeSource={props.themeSource}
+            onTheme={props.onTheme}
+          />
 
           {mobile ? (
             <button
