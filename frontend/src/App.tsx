@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Scene } from './components/Scene'
 import type { MoveIntent, RigCommand } from './lib/view'
 import { Hud } from './components/Hud'
+import { FloorTabs } from './components/FloorTabs'
 import { Roster } from './components/Roster'
 import { Feed, type FeedTab } from './components/Feed'
 import { TaskBoard } from './components/TaskBoard'
@@ -12,23 +13,39 @@ import { useStatus } from './hooks/useStatus'
 import { useIsMobile, useIsTouch } from './hooks/useViewport'
 import { resolveAgentId } from './lib/agents'
 import { agentFocus } from './lib/focus'
+import { agentMeta } from './lib/roster'
 import { SPOT_FLOOR } from './lib/view'
+import type { FloorId } from './lib/rooms'
 
-const TEAM_SPOTS = new Set(['lobby', 'edu', 'dev'])
+/** `?floor=1|2|3` — the highest-priority deep link; absent/invalid → null. */
+function queryFloor(): FloorId | null {
+  const raw = new URLSearchParams(window.location.search).get('floor')
+  const n = Number(raw)
+  return n === 1 || n === 2 || n === 3 ? (n as FloorId) : null
+}
+
+/** Persist the active floor in the URL so any view stays shareable. */
+function writeFloorToUrl(floor: FloorId): void {
+  if (typeof history === 'undefined') return
+  const url = new URL(window.location.href)
+  url.searchParams.set('floor', String(floor))
+  history.replaceState(null, '', url)
+}
 
 export default function App() {
   const { data, error, stale } = useStatus()
   const mobile = useIsMobile()
   const touch = useIsTouch()
 
-  // ?spot=<id> opens the canvas at a named spot (used by verify/ scripts);
-  // team spots land on their floor, tampak/luar keep the active one.
+  // The floor is the single source of truth; the command carries it to the
+  // canvas, which re-fits that floor. Deep-link priority: ?floor= wins over
+  // ?spot=; ?face=/#id pick the agent's own floor unless ?floor= is explicit.
   const [command, setCommand] = useState<RigCommand>(() => {
     const spot = new URLSearchParams(window.location.search).get('spot')
-    const floor = spot ? SPOT_FLOOR[spot] : undefined
+    const floor = queryFloor() ?? (spot ? SPOT_FLOOR[spot] : undefined)
     // default: the whole floor ("tampak"), so every desk is on screen from the
     // first frame — a cropped cluster is a bug, not a zoom
-    return { spot: floor !== undefined ? spot! : 'tampak', nonce: 0, floor: floor ?? 1 }
+    return { spot: floor !== undefined ? spot ?? 'tampak' : 'tampak', nonce: 0, floor: floor ?? 1 }
   })
   const [rosterOpen, setRosterOpen] = useState(!mobile)
   const [feedOpen, setFeedOpen] = useState(!mobile)
@@ -51,14 +68,11 @@ export default function App() {
   const displayId = pickedId ?? nearId
   const displayAgent = displayId ? agentById.get(displayId) : undefined
 
-  const goTo = useCallback((spot: string) => {
-    setCommand((c) => ({
-      spot,
-      nonce: c.nonce + 1,
-      // team spots own their floor; tampak/luar re-fit whatever floor is active
-      floor: TEAM_SPOTS.has(spot) ? SPOT_FLOOR[spot]! : c.floor,
-    }))
+  /** Switch floors: re-fit the floor (desktop fit, mobile zoom 1 + pan) and keep the URL shareable. */
+  const goFloor = useCallback((floor: FloorId) => {
+    setCommand((c) => ({ spot: 'tampak', nonce: c.nonce + 1, floor }))
     setPickedId(null)
+    writeFloorToUrl(floor)
   }, [])
 
   const flyToAgent = useCallback((id: string, tight = false) => {
@@ -72,6 +86,7 @@ export default function App() {
       nonce: c.nonce + 1,
       focus: focus ?? undefined,
       tight,
+      floor: focus?.floor ?? c.floor,
     }))
     setPickedId(id)
     setChipVisible(true)
@@ -93,16 +108,20 @@ export default function App() {
     [flyToAgent, mobile],
   )
 
-  // deep link: /#coder opens that desk, /?face=coder gets a face portrait
+  // deep links: /#coder opens that desk, /?face=coder gets a face portrait.
+  // The agent's own floor wins, except an explicit ?floor= which outranks both.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
+    const explicit = queryFloor()
     const face = resolveAgentId(params.get('face') ?? '')
-    if (face) {
-      flyToAgent(face, true)
+    const hash = resolveAgentId(decodeURIComponent(window.location.hash.replace('#', '')))
+    const id = face ?? hash
+    if (!id) return
+    if (explicit) {
+      if (agentMeta(id).desk.floor === explicit) setPickedId(id)
       return
     }
-    const hash = resolveAgentId(decodeURIComponent(window.location.hash.replace('#', '')))
-    if (hash) flyToAgent(hash)
+    flyToAgent(id, Boolean(face))
   }, [flyToAgent])
 
   // keep desktop panels open, phones clean
@@ -129,6 +148,7 @@ export default function App() {
       }`}
     >
       <div className="canvas-wrap">
+        <FloorTabs floor={command.floor ?? 1} status={data} onFloor={goFloor} />
         <Scene
           status={data}
           command={command}
@@ -142,8 +162,6 @@ export default function App() {
 
       <Hud
         status={data}
-        spot={command.spot}
-        onSpot={goTo}
         rosterOpen={rosterOpen}
         onToggleRoster={() => setRosterOpen((v) => !v)}
         feedOpen={feedOpen}
@@ -248,7 +266,7 @@ export default function App() {
         </div>
       ) : null}
 
-      {touch && !mobile ? <p className="hint">geser untuk melihat · tombol ruang untuk pindah</p> : null}
+      {touch && !mobile ? <p className="hint">geser untuk melihat · tombol 1/2/3 untuk pindah lantai</p> : null}
     </div>
   )
 }

@@ -209,6 +209,90 @@ ul {
   color: var(--ink-dim);
 }
 
+/* ---------- floor tabs (overlay above the canvas) ---------- */
+
+.floor-tabs {
+  position: absolute;
+  z-index: 20;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--navy-800);
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.floor-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 84px;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-dim);
+  text-align: left;
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.floor-tab:hover {
+  background: var(--navy-700);
+  color: var(--ink);
+}
+
+.floor-tab.is-active {
+  background: var(--terra-400);
+  color: var(--on-brass);
+}
+
+.floor-tab-id {
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.floor-tab.is-active .floor-tab-id {
+  color: var(--on-brass);
+}
+
+.floor-tab-name {
+  font-size: 10px;
+}
+
+.floor-tab-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.floor-tab-count {
+  font-weight: 700;
+}
+
+.floor-tab-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.floor-tab-stat .dot {
+  width: 6px;
+  height: 6px;
+}
+
+.floor-tab.is-active .floor-tab-meta {
+  color: var(--on-brass);
+}
+
 /* loading skeleton — the wrap already paints the dusk gradient */
 .scene-loading {
   position: absolute;
@@ -523,34 +607,6 @@ ul {
   padding: 0 12px;
   background: var(--navy-800);
   border-top: 2px solid var(--line);
-}
-
-.spots {
-  display: flex;
-  gap: 4px;
-  padding: 3px;
-  background: var(--navy-900);
-  border: 2px solid var(--line);
-}
-
-.spot-btn {
-  border: 0;
-  background: transparent;
-  color: var(--ink-dim);
-  padding: 6px 14px;
-  min-height: 36px;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.spot-btn:hover {
-  color: var(--ink);
-  background: var(--navy-700);
-}
-.spot-btn.is-active {
-  background: var(--terra-400);
-  color: var(--on-brass);
-  font-weight: 700;
 }
 
 .toolbar .hud-actions {
@@ -1459,20 +1515,6 @@ ul {
     margin-left: auto;
   }
 
-  /* the phone keeps its spots in the HUD, wrapped under the brand row */
-  .hud .spots {
-    order: 3;
-    flex: 1 1 100%;
-    justify-content: space-between;
-  }
-
-  .hud .spot-btn {
-    flex: 1;
-    min-height: 40px;
-    font-size: 11px;
-    padding: 4px 6px;
-  }
-
   .hud-detail {
     display: none;
     flex-direction: column;
@@ -1494,6 +1536,24 @@ ul {
     top: auto;
     bottom: calc(var(--toolbar-h) + 12px + var(--safe-b));
     right: calc(10px + var(--safe-r));
+  }
+
+  /* floor tabs stay compact on the phone: id + count only */
+  .floor-tabs {
+    top: 6px;
+    left: 6px;
+    gap: 2px;
+    padding: 2px;
+  }
+
+  .floor-tab {
+    min-width: 0;
+    padding: 4px 6px;
+  }
+
+  .floor-tab-name,
+  .floor-tab-stat {
+    display: none;
   }
 
   /* agent list = bottom sheet (was a left drawer) */

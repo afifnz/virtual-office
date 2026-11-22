@@ -26,7 +26,7 @@
 import { AGENTS } from '../frontend/src/lib/agents'
 import { rosterAgents } from '../frontend/src/lib/roster'
 import { seatPoint } from '../frontend/src/lib/routes'
-import { FLOORS, FLOOR_IDS, type FloorId } from '../frontend/src/lib/rooms'
+import { FLOORS, FLOOR_IDS, LIFT, liftNode, navOf, obstaclesOf, type FloorId } from '../frontend/src/lib/rooms'
 import {
   NAME_GAP,
   NAME_MAX,
@@ -427,6 +427,39 @@ for (const f of FLOOR_IDS) {
 if (PLATE_H !== 11) fail(`PLATE_H = ${PLATE_H}, want 11`)
 if (NAME_GAP < 1) fail('nameplates must float above the head, not sit on it')
 else ok(`plate geometry: ${PLATE_H} px tall at 1×, ${NAME_GAP} px above the head`)
+
+// ------------------------------------------------- 11. the lift on every floor
+// The lift core follows the identical rule on all three floors: a shaft that
+// is a real obstacle, a walkable nav node wired into that floor's graph, 1.0
+// unit west of the door, inside the floor bounds (plan §Denah/Lift).
+
+for (const f of FLOOR_IDS) {
+  const lift = LIFT[f]
+  if (!lift) fail(`L${f}: LIFT[${f}] missing`)
+  else {
+    const shaft = obstaclesOf(f).find((o) => o.id === `lift-${f}`)
+    if (!shaft) fail(`L${f}: lift shaft is not an obstacle on this floor`)
+    else if (Math.abs(shaft.x1 - lift.shaft.x1) > 1e-9 || Math.abs(shaft.z2 - lift.shaft.z2) > 1e-9) {
+      fail(`L${f}: OBSTACLES lift-${f} != LIFT[${f}].shaft`)
+    }
+    const node = liftNode(f)
+    const nav = navOf(f)
+    const wired = nav.find((n) => n.id === node.id)
+    if (!wired) fail(`L${f}: nav node ${node.id} missing`)
+    else {
+      if (wired.floor !== f) fail(`L${f}: lift nav node claims floor ${wired.floor}`)
+      if (wired.x !== node.x || wired.z !== node.z) fail(`L${f}: lift nav node drifted from LIFT[${f}].node`)
+      if (Math.abs(wired.x - (lift.doorX - 1)) > 1e-9) fail(`L${f}: lift node must stand 1.0 west of the door`)
+      if (wired.z < -FLOORS[f].d / 2 || wired.z > FLOORS[f].d / 2) fail(`L${f}: lift node outside the floor`)
+    }
+    const shaftPxW = (lift.shaft.x2 - lift.shaft.x1) * 16
+    const shaftPxH = (lift.shaft.z2 - lift.shaft.z1) * 16
+    if (Math.abs(shaftPxW - 2.6 * 16) > 1e-9 || Math.abs(shaftPxH - 3.2 * 16) > 1e-9) {
+      fail(`L${f}: shaft is ${shaftPxW}×${shaftPxH}px, want 2.6×3.2 world units`)
+    }
+  }
+  ok(`L${f}: shaft lift = obstacle, node ${liftNode(f).id} (${liftNode(f).x},${liftNode(f).z}) walkable & wired`)
+}
 
 console.log(fails === 0 ? '\nVISUAL OK' : `\n${fails} MASALAH`)
 process.exit(fails === 0 ? 0 : 1)

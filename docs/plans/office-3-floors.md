@@ -441,13 +441,20 @@ Koordinat persis sesuai rencana (tanpa penyesuaian); lift placeholder digambar d
 tiap lantai; satu lantai dirender (default L1, tab M2).
 
 ### M2 — lift + tab + deep link
-- [ ] T2.1 [test] assertion journey lift (RED)
-- [ ] T2.2 [fe] journeyState + pintu + chip lift + envelope sesama lantai
-- [ ] T2.3 [fe] App floor state + ?floor= + keyboard 1/2/3 + Office2D per lantai
-- [ ] T2.4 [fe] FloorTabs (slot SpotNav) + gaya
-- [ ] T2.5 [test] visual_check/layout_check per lantai + lift
-- [ ] T2.6 [test] regresi panel + seed fallback + probe
-- [ ] T2.7 gate M2 hijau; commit M2
+- [x] T2.1 [test] assertion journey lift (RED)
+- [x] T2.2 [fe] journeyState + pintu + chip lift + envelope sesama lantai
+- [x] T2.3 [fe] App floor state + ?floor= + keyboard 1/2/3 + Office2D per lantai
+- [x] T2.4 [fe] FloorTabs (slot SpotNav) + gaya
+- [x] T2.5 [test] visual_check/layout_check per lantai + lift
+- [x] T2.6 [test] regresi panel + seed fallback + probe
+- [x] T2.7 gate M2 hijau; commit M2
+
+**Status M2: DONE** (2026-11-22) — `journey.ts` murni (segmen A..G, dwell 2.6 s,
+chip `di lift · L<n>` generik, total menutup pulang-pergi); render hanya lantai
+aktif + pintu lift terbuka saat dwell + envelope sesama lantai; FloorTabs DOM
+overlay (L1/L2/L3 + jumlah agen + ringkasan status, keyboard 1/2/3, SpotNav
+dihapus); `?floor=` menang atas `?spot=`/`?face=`, pindah lantai menulis URL &
+re-fit. Semua gate hijau: tsc, build, roster/layout/anim/visual OK, e2e 51 ok.
 
 ### M3 — visual modern + roster + dokumen
 - [ ] T3.1 [fe] palette + sprites modern (hapus gamelan/lesehan/kucing)

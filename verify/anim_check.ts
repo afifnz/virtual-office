@@ -325,6 +325,121 @@ if (STATUS.blocked !== '#FFC93B') fail('blocked chip colour drifted from design 
 if (PALETTE.navy900 !== '#101828' || PALETTE.terra500 !== '#C4602C') fail('core palette drifted from design §2.1')
 else ok('palette matches the design tokens (team accents, blocked yellow, navy/terra)')
 
+// --------------------------------------------------------- 11. lift journeys
+// Cross-floor delegation is a lift journey (plan §Lift): walk to the lift on
+// the home floor, dwell exactly LIFT_DWELL with the doors open and a floor-only
+// chip, walk on the target floor, stand, walk back, dwell, walk home. Same-floor
+// delegation keeps the old out/stand/back loop with no lift step at all.
+
+import { LIFT_DWELL, journeyAt, journeyFor, liftChip } from '../frontend/src/scene2d/journey'
+import { DESK_EXIT, LIFT } from '../frontend/src/lib/rooms'
+import { agentMeta, hashId } from '../frontend/src/lib/roster'
+
+const pathLenOf = (path: Array<[number, number]>) => {
+  let L = 0
+  for (let i = 0; i < path.length - 1; i++) L += Math.hypot(path[i + 1]![0] - path[i]![0], path[i + 1]![1] - path[i]![1])
+  return L
+}
+
+const devMeta = agentMeta('dev') // Bima, desk on L3
+
+// --- cross-floor: dev (L3) delegates to default (Ndoro, desk on L1)
+
+const xj = journeyFor(devMeta, { kind: 'desk', id: 'default' })
+const xkinds = xj.steps.map((s) => s.kind).join(',')
+if (xkinds !== 'walk,lift,walk,walk,lift,walk') {
+  fail(`cross-floor journey = ${xkinds}, want walk,lift,walk,walk,lift,walk (A..G)`)
+} else ok('cross-floor journey: segments A walk, B lift, C walk, D stand, E walk, F lift, G walk')
+
+if (LIFT_DWELL !== 2.6) fail(`LIFT_DWELL = ${LIFT_DWELL}, want 2.6`)
+else ok('LIFT_DWELL = 2.6')
+
+const dwells = xj.steps.filter((s) => s.kind === 'lift')
+if (dwells.length !== 2) fail(`cross-floor journey has ${dwells.length} lift steps, want 2`)
+else {
+  const [b, fseg] = dwells as Array<{ kind: 'lift'; floor: 1 | 2 | 3; to: 1 | 2 | 3; x: number; z: number; dur: number }>
+  if (b!.dur !== 2.6 || fseg!.dur !== 2.6) fail(`lift dwells are ${b!.dur}/${fseg!.dur}, want 2.6/2.6`)
+  else ok('both lift dwells are exactly 2.6 s')
+  if (b!.floor !== 3 || b!.to !== 1) fail(`seg B = floor ${b!.floor}→${b!.to}, want 3→1`)
+  if (fseg!.floor !== 1 || fseg!.to !== 3) fail(`seg F = floor ${fseg!.floor}→${fseg!.to}, want 1→3`)
+  else ok('seg B dwells on L3 bound for L1; seg F dwells on L1 bound for L3')
+  const node = LIFT[3]!.node
+  if (b!.x !== node.x || b!.z !== node.z) fail(`seg B dwell position ${b!.x},${b!.z} != lift node ${node.x},${node.z}`)
+  else ok('seg B dwells at the L3 lift node')
+}
+
+// segment D keeps the existing stand duration 5 + seed*4
+const seed = (hashId('dev') % 1000) / 1000
+const standWant = 5 + seed * 4
+const segC = xj.steps[2]!
+if (segC.kind !== 'walk' || segC.stand !== standWant) {
+  fail(`seg C stand = ${segC.kind === 'walk' ? segC.stand : '?'}, want ${standWant}`)
+} else ok(`seg D stand = 5+seed·4 = ${standWant.toFixed(2)} s`)
+
+// the total covers the whole round trip: 2(tA+tC) + 2·2.6 + stand + rest
+const tA = pathLenOf((xj.steps[0] as { kind: 'walk'; path: Array<[number, number]> }).path) / 1.8
+const tC = pathLenOf((xj.steps[2] as { kind: 'walk'; path: Array<[number, number]> }).path) / 1.8
+const tE = pathLenOf((xj.steps[3] as { kind: 'walk'; path: Array<[number, number]> }).path) / 1.8
+const tG = pathLenOf((xj.steps[5] as { kind: 'walk'; path: Array<[number, number]> }).path) / 1.8
+if (!(xj.total >= 2 * (tA + tC) + 2 * 2.6 + standWant - 1e-9)) {
+  fail(`cross-floor total ${xj.total.toFixed(2)} < 2(tA+tC)+5.2+stand — the return leg is cut`)
+} else ok(`cross-floor total ${xj.total.toFixed(2)} s covers out + dwell + stand + back + dwell + home`)
+if (!(tE >= tC - 1e-9)) fail(`seg E (${tE.toFixed(2)}) should retrace seg C (${tC.toFixed(2)})`)
+
+// journeyAt: dwell state, single floor, target-floor chip, determinism
+const dwellAt = journeyAt(xj, tA + 1.0)
+if (!dwellAt.inLift || dwellAt.liftTo !== 1 || dwellAt.floor !== 3 || dwellAt.walking) {
+  fail(`mid-dwell state = ${JSON.stringify(dwellAt)}, want floor 3, inLift, liftTo 1, standing`)
+} else ok('mid-dwell: standing in the lift on L3, liftTo = 1')
+
+const liftChipText = liftChip(dwellAt.liftTo ?? 1)
+if (!/^di lift · L[123]$/.test(liftChipText)) fail(`lift chip "${liftChipText}" must be only "di lift · L<floornum>"`)
+else ok(`lift chip is generic: "${liftChipText}"`)
+
+const midC = journeyAt(xj, tA + 2.6 + tC / 2)
+if (midC.floor !== 1 || !midC.walking || midC.inLift) {
+  fail(`mid-seg-C state = ${JSON.stringify(midC)}, want walking on L1`)
+} else ok('seg C walks the target floor (L1)')
+
+const midStand = journeyAt(xj, tA + 2.6 + tC + standWant / 2)
+const exit1 = DESK_EXIT['default']!
+if (midStand.floor !== 1 || midStand.walking || !near(midStand.x, exit1[0]) || !near(midStand.z, exit1[1])) {
+  fail(`mid-stand state = ${JSON.stringify(midStand)}, want standing at the L1 target desk exit`)
+} else ok('seg D stands at the target desk exit')
+
+let floorsSeen = new Set<number>()
+let singleFloorOk = true
+let finiteOk = true
+for (let i = 0; i < 600; i++) {
+  const ph = (xj.total * i) / 600
+  const st = journeyAt(xj, ph)
+  floorsSeen.add(st.floor)
+  if (!Number.isFinite(st.x) || !Number.isFinite(st.z)) finiteOk = false
+}
+if (!finiteOk) fail('journeyAt produced a non-finite position')
+if (floorsSeen.size !== 2 || !floorsSeen.has(3) || !floorsSeen.has(1)) {
+  fail(`cross-floor journey visits floors {${[...floorsSeen].join(',')}}, want exactly {1,3} — never two floors at once`)
+} else ok('a cross-floor agent is drawn on exactly one floor at a time ({1,3} across the period)')
+
+const j1 = JSON.stringify(journeyAt(xj, 3.21))
+const j2 = JSON.stringify(journeyAt(xj, 3.21))
+const f1 = JSON.stringify(journeyFor(devMeta, { kind: 'desk', id: 'default' }))
+const f2 = JSON.stringify(journeyFor(devMeta, { kind: 'desk', id: 'default' }))
+if (j1 !== j2 || f1 !== f2) fail('journey is not deterministic for the same agent + clock')
+else ok('journey is deterministic from hashId(agent) + t (frozen under ?still=1)')
+
+// --- same-floor: dev (L3) delegates to coder (Dimas, desk on L3)
+
+const sj = journeyFor(devMeta, { kind: 'desk', id: 'coder' })
+if (sj.steps.some((s) => s.kind === 'lift')) fail('same-floor journey must not contain a lift step')
+else if (sj.steps.map((s) => s.kind).join(',') !== 'walk,walk') {
+  fail(`same-floor journey = ${sj.steps.map((s) => s.kind).join(',')}, want walk,walk (out, back)`)
+} else ok('same-floor journey keeps the out/stand/back loop — no lift step')
+if (!sj.steps.every((s) => s.kind !== 'walk' || s.floor === 3)) fail('same-floor journey left L3')
+let sfloors = new Set<number>()
+for (let i = 0; i < 300; i++) sfloors.add(journeyAt(sj, (sj.total * i) / 300).floor)
+if (sfloors.size !== 1) fail(`same-floor journey visited floors {${[...sfloors].join(',')}}, want only {3}`)
+
 // --------------------------------------------------------------- final verdict
 
 console.log(fails === 0 ? '\nANIM OK' : `\n${fails} MASALAH`)

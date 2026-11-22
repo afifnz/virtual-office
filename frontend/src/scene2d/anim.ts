@@ -68,10 +68,10 @@ function isDelegating(agent: Agent, now: number, comms: Comm[]): boolean {
 }
 
 /**
- * Target of a delegate walk: the comm's recipient desk when it sits on the
- * walker's own floor, else the nearest meeting POI on the walker's floor
- * (cross-floor visits are a lift journey, M2/M3 — the walk never leaves the
- * walker's floor).
+ * Target of a delegate walk: the comm's recipient desk — on any floor; a
+ * cross-floor visit becomes a lift journey (scene2d/journey.ts), not a local
+ * walk. An unknown recipient falls back to the meeting POI on the walker's
+ * own floor (no teleport, plan §Lift.6).
  */
 function walkTarget(agent: Agent, now: number, comms: Comm[]): WalkTarget {
   const c = recentDelegate(agent, now, comms)
@@ -80,7 +80,7 @@ function walkTarget(agent: Agent, now: number, comms: Comm[]): WalkTarget {
   const floor = self?.desk.floor ?? 1
   if (to) {
     const target = rosterAgents().find((a) => a.id === to)
-    if (target && target.desk.floor === floor) return { kind: 'desk', id: to }
+    if (target) return { kind: 'desk', id: to }
   }
   return { kind: 'poi', id: floor === 3 ? 'standup' : 'rapat' }
 }

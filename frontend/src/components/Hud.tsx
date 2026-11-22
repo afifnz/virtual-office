@@ -1,6 +1,6 @@
-import { useIsMobile, useIsNarrow } from '../hooks/useViewport'
+import { useIsMobile } from '../hooks/useViewport'
 import type { StatusPayload } from '../lib/types'
-import { teamMeta, tzLabel } from '../lib/roster'
+import { tzLabel } from '../lib/roster'
 import { compact } from '../lib/format'
 
 const DOTS: Array<{ key: string; label: string }> = [
@@ -10,12 +10,8 @@ const DOTS: Array<{ key: string; label: string }> = [
   { key: 'blocked', label: 'terblokir' },
 ]
 
-const SPOT_IDS = ['lobby', 'dev', 'edu'] as const
-
 interface HudProps {
   status: StatusPayload | null
-  spot: string
-  onSpot: (id: string) => void
   rosterOpen: boolean
   onToggleRoster: () => void
   feedOpen: boolean
@@ -27,34 +23,6 @@ interface HudProps {
   expanded: boolean
   onToggleExpanded: () => void
   stale: boolean
-}
-
-/** Room buttons: four spots, the active one lit in terracotta. */
-function SpotNav({ spot, onSpot }: { spot: string; onSpot: (id: string) => void }) {
-  const narrow = useIsNarrow()
-  return (
-    <nav className="spots" aria-label="Pindah ruang">
-      {SPOT_IDS.map((id) => (
-        <button
-          key={id}
-          type="button"
-          className={`spot-btn ${spot === id ? 'is-active' : ''}`}
-          onClick={() => onSpot(id)}
-          title={teamMeta(id).sub}
-        >
-          {narrow ? (teamMeta(id).label.split(' ')[1] ?? teamMeta(id).name) : teamMeta(id).name}
-        </button>
-      ))}
-      <button
-        type="button"
-        className={`spot-btn ${spot === 'luar' ? 'is-active' : ''}`}
-        onClick={() => onSpot('luar')}
-        title="Tampak luar gedung"
-      >
-        Luar
-      </button>
-    </nav>
-  )
 }
 
 /** Panel toggles: the desktop bottom toolbar owns them; phones use the bar. */
@@ -125,7 +93,7 @@ function PanelToggles({
 }
 
 export function Hud(props: HudProps) {
-  const { status, spot, onSpot, expanded, onToggleExpanded, stale } = props
+  const { status, expanded, onToggleExpanded, stale } = props
   const mobile = useIsMobile()
 
   const counts = new Map<string, number>()
@@ -173,18 +141,15 @@ export function Hud(props: HudProps) {
           </div>
 
           {mobile ? (
-            <>
-              <button
-                type="button"
-                className="hud-caret"
-                aria-expanded={expanded}
-                aria-label={expanded ? 'Ringkas HUD' : 'Buka detail HUD'}
-                onClick={onToggleExpanded}
-              >
-                {expanded ? '▾' : '▴'}
-              </button>
-              <SpotNav spot={spot} onSpot={onSpot} />
-            </>
+            <button
+              type="button"
+              className="hud-caret"
+              aria-expanded={expanded}
+              aria-label={expanded ? 'Ringkas HUD' : 'Buka detail HUD'}
+              onClick={onToggleExpanded}
+            >
+              {expanded ? '▾' : '▴'}
+            </button>
           ) : null}
 
           {detail}
@@ -193,11 +158,11 @@ export function Hud(props: HudProps) {
         {stale ? <div className="stale">data lama — mencoba ulang…</div> : null}
       </header>
 
-      {/* Desktop keeps navigation and panel toggles in a bottom toolbar, so the
-          HUD stays a thin bar and the canvas owns everything in between. */}
+      {/* Desktop keeps the panel toggles in a bottom toolbar, so the HUD stays a
+          thin bar and the canvas owns everything in between. Floor switching
+          lives in the FloorTabs overlay above the canvas. */}
       {!mobile ? (
         <footer className="toolbar">
-          <SpotNav spot={spot} onSpot={onSpot} />
           <PanelToggles {...props} />
         </footer>
       ) : null}

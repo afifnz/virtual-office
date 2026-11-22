@@ -44,14 +44,14 @@
 
   // 1. no panel may sit on top of the canvas
   const panels = {}
-  for (const sel of ['.roster', '.feed', '.card', '.prox-chip', '.zoom-ctrl', '.dpad']) {
+  for (const sel of ['.roster', '.feed', '.card', '.prox-chip', '.zoom-ctrl', '.dpad', '.floor-tabs']) {
     const el = document.querySelector(sel)
     const r = rect(el)
     if (!r) continue
     const visible = el.offsetParent !== null && getComputedStyle(el).display !== 'none'
     panels[sel] = r
     if (!visible) continue
-    if (sel === '.zoom-ctrl' || sel === '.dpad') continue // they live inside the canvas on purpose
+    if (sel === '.zoom-ctrl' || sel === '.dpad' || sel === '.floor-tabs') continue // they live inside the canvas on purpose
     // phone sheets are modal on purpose; only the desktop layout must stay clear
     if (el.classList.contains('is-sheet') || el.classList.contains('is-full')) continue
     if (overlaps(r, canvasRect)) problems.push(`${sel} overlaps the canvas (${JSON.stringify(r)} vs ${JSON.stringify(canvasRect)})`)
@@ -99,12 +99,34 @@
   const zoomText = document.querySelector('.zoom-ctrl span')?.textContent ?? null
   const vp = typeof window.__office2dVp === 'function' ? window.__office2dVp() : null
   if (vp && canvasRect) {
-    const floorW = 448 * vp.zoom
-    const floorH = 320 * vp.zoom
+    // world px per floor at TILE=16: L1 448×320, L2 320×256, L3 384×288
+    const FLOOR_PX = { 1: [448, 320], 2: [320, 256], 3: [384, 288] }
+    const size = FLOOR_PX[vp.floor] ?? FLOOR_PX[1]
+    const floorW = size[0] * vp.zoom
+    const floorH = size[1] * vp.zoom
     if (floorW > canvasRect.w + 1 && vp.zoom > 1) problems.push(`floor ${floorW}px wider than the ${canvasRect.w}px canvas at zoom ${vp.zoom}`)
     if (floorH > canvasRect.h + 1 && vp.zoom > 1) problems.push(`floor ${floorH}px taller than the ${canvasRect.h}px canvas at zoom ${vp.zoom}`)
   } else {
     problems.push('window.__office2dVp() is missing')
+  }
+
+  // 3b. the floor tabs: three of them, and clicking one switches vp.floor
+  let tabs = null
+  const tabEls = [...document.querySelectorAll('.floor-tabs .floor-tab')]
+  if (tabEls.length !== 3) {
+    problems.push(`expected 3 floor tabs, found ${tabEls.length}`)
+  } else if (typeof window.__office2dVp === 'function') {
+    const before = window.__office2dVp().floor
+    // click L2 (index 1), or L3 when already on L2, so the floor must change
+    const idx = before === 2 ? 2 : 1
+    tabEls[idx].click()
+    await sleep(200)
+    const after = window.__office2dVp().floor
+    tabs = { clicked: idx + 1, before, after }
+    if (after === before) problems.push(`clicking floor tab L${idx + 1} did not change vp.floor (${before} → ${after})`)
+    if (!new URLSearchParams(window.location.search).get('floor')) {
+      problems.push('switching floors did not write ?floor= to the URL')
+    }
   }
 
   // 4. the canvas is actually painted (a blank canvas is all-transparent)
@@ -128,6 +150,7 @@
     zoomText,
     canvas: canvasRect,
     panels,
+    tabs,
     roster,
     painted: painted === null ? null : Math.round(painted * 100) / 100,
     notes,

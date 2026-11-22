@@ -16,13 +16,12 @@
 import type { AgentMeta } from '../lib/agents'
 import type { Agent, Comm } from '../lib/types'
 import { deskObstacle } from '../lib/layout'
-import {
-  DESK_EXIT, FLOORS, LIFT, POIS, obstaclesOf, wallsOf, type FloorId,
-} from '../lib/rooms'
-import { hashId, rosterAgents } from '../lib/roster'
-import { onward, seatPoint } from '../lib/routes'
+import { FLOORS, LIFT, obstaclesOf, wallsOf, type FloorId } from '../lib/rooms'
+import { rosterAgents } from '../lib/roster'
+import { seatPoint } from '../lib/routes'
 import type { Pt } from '../lib/nav'
 import { poseFor, blockedChipText, type Pose } from './anim'
+import { dwellFloors, journeyAt, journeyClock, journeyFor, liftChip, liftDoorRect } from './journey'
 import {
   DOT,
   PLATE_H,
@@ -164,6 +163,45 @@ function drawLift(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   ctx.fillRect(x - 1, dz - 12, 3, 24)
   ctx.fillStyle = PALETTE.muted
   ctx.fillRect(x - 1, dz - 12, 1, 24)
+  // closed steel door panels; the dynamic layer slides them apart while an
+  // agent dwells on this floor (renderFrame → drawLiftDoorsOpen)
+  ctx.fillStyle = PALETTE.navy600
+  ctx.fillRect(x, dz - 12, 7, 24)
+  ctx.fillRect(x + 7, dz - 12, 7, 24)
+  ctx.fillStyle = PALETTE.muted
+  ctx.fillRect(x + 6, dz - 12, 1, 24)
+  ctx.fillRect(x + 7, dz - 12, 1, 24)
+}
+
+/**
+ * Dynamic overlay: while an agent dwells in the lift on the active floor, the
+ * steel doors part and the dark car interior shows. Drawn in CSS px on top of
+ * the cached static layer.
+ */
+function drawLiftDoorsOpen(
+  ctx: CanvasRenderingContext2D,
+  floor: FloorId,
+  toCss: (x: number, z: number) => { x: number; y: number },
+  k: number,
+  dpr: number,
+): void {
+  const door = liftDoorRect(floor)
+  const c = toCss(door.x, door.z)
+  const w = Math.round(14 * k)
+  const h = Math.round(24 * k)
+  const x = Math.round(c.x * dpr)
+  const y = Math.round((c.y - h / 2) * dpr)
+  // dark car interior
+  ctx.fillStyle = PALETTE.navy900
+  ctx.fillRect(x, y, w, h)
+  // the two panels, slid to the sides of the opening
+  const pw = Math.max(2, Math.round(6 * k))
+  ctx.fillStyle = PALETTE.navy600
+  ctx.fillRect(x - pw, y, pw, h)
+  ctx.fillRect(x + w, y, pw, h)
+  ctx.fillStyle = PALETTE.muted
+  ctx.fillRect(x - 1, y, Math.max(1, dpr), h)
+  ctx.fillRect(x + w, y, Math.max(1, dpr), h)
 }
 
 /** Build the static world surface of one floor; the caller caches it. */
@@ -312,85 +350,63 @@ function plaquePlate(text: string): Sprite {
 
 // ---------------------------------------------------------------- geometry
 
-/** Live world position of one agent for picking & the proximity card. */
-export function pickTargets(metas: AgentMeta[]): Array<{ id: string; x: number; z: number }> {
-  return metas.map((m) => {
-    const p = seatPoint(m)
-    return { id: m.id, x: p[0], z: p[1] }
-  })
-}
-
-function poiPoint(id: string, floor: FloorId): Pt {
-  return (POIS.find((p) => p.id === id && p.floor === floor)?.pos as Pt | undefined) ?? [0, 0]
-}
-
-function pathLen(path: Pt[]): number {
-  let L = 0
-  for (let i = 0; i < path.length - 1; i++) {
-    L += Math.hypot(path[i + 1]![0] - path[i]![0], path[i + 1]![1] - path[i]![1])
-  }
-  return L
-}
-
-function pointAt(path: Pt[], dist: number): Pt {
-  if (path.length === 0) return [0, 0]
-  if (path.length === 1) return path[0]!
-  let rem = dist
-  for (let i = 0; i < path.length - 1; i++) {
-    const a = path[i]!
-    const b = path[i + 1]!
-    const seg = Math.hypot(b[0] - a[0], b[1] - a[1])
-    if (rem <= seg || i === path.length - 2) {
-      const k = seg > 0 ? Math.min(1, rem / seg) : 1
-      return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]
-    }
-    rem -= seg
-  }
-  return path[path.length - 1]!
+/**
+ * One agent resolved to its current floor + position for a single frame. The
+ * `floor` is the journey's current floor while walking — an agent in transit
+ * belongs to exactly one floor at a time, never two.
+ */
+export interface PlacedAgent {
+  meta: AgentMeta
+  agent: Agent | undefined
+  pose: Pose
+  /** the floor the agent is on right now (journey floor, else its desk floor) */
+  floor: FloorId
+  x: number
+  z: number
+  walking: boolean
+  /** dwelling in the lift on `floor`, riding towards `liftTo` */
+  inLift: boolean
+  liftTo: FloorId | null
 }
 
 /**
- * Deterministic delegate walk: out to the target's desk exit, stand, walk home.
- * Seeded from the agent id so two agents never sync, and driven by `t` (the
- * render loop's monotonic clock, frozen under `?still=1`) — never Math.random.
+ * Resolve every agent's position for one frame. A delegate gets a
+ * deterministic journey (scene2d/journey.ts) that may cross floors through
+ * the lift; everyone else sits at their desk. Offline agents stay parked.
  */
-function walkState(meta: AgentMeta, pose: Pose, t: number): { x: number; z: number; walking: boolean } {
-  const walkTo = pose.walkTo!
-  const floor = meta.desk.floor
-  let target: Pt
-  if (walkTo.kind === 'desk') {
-    // The walk always happens on the walker's own floor; a cross-floor desk
-    // visit plays out at the nearest standup/rapat circle instead (the lift
-    // journey is a separate animation, M2/M3).
-    const agent = rosterAgents().find((a) => a.id === walkTo.id)
-    target =
-      agent && agent.desk.floor === floor
-        ? ((DESK_EXIT[walkTo.id] as Pt | undefined) ?? poiPoint(floor === 3 ? 'standup' : 'rapat', floor))
-        : poiPoint(floor === 3 ? 'standup' : 'rapat', floor)
-  } else {
-    target = poiPoint(walkTo.id, floor)
-  }
-  const path = onward(meta, target)
-  const seed = (hashId(meta.id) % 1000) / 1000
-  const period = 16 + seed * 6
-  const stand = 5 + seed * 4
-  const L = pathLen(path)
-  const speed = 1.8
-  const tOut = Math.max(0.01, L / speed)
-  const phase = (((t + seed * 97) % period) + period) % period
+export function placeAgents(
+  metas: AgentMeta[],
+  byId: Map<string, Agent>,
+  now: number,
+  comms: Comm[],
+  t: number,
+): PlacedAgent[] {
+  return metas.map((meta) => {
+    const agent = byId.get(meta.id)
+    const pose = agent ? poseFor(agent, now, comms) : OFFLINE_POSE
+    const seat = seatPoint(meta)
+    if (pose.kind !== 'walk' || !pose.walkTo || pose.offline) {
+      return {
+        meta,
+        agent,
+        pose,
+        floor: meta.desk.floor,
+        x: seat[0],
+        z: seat[1],
+        walking: false,
+        inLift: false,
+        liftTo: null,
+      }
+    }
+    const journey = journeyFor(meta, pose.walkTo)
+    const j = journeyAt(journey, journeyClock(meta, journey, t))
+    return { meta, agent, pose, floor: j.floor, x: j.x, z: j.z, walking: j.walking, inLift: j.inLift, liftTo: j.liftTo }
+  })
+}
 
-  if (phase < tOut) return { x: pointAt(path, phase * speed)[0], z: pointAt(path, phase * speed)[1], walking: true }
-  if (phase < tOut + stand) {
-    const p = path[path.length - 1]!
-    return { x: p[0], z: p[1], walking: false }
-  }
-  if (phase < tOut + stand + tOut) {
-    const back = phase - tOut - stand
-    const p = pointAt(path, (tOut - back) * speed)
-    return { x: p[0], z: p[1], walking: true }
-  }
-  const seat = seatPoint(meta)
-  return { x: seat[0], z: seat[1], walking: false }
+/** Live world position of one agent (current floor) for picking & the proximity card. */
+export function pickTargets(placed: PlacedAgent[]): Array<{ id: string; floor: FloorId; x: number; z: number }> {
+  return placed.map((p) => ({ id: p.meta.id, floor: p.floor, x: p.x, z: p.z }))
 }
 
 // ---------------------------------------------------------------- the frame
@@ -467,6 +483,14 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   const mode = plateMode(r.vp.zoom)
   const scale = plateScale(r.vp.zoom)
 
+  // Every agent resolved to its current floor + position: a delegate's journey
+  // may cross floors, so an in-transit agent belongs to exactly one floor —
+  // the journey's current floor — and is drawn only while that floor is active.
+  const resolved = placeAgents(r.metas, r.byId, r.now, r.comms, r.t)
+
+  // lift doors stand open on any floor where an agent dwells
+  if (dwellFloors(resolved).has(r.vp.floor)) drawLiftDoorsOpen(ctx, r.vp.floor, toCss, k, dpr)
+
   // The dynamic layer shows the active floor only: desks, chairs, agents,
   // nameplates and comm envelopes all belong to the floor on screen.
   const floorMetas = r.metas.filter((m) => m.desk.floor === r.vp.floor)
@@ -501,22 +525,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     }
   }
 
-  // agents, painter's-algorithm sorted by their current z (south drawn last)
-  const order = floorMetas
-    .map((meta) => {
-      const agent = r.byId.get(meta.id)
-      const pose = agent ? poseFor(agent, r.now, r.comms) : OFFLINE_POSE
-      const seat = seatPoint(meta)
-      const walk = pose.kind === 'walk' ? walkState(meta, pose, r.t) : null
-      return {
-        meta,
-        agent,
-        pose,
-        x: walk ? walk.x : seat[0],
-        z: walk ? walk.z : seat[1],
-        walking: walk?.walking ?? false,
-      }
-    })
+  // agents on the active floor, painter's-algorithm sorted by current z
+  // (south drawn last); a cross-floor delegate appears only on the floor
+  // their journey is currently on
+  const order = resolved
+    .filter((p) => p.floor === r.vp.floor)
+    .map((p) => ({ ...p }))
     .sort((a, b) => a.z - b.z)
 
   for (const item of order) {
@@ -563,7 +577,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
           ? '!'
           : dotsFrame(r.t)
         : ''
-    const chip = mode === 'compact' ? '' : statusChip(agent, pose)
+    const chip =
+      mode === 'compact'
+        ? ''
+        : item.inLift
+          ? liftChip(item.liftTo ?? r.vp.floor)
+          : statusChip(agent, pose)
     const counters = mode === 'detail' && !offline ? countersLine(agent) : ''
 
     // nameplate: team accent border, status dot, full first name
@@ -632,15 +651,16 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   }
 
   // comms envelopes: a quick paper-plane hop from sender to recipient, only
-  // when both ends sit on the active floor (cross-floor comms ride the lift)
+  // when both ends are on the same active floor (cross-floor comms ride the lift)
   for (const c of r.comms) {
     const age = r.now - c.ts
     if (age < 0 || age > 1.5) continue
-    const from = r.metas.find((m) => m.id === c.from && m.desk.floor === r.vp.floor)
-    const to = r.metas.find((m) => m.id === c.to && m.desk.floor === r.vp.floor)
+    const from = resolved.find((p) => p.meta.id === c.from)
+    const to = resolved.find((p) => p.meta.id === c.to)
     if (!from || !to) continue
-    const fp = seatPoint(from)
-    const tp = seatPoint(to)
+    if (from.floor !== r.vp.floor || to.floor !== r.vp.floor) continue
+    const fp: Pt = [from.x, from.z]
+    const tp: Pt = [to.x, to.z]
     const kk = age / 1.5
     const x = fp[0] + (tp[0] - fp[0]) * kk
     const z = fp[1] + (tp[1] - fp[1]) * kk - Math.sin(kk * Math.PI) * 0.6
