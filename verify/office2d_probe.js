@@ -57,6 +57,21 @@
     if (overlaps(r, canvasRect)) problems.push(`${sel} overlaps the canvas (${JSON.stringify(r)} vs ${JSON.stringify(canvasRect)})`)
   }
 
+  // 1b. the feed is docked at the foot of the right rail (decision: dock it
+  //     like the roster), never floating over the floor
+  const feed = document.querySelector('.feed')
+  const feedRect = rect(feed)
+  if (feed && feedRect && !feed.classList.contains('is-sheet') && feed.offsetParent !== null) {
+    const docked =
+      feedRect.x >= canvasRect.x + canvasRect.w - 1 && feedRect.x + feedRect.w >= window.innerWidth - 2
+    if (!docked) {
+      problems.push(
+        `.feed is not docked in the right rail (${JSON.stringify(feedRect)} vs canvas ${JSON.stringify(canvasRect)})`,
+      )
+    }
+    notes.push(`feed docked at ${JSON.stringify(feedRect)}`)
+  }
+
   // 2. the roster really scrolls (regression cc2add3)
   const body = document.querySelector('.roster-body')
   let roster = null
