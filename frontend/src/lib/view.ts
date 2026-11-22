@@ -7,13 +7,16 @@
  * bundle). The old `CameraRig` re-exports the same names during the transition
  * and is removed in a later step.
  */
+import type { FloorId } from './rooms'
 
 /** One command the HUD / deep links send to the scene. */
 export interface RigCommand {
   spot: string
   nonce: number
+  /** which floor to show (absent → keep the current one, default 1) */
+  floor?: FloorId
   /** fly to an agent's desk instead of a named spot */
-  focus?: { x: number; z: number; rot: number; seated?: boolean }
+  focus?: { x: number; z: number; rot: number; floor: FloorId; seated?: boolean }
   /** portrait mode: get close enough to read the face */
   tight?: boolean
 }
@@ -34,14 +37,37 @@ export interface SpotView {
 }
 
 /**
- * Where each named spot points the 2D camera. Centres are the team rooms from
- * `lib/layout.ts` TEAM_CENTRE; `tampak`/`luar` ask the canvas to zoom-fit the
- * whole floor, so no desk cluster can ever start off-screen.
+ * Where each named spot points the 2D camera, per floor. `tampak`/`luar` ask
+ * the canvas to zoom-fit the whole floor, so no desk cluster can ever start
+ * off-screen; the team spots centre that team's block.
  */
-export const SPOT_VIEW: Record<string, SpotView> = {
-  lobby: { x: 0, z: 6, zoom: 2 },
-  dev: { x: -7.6, z: -4.4, zoom: 2 },
-  edu: { x: 7.0, z: -4.4, zoom: 2 },
-  tampak: { x: 0, z: 0, zoom: 1, fit: true },
-  luar: { x: 0, z: 0, zoom: 1, fit: true },
+export const SPOT_VIEW: Record<FloorId, Record<string, SpotView>> = {
+  1: {
+    lobby: { x: -6, z: 6, zoom: 2 },
+    tampak: { x: 0, z: 0, zoom: 1, fit: true },
+    luar: { x: 0, z: 0, zoom: 1, fit: true },
+  },
+  2: {
+    edu: { x: 0, z: 0.6, zoom: 2 },
+    tampak: { x: 0, z: 0, zoom: 1, fit: true },
+    luar: { x: 0, z: 0, zoom: 1, fit: true },
+  },
+  3: {
+    dev: { x: 0, z: -0.39, zoom: 2 },
+    tampak: { x: 0, z: 0, zoom: 1, fit: true },
+    luar: { x: 0, z: 0, zoom: 1, fit: true },
+  },
+}
+
+/**
+ * Legacy deep-link compatibility: the old `?spot=` names map onto floors
+ * (`lobby` → L1, `edu` → L2, `dev` → L3; `tampak`/`luar` fit the active
+ * floor, which defaults to L1 — there is no exterior view any more).
+ */
+export const SPOT_FLOOR: Record<string, FloorId> = {
+  lobby: 1,
+  edu: 2,
+  dev: 3,
+  tampak: 1,
+  luar: 1,
 }

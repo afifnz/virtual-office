@@ -1,4 +1,9 @@
-/** Shortest path over the office waypoint graph (Dijkstra, tiny graph). */
+/** Shortest path over the office waypoint graph (Dijkstra, tiny graph).
+ *
+ * Node ids carry an `l<f>-` prefix and NAV_EDGES only ever links nodes of the
+ * same floor, so a path can never cross floors by construction — the lift is
+ * a separate journey segment (see the office-3-floors plan §Lift).
+ */
 import { NAV, NAV_EDGES, type NavNode } from './rooms'
 
 const ADJ = new Map<string, Array<{ id: string; w: number }>>()

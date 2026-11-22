@@ -12,19 +12,23 @@ import { useStatus } from './hooks/useStatus'
 import { useIsMobile, useIsTouch } from './hooks/useViewport'
 import { resolveAgentId } from './lib/agents'
 import { agentFocus } from './lib/focus'
-import { SPOTS } from './lib/rooms'
+import { SPOT_FLOOR } from './lib/view'
+
+const TEAM_SPOTS = new Set(['lobby', 'edu', 'dev'])
 
 export default function App() {
   const { data, error, stale } = useStatus()
   const mobile = useIsMobile()
   const touch = useIsTouch()
 
-  // ?spot=<id> opens the camera at a named spot (used by verify/ scripts)
+  // ?spot=<id> opens the canvas at a named spot (used by verify/ scripts);
+  // team spots land on their floor, tampak/luar keep the active one.
   const [command, setCommand] = useState<RigCommand>(() => {
     const spot = new URLSearchParams(window.location.search).get('spot')
-    // default: the whole floor ("tampak"), so every one of the 13 desks is on
-    // screen from the first frame — a cropped cluster is a bug, not a zoom
-    return { spot: spot && spot in SPOTS ? spot : 'tampak', nonce: 0 }
+    const floor = spot ? SPOT_FLOOR[spot] : undefined
+    // default: the whole floor ("tampak"), so every desk is on screen from the
+    // first frame — a cropped cluster is a bug, not a zoom
+    return { spot: floor !== undefined ? spot! : 'tampak', nonce: 0, floor: floor ?? 1 }
   })
   const [rosterOpen, setRosterOpen] = useState(!mobile)
   const [feedOpen, setFeedOpen] = useState(!mobile)
@@ -48,7 +52,12 @@ export default function App() {
   const displayAgent = displayId ? agentById.get(displayId) : undefined
 
   const goTo = useCallback((spot: string) => {
-    setCommand((c) => ({ spot, nonce: c.nonce + 1 }))
+    setCommand((c) => ({
+      spot,
+      nonce: c.nonce + 1,
+      // team spots own their floor; tampak/luar re-fit whatever floor is active
+      floor: TEAM_SPOTS.has(spot) ? SPOT_FLOOR[spot]! : c.floor,
+    }))
     setPickedId(null)
   }, [])
 

@@ -252,26 +252,34 @@ export function placeStacks(
 export interface ZoneLabel {
   id: string
   text: string
+  /** the floor this plaque hangs on */
+  floor: 1 | 2 | 3
   /** world anchor */
   x: number
   z: number
 }
 
 /**
- * One plaque per zone (design §3.1: "plakat nama zona ditempel di dinding").
- * Dev and Edu sit on the back wall band, Pendopo on the front band west of the
- * MASUK gap — always outside the desk rows, so they never fight a nameplate.
+ * One plaque per zone per floor (design §3.1: "plakat nama zona ditempel di
+ * dinding"). L1 carries the LOBBY plaque west of the MASUK gap on the front
+ * band plus the entrance plaque; L2/L3 hang their team plaque on the north
+ * wall band, in the gap between the wall-hugging furniture.
  */
-export const ZONE_LABELS: ZoneLabel[] = [
-  { id: 'zone-dev', text: 'TIM DEV', x: -7, z: -9.55 },
-  { id: 'zone-edu', text: 'TIM EDU', x: 7, z: -9.55 },
-  { id: 'zone-lobby', text: 'PENDOPO', x: -7, z: 9.55 },
+const ZONE_LABELS: ZoneLabel[] = [
+  { id: 'zone-lobby', floor: 1, text: 'LOBBY', x: -7, z: 9.55 },
+  { id: 'zone-edu', floor: 2, text: 'TIM EDU', x: 0, z: -7.5 },
+  { id: 'zone-dev', floor: 3, text: 'TIM DEV', x: 3.5, z: -8.55 },
 ]
 
-/** The entrance plaque, kept from the old 3D door labels. */
-export const DOOR_LABELS: ZoneLabel[] = [{ id: 'door-masuk', text: 'MASUK', x: 0, z: 9.55 }]
+/** The entrance plaque, kept from the old 3D door labels (L1 only). */
+const DOOR_LABELS: ZoneLabel[] = [{ id: 'door-masuk', floor: 1, text: 'MASUK', x: 0, z: 9.55 }]
 
-/** Every fixed in-world plaque, drawn before the agent plates reserve space. */
+/** Every fixed in-world plaque of one floor, drawn before the agent plates reserve space. */
+export function labelsOf(floor: 1 | 2 | 3): ZoneLabel[] {
+  return [...ZONE_LABELS, ...DOOR_LABELS].filter((l) => l.floor === floor)
+}
+
+/** Every plaque in the building (verify scripts iterate per floor). */
 export const WORLD_LABELS: ZoneLabel[] = [...ZONE_LABELS, ...DOOR_LABELS]
 
 /** Plaque rect for a text whose centre is at (cx, cy) in CSS px. */

@@ -67,12 +67,22 @@ function isDelegating(agent: Agent, now: number, comms: Comm[]): boolean {
   return viaTool || viaComm
 }
 
-/** Target of a delegate walk: the comm's recipient desk, else the meeting POI. */
+/**
+ * Target of a delegate walk: the comm's recipient desk when it sits on the
+ * walker's own floor, else the nearest meeting POI on the walker's floor
+ * (cross-floor visits are a lift journey, M2/M3 — the walk never leaves the
+ * walker's floor).
+ */
 function walkTarget(agent: Agent, now: number, comms: Comm[]): WalkTarget {
   const c = recentDelegate(agent, now, comms)
   const to = c?.to
-  if (to && rosterAgents().some((a) => a.id === to)) return { kind: 'desk', id: to }
-  return { kind: 'poi', id: 'rapat' }
+  const self = rosterAgents().find((a) => a.id === agent.id)
+  const floor = self?.desk.floor ?? 1
+  if (to) {
+    const target = rosterAgents().find((a) => a.id === to)
+    if (target && target.desk.floor === floor) return { kind: 'desk', id: to }
+  }
+  return { kind: 'poi', id: floor === 3 ? 'standup' : 'rapat' }
 }
 
 function base(kind: PoseKind, extra: Partial<Pose> = {}): Pose {

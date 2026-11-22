@@ -15,17 +15,18 @@ import {
 } from '../frontend/src/scene2d/anim'
 import {
   TILE,
-  WORLD_H,
-  WORLD_W,
   blitScale,
   clampCenter,
   clampZoom,
+  fitZoom,
   nearestAt,
   pixelToWorld,
   screenToWorld,
   worldToPixel,
   worldToScreen,
+  worldSize,
 } from '../frontend/src/scene2d/viewport'
+import { FLOORS, type FloorId } from '../frontend/src/lib/rooms'
 import { glyphFor, textWidth } from '../frontend/src/scene2d/pixelfont'
 import { PALETTE, STATUS, TEAM } from '../frontend/src/scene2d/palette'
 
@@ -152,9 +153,9 @@ const delegateUnknown = poseFor(
   NOW,
   [comm({ from: 'dev', to: 'ghost-unknown', ts: NOW - 5 })],
 )
-if (delegateUnknown.walkTo?.kind !== 'poi' || delegateUnknown.walkTo.id !== 'rapat') {
-  fail(`unknown target → ${JSON.stringify(delegateUnknown.walkTo)}, want poi rapat`)
-} else ok('unknown walk target → the meeting POI')
+if (delegateUnknown.walkTo?.kind !== 'poi' || delegateUnknown.walkTo.id !== 'standup') {
+  fail(`unknown target → ${JSON.stringify(delegateUnknown.walkTo)}, want poi standup (dev walks on L3)`)
+} else ok("unknown walk target → the meeting POI on the walker's own floor (standup on L3)")
 
 const staleComm = poseFor(
   agent({ id: 'dev', status: 'idle', current: null }),
@@ -186,28 +187,42 @@ if (p1 !== p2) fail('poseFor is not deterministic')
 else ok('poseFor is deterministic for the same input')
 
 // ------------------------------------------------------- 5. world ↔ pixel math
+// per floor: L1 28×20 → 448×320, L2 20×16 → 320×256, L3 24×18 → 384×288
 
 if (TILE !== 16) fail(`TILE = ${TILE}, want 16`)
-const c = worldToPixel(0, 0)
-if (c.x !== 224 || c.y !== 160) fail(`worldToPixel(0,0) = ${c.x},${c.y}, want 224,160`)
-const nw = worldToPixel(-14, -10)
-if (nw.x !== 0 || nw.y !== 0) fail(`worldToPixel(-14,-10) = ${nw.x},${nw.y}, want 0,0`)
-const se = worldToPixel(14, 10)
-if (se.x !== WORLD_W || se.y !== WORLD_H) fail(`worldToPixel(14,10) = ${se.x},${se.y}, want ${WORLD_W},${WORLD_H}`)
-ok('world→pixel: TILE 16, floor 28×20 → 448×320, corners exact')
+const FLOOR_PX: Array<[FloorId, number, number]> = [
+  [1, 448, 320],
+  [2, 320, 256],
+  [3, 384, 288],
+]
+for (const [f, w, h] of FLOOR_PX) {
+  const size = worldSize(f)
+  if (size.w !== w || size.h !== h) fail(`L${f} worldSize = ${size.w}×${size.h}, want ${w}×${h}`)
+  const c = worldToPixel(0, 0, f)
+  if (c.x !== w / 2 || c.y !== h / 2) fail(`L${f} worldToPixel(0,0) = ${c.x},${c.y}, want ${w / 2},${h / 2}`)
+  const nw = worldToPixel(-FLOORS[f].w / 2, -FLOORS[f].d / 2, f)
+  if (nw.x !== 0 || nw.y !== 0) fail(`L${f} NW corner = ${nw.x},${nw.y}, want 0,0`)
+  const se = worldToPixel(FLOORS[f].w / 2, FLOORS[f].d / 2, f)
+  if (se.x !== w || se.y !== h) fail(`L${f} SE corner = ${se.x},${se.y}, want ${w},${h}`)
+}
+ok('world→pixel: TILE 16; L1 448×320, L2 320×256, L3 384×288; corners exact')
 
 let roundtripOk = true
-for (const [x, z] of [[0, 0], [-3.7, 6.2], [12.9, -8.4], [-14, -10], [14, 10]] as Array<[number, number]>) {
-  const p = worldToPixel(x, z)
-  const back = pixelToWorld(p.x, p.y)
-  if (!near(back.x, x) || !near(back.z, z)) {
-    roundtripOk = false
-    fail(`roundtrip (${x},${z}) → (${back.x.toFixed(2)},${back.z.toFixed(2)})`)
+for (const [f, , ] of FLOOR_PX) {
+  const halfW = FLOORS[f].w / 2
+  const halfD = FLOORS[f].d / 2
+  for (const [x, z] of [[0, 0], [-3.7, 6.2], [halfW - 1.1, -halfD + 1.6], [-halfW, -halfD], [halfW, halfD]] as Array<[number, number]>) {
+    const p = worldToPixel(x, z, f)
+    const back = pixelToWorld(p.x, p.y, f)
+    if (!near(back.x, x) || !near(back.z, z)) {
+      roundtripOk = false
+      fail(`L${f} roundtrip (${x},${z}) → (${back.x.toFixed(2)},${back.z.toFixed(2)})`)
+    }
   }
 }
-if (roundtripOk) ok('world→pixel→world roundtrips for sampled points')
+if (roundtripOk) ok('world→pixel→world roundtrips on sampled points of every floor')
 
-const vp = { x: -1.2, z: 3.4, zoom: 2 }
+const vp = { x: -1.2, z: 3.4, zoom: 2, floor: 1 as FloorId }
 const w = 800
 const h = 600
 let screenOk = true
@@ -238,7 +253,26 @@ if (blitScale(2, 1.5) !== 3) fail(`blitScale(2,1.5) = ${blitScale(2, 1.5)}, want
 if (blitScale(1, 0.5) !== 1) fail(`blitScale(1,0.5) = ${blitScale(1, 0.5)}, want 1`)
 else ok('DPR blit factor is an integer ≥ 1')
 
-// --------------------------------------------------------------- 7. hit test
+// ------------------------------------------------------------- 6b. default zoom
+// The default view fits the whole floor: desktop 1000×688 → zoom 2 on every
+// floor; mobile 390×692 → zoom 1 (pan, never a fractional "50 %").
+
+let fitOk = true
+for (const [f] of FLOOR_PX) {
+  const desk = fitZoom(f, 1000, 688)
+  const phone = fitZoom(f, 390, 692)
+  if (desk !== 2) {
+    fitOk = false
+    fail(`L${f} fitZoom(1000×688) = ${desk}, want 2`)
+  }
+  if (phone !== 1) {
+    fitOk = false
+    fail(`L${f} fitZoom(390×692) = ${phone}, want 1`)
+  }
+}
+if (fitOk) ok('default zoom: 1000×688 desktop → 2, 390×692 mobile → 1, on all three floors')
+
+// ---------------------------------------------------------------- 7. hit test
 
 const pts = [
   { id: 'a', x: 0, z: 0 },
@@ -252,22 +286,24 @@ else ok('hit-test picks the nearest agent within 0.9 units')
 
 // ---------------------------------------------------------------- 8. pan clamp
 
-const big = { x: 999, z: -999, zoom: 2 }
+const big = { x: 999, z: -999, zoom: 2, floor: 1 as FloorId }
 const clamped = clampCenter(big, 800, 600)
 const visW = 800 / 2 / TILE // visible world extent
 const visH = 600 / 2 / TILE
-const halfW = 14
-const halfD = 10
+const halfW = FLOORS[1].w / 2
+const halfD = FLOORS[1].d / 2
 if (clamped.zoom !== 2) fail(`clampCenter changed zoom: ${clamped.zoom}`)
+if (clamped.floor !== 1) fail(`clampCenter changed floor: ${clamped.floor}`)
 if (clamped.x > halfW - visW / 2 + 0.001 || clamped.x < -(halfW - visW / 2) - 0.001) {
   fail(`clampCenter x out of range: ${clamped.x.toFixed(2)} (want ±${(halfW - visW / 2).toFixed(2)})`)
 }
 if (clamped.z > halfD - visH / 2 + 0.001 || clamped.z < -(halfD - visH / 2) - 0.001) {
   fail(`clampCenter z out of range: ${clamped.z.toFixed(2)} (want ±${(halfD - visH / 2).toFixed(2)})`)
 }
-// when the whole floor fits, the centre is pinned to the origin
-const fit = clampCenter({ x: 5, z: 5, zoom: 1 }, 2000, 2000)
-if (fit.x !== 0 || fit.z !== 0) fail(`clampCenter should pin centre to origin when the floor fits: ${fit.x},${fit.z}`)
+// when the whole floor fits, the centre is pinned to the origin (L2 20 wide
+// at zoom 1 inside a 400 px view: 400/16 = 25 ≥ 20)
+const fit2 = clampCenter({ x: 5, z: 5, zoom: 1, floor: 2 }, 400, 400)
+if (fit2.x !== 0 || fit2.z !== 0) fail(`clampCenter should pin centre to origin when the floor fits: ${fit2.x},${fit2.z}`)
 else ok('pan is clamped so the floor never leaves the view; centre pinned when it fits')
 
 // --------------------------------------------------------------- 9. pixel font

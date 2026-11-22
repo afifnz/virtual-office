@@ -1,24 +1,19 @@
 /**
- * World ↔ pixel math for the 2D office.
+ * World ↔ pixel math for the 2D office — per floor.
  *
- * The world is 28 × 20 units (`lib/rooms.ts` FLOOR), x ∈ [-14,14], z ∈ [-10,10].
- * One unit = TILE px at zoom 1, +z grows downward on screen (the back wall at
- * z=-10 is at the top, the MASUK door at z=+10 at the bottom). Zoom is integer
- * 1..4 so every blit is nearest-neighbour; a fractional device-pixel-ratio is
- * absorbed by an integer backing-store factor, never by blurring.
+ * The building has three floors (lib/rooms.ts FLOORS): L1 28×20, L2 20×16,
+ * L3 24×18 world units, one floor on screen at a time (x ∈ [-w/2,w/2], z ∈
+ * [-d/2,d/2]). One unit = TILE px at zoom 1, +z grows downward on screen (the
+ * north wall at z=-d/2 is at the top). Zoom is integer 1..4 so every blit is
+ * nearest-neighbour; a fractional device-pixel-ratio is absorbed by an integer
+ * backing-store factor, never by blurring.
  *
  * Everything here is pure — no DOM, so verify/anim_check.ts replays it headless.
  */
-import { FLOOR } from '../lib/rooms'
+import { FLOORS, type FloorId } from '../lib/rooms'
 
 /** Pixels per world unit at zoom 1. */
 export const TILE = 16
-/** World extents (28 × 20). */
-export const FLOOR_W = FLOOR.w
-export const FLOOR_D = FLOOR.d
-/** The offscreen world surface at zoom 1, in px (448 × 320). */
-export const WORLD_W = FLOOR_W * TILE
-export const WORLD_H = FLOOR_D * TILE
 
 export const MIN_ZOOM = 1
 export const MAX_ZOOM = 4
@@ -29,6 +24,8 @@ export interface Viewport {
   z: number
   /** integer zoom, 1..4 */
   zoom: number
+  /** which floor the view shows */
+  floor: FloorId
 }
 
 export interface PixelPoint {
@@ -49,31 +46,41 @@ export function clampZoom(zoom: number): number {
 /** Share of the view the floor may fill, so the walls never touch the edge. */
 export const FIT_MARGIN = 0.94
 
+/** The offscreen world surface at zoom 1 for one floor, in px. */
+export function worldSize(floor: FloorId): { w: number; h: number } {
+  const f = FLOORS[floor]
+  return { w: f.w * TILE, h: f.d * TILE }
+}
+
 /**
- * The largest integer zoom at which the whole 28 × 20 floor still fits the
- * view. This is the default view ("tampak"): a desk cluster that leaves the
- * screen is a bug, not a zoom level.
+ * The largest integer zoom at which the whole floor still fits the view. This
+ * is the default view ("tampak"): a desk cluster that leaves the screen is a
+ * bug, not a zoom level. Verified numbers (TILE=16, margin 0.94): a 1000×688
+ * desktop canvas fits zoom 2 on all three floors; 390×692 mobile fits zoom 1.
  */
-export function fitZoom(viewW: number, viewH: number): number {
+export function fitZoom(floor: FloorId, viewW: number, viewH: number): number {
   if (viewW <= 0 || viewH <= 0) return MIN_ZOOM
-  const z = Math.min(viewW / (WORLD_W * FIT_MARGIN), viewH / (WORLD_H * FIT_MARGIN))
+  const { w, h } = worldSize(floor)
+  const z = Math.min(viewW / (w * FIT_MARGIN), viewH / (h * FIT_MARGIN))
   return clampZoom(Math.floor(z))
 }
 
 /** world → zoom-1 pixel space. Origin = the north-west corner of the floor. */
-export function worldToPixel(x: number, z: number): PixelPoint {
-  return { x: (x + FLOOR_W / 2) * TILE, y: (z + FLOOR_D / 2) * TILE }
+export function worldToPixel(x: number, z: number, floor: FloorId): PixelPoint {
+  const f = FLOORS[floor]
+  return { x: (x + f.w / 2) * TILE, y: (z + f.d / 2) * TILE }
 }
 
 /** zoom-1 pixel space → world. Inverse of worldToPixel. */
-export function pixelToWorld(px: number, py: number): WorldPoint {
-  return { x: px / TILE - FLOOR_W / 2, z: py / TILE - FLOOR_D / 2 }
+export function pixelToWorld(px: number, py: number, floor: FloorId): WorldPoint {
+  const f = FLOORS[floor]
+  return { x: px / TILE - f.w / 2, z: py / TILE - f.d / 2 }
 }
 
 /** world → screen (CSS px), through the viewport centre and zoom. */
 export function worldToScreen(vp: Viewport, viewW: number, viewH: number, x: number, z: number): PixelPoint {
-  const centre = worldToPixel(vp.x, vp.z)
-  const p = worldToPixel(x, z)
+  const centre = worldToPixel(vp.x, vp.z, vp.floor)
+  const p = worldToPixel(x, z, vp.floor)
   return {
     x: viewW / 2 + (p.x - centre.x) * vp.zoom,
     y: viewH / 2 + (p.y - centre.y) * vp.zoom,
@@ -82,10 +89,10 @@ export function worldToScreen(vp: Viewport, viewW: number, viewH: number, x: num
 
 /** screen (CSS px) → world, the inverse of worldToScreen. */
 export function screenToWorld(vp: Viewport, viewW: number, viewH: number, sx: number, sy: number): WorldPoint {
-  const centre = worldToPixel(vp.x, vp.z)
+  const centre = worldToPixel(vp.x, vp.z, vp.floor)
   const px = centre.x + (sx - viewW / 2) / vp.zoom
   const py = centre.y + (sy - viewH / 2) / vp.zoom
-  return pixelToWorld(px, py)
+  return pixelToWorld(px, py, vp.floor)
 }
 
 /**
@@ -95,11 +102,13 @@ export function screenToWorld(vp: Viewport, viewW: number, viewH: number, sx: nu
 export function clampCenter(vp: Viewport, viewW: number, viewH: number): Viewport {
   const visW = viewW / vp.zoom // zoom-1 px
   const visH = viewH / vp.zoom
-  const halfW = FLOOR_W / 2
-  const halfD = FLOOR_D / 2
-  const x = visW >= WORLD_W ? 0 : Math.min(halfW - visW / 2 / TILE, Math.max(-halfW + visW / 2 / TILE, vp.x))
-  const z = visH >= WORLD_H ? 0 : Math.min(halfD - visH / 2 / TILE, Math.max(-halfD + visH / 2 / TILE, vp.z))
-  return { x, z, zoom: vp.zoom }
+  const { w, h } = worldSize(vp.floor)
+  const f = FLOORS[vp.floor]
+  const halfW = f.w / 2
+  const halfD = f.d / 2
+  const x = visW >= w ? 0 : Math.min(halfW - visW / 2 / TILE, Math.max(-halfW + visW / 2 / TILE, vp.x))
+  const z = visH >= h ? 0 : Math.min(halfD - visH / 2 / TILE, Math.max(-halfD + visH / 2 / TILE, vp.z))
+  return { x, z, zoom: vp.zoom, floor: vp.floor }
 }
 
 /**

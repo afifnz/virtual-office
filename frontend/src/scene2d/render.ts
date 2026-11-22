@@ -16,7 +16,9 @@
 import type { AgentMeta } from '../lib/agents'
 import type { Agent, Comm } from '../lib/types'
 import { deskObstacle } from '../lib/layout'
-import { DESK_EXIT, FLOOR, OBSTACLES, POIS, WALLS } from '../lib/rooms'
+import {
+  DESK_EXIT, FLOORS, LIFT, POIS, obstaclesOf, wallsOf, type FloorId,
+} from '../lib/rooms'
 import { hashId, rosterAgents } from '../lib/roster'
 import { onward, seatPoint } from '../lib/routes'
 import type { Pt } from '../lib/nav'
@@ -25,8 +27,8 @@ import {
   DOT,
   PLATE_H,
   PLATE_PAD,
-  WORLD_LABELS,
   buildStacks,
+  labelsOf,
   placeStacks,
   plateMode,
   plateScale,
@@ -37,7 +39,7 @@ import {
   type Rect,
   type Stack,
 } from './labels'
-import { EXTRAS, PALETTE, SCREEN, STATUS } from './palette'
+import { EXTRAS, PALETTE, SCREEN, STATUS, ZONE_FLOOR } from './palette'
 import { drawText } from './pixelfont'
 import { getSprite, type Sprite } from './sprites'
 import {
@@ -49,7 +51,7 @@ import {
   drawEnvelope,
   drawFurniture,
 } from './sprites'
-import { TILE, WORLD_H, WORLD_W, blitScale, worldToPixel, type Viewport } from './viewport'
+import { TILE, blitScale, worldSize, worldToPixel, type Viewport } from './viewport'
 
 export type MonitorMode = 'terminal' | 'doc' | 'browser' | 'diff' | 'idle' | 'off'
 
@@ -58,38 +60,20 @@ export type MonitorMode = 'terminal' | 'doc' | 'browser' | 'diff' | 'idle' | 'of
 const WALL_PX = 6 // thick cutaway wall band at 16 px/tile (design: 12 px @ 32)
 const CHAIR_PX = 10
 
-/** Which zone a floor tile belongs to: lobby z>=2, dev x<0, edu x>=0. */
-function zoneAt(tx: number, tz: number): 'lobby' | 'dev' | 'edu' {
-  if (tz >= 12) return 'lobby' // world z >= 2
-  return tx < 14 ? 'dev' : 'edu' // world x < 0
-}
-
-function drawFloor(ctx: CanvasRenderingContext2D): void {
-  for (let tz = 0; tz < FLOOR.d; tz++) {
-    for (let tx = 0; tx < FLOOR.w; tx++) {
-      const zone = zoneAt(tx, tz)
-      let c: string
-      if (zone === 'lobby') c = (tx + tz) % 2 === 0 ? '#C4602C' : '#E07B3E'
-      else if (zone === 'edu') c = '#D9B36B'
-      else c = '#1F2A42'
-      ctx.fillStyle = c
-      ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
-      if (zone === 'lobby' && tz === 12) {
-        // sand strip marking the Pendopo edge along the partition
-        ctx.fillStyle = PALETTE.sand300
+/** Each floor keeps its old zone motif: L1 terracotta checker, L2 woven bamboo, L3 navy plank. */
+function drawFloor(ctx: CanvasRenderingContext2D, floor: FloorId): void {
+  const f = FLOORS[floor]
+  for (let tz = 0; tz < f.d; tz++) {
+    for (let tx = 0; tx < f.w; tx++) {
+      if (floor === 1) {
+        const c = (tx + tz) % 2 === 0 ? ZONE_FLOOR.lobby.a : ZONE_FLOOR.lobby.b
+        ctx.fillStyle = c
         ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
-      }
-      // dev plank seam every tile row + amber duct along the north wall
-      if (zone === 'dev') {
-        ctx.fillStyle = '#16203A'
-        ctx.fillRect(tx * TILE, (tz + 1) * TILE - 1, TILE, 1)
-        if (tz === 0) {
-          ctx.fillStyle = '#C99A3C'
-          ctx.fillRect(tx * TILE, 1, TILE, 2)
-        }
-      } else if (zone === 'edu') {
+      } else if (floor === 2) {
         // woven bamboo: diagonal 2px lines, alternating direction per tile
-        ctx.fillStyle = '#C49A4E'
+        ctx.fillStyle = ZONE_FLOOR.edu.bamboo
+        ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
+        ctx.fillStyle = ZONE_FLOOR.edu.line
         const flip = (tx + tz) % 2 === 0
         for (let k = 0; k < TILE; k += 4) {
           if (flip) {
@@ -98,26 +82,37 @@ function drawFloor(ctx: CanvasRenderingContext2D): void {
             ctx.fillRect(tx * TILE + k, tz * TILE + k, 2, 2)
           }
         }
+      } else {
+        ctx.fillStyle = ZONE_FLOOR.dev.plank
+        ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
+        // plank seam every tile row + amber duct along the north wall
+        ctx.fillStyle = ZONE_FLOOR.dev.seam
+        ctx.fillRect(tx * TILE, (tz + 1) * TILE - 1, TILE, 1)
+        if (tz === 0) {
+          ctx.fillStyle = ZONE_FLOOR.dev.duct
+          ctx.fillRect(tx * TILE, 1, TILE, 2)
+        }
       }
     }
   }
 }
 
-function drawWalls(ctx: CanvasRenderingContext2D): void {
-  for (const seg of WALLS) {
+function drawWalls(ctx: CanvasRenderingContext2D, floor: FloorId): void {
+  const f = FLOORS[floor]
+  for (const seg of wallsOf(floor)) {
     const half = WALL_PX / 2
     let x: number
     let y: number
     let w: number
     let h: number
     if (seg.axis === 'x') {
-      x = (Math.min(seg.from, seg.to) + FLOOR.w / 2) * TILE
-      y = (seg.at + FLOOR.d / 2) * TILE - half
+      x = (Math.min(seg.from, seg.to) + f.w / 2) * TILE
+      y = (seg.at + f.d / 2) * TILE - half
       w = Math.abs(seg.to - seg.from) * TILE
       h = WALL_PX
     } else {
-      x = (seg.at + FLOOR.w / 2) * TILE - half
-      y = (Math.min(seg.from, seg.to) + FLOOR.d / 2) * TILE
+      x = (seg.at + f.w / 2) * TILE - half
+      y = (Math.min(seg.from, seg.to) + f.d / 2) * TILE
       w = WALL_PX
       h = Math.abs(seg.to - seg.from) * TILE
     }
@@ -135,11 +130,12 @@ function drawWalls(ctx: CanvasRenderingContext2D): void {
   }
 }
 
-function drawFurnitureLayer(ctx: CanvasRenderingContext2D): void {
-  for (const o of OBSTACLES) {
+function drawFurnitureLayer(ctx: CanvasRenderingContext2D, floor: FloorId): void {
+  const f = FLOORS[floor]
+  for (const o of obstaclesOf(floor)) {
     if (o.id.startsWith('desk-')) continue // desks are drawn dynamically
-    const x = (o.x1 + FLOOR.w / 2) * TILE
-    const y = (o.z1 + FLOOR.d / 2) * TILE
+    const x = (o.x1 + f.w / 2) * TILE
+    const y = (o.z1 + f.d / 2) * TILE
     const w = Math.max(1, Math.round((o.x2 - o.x1) * TILE))
     const h = Math.max(1, Math.round((o.z2 - o.z1) * TILE))
     ctx.save()
@@ -149,16 +145,52 @@ function drawFurnitureLayer(ctx: CanvasRenderingContext2D): void {
   }
 }
 
-/** Build the static world surface (448×320) once; rebuilt only on config change. */
-export function createStaticLayer(): HTMLCanvasElement {
+/**
+ * The lift: steel shaft with a door on its west face (M1 placeholder — the
+ * modern re-skin and the opening animation arrive with the lift journey in M2/M3).
+ */
+function drawLift(ctx: CanvasRenderingContext2D, floor: FloorId): void {
+  const f = FLOORS[floor]
+  const { shaft } = LIFT[floor]
+  const x = (shaft.x1 + f.w / 2) * TILE
+  const y = (shaft.z1 + f.d / 2) * TILE
+  const w = Math.round((shaft.x2 - shaft.x1) * TILE)
+  const h = Math.round((shaft.z2 - shaft.z1) * TILE)
+  ctx.fillStyle = PALETTE.navy700
+  ctx.fillRect(x, y, w, h)
+  // door frame on the west face, centred on the walk node (z = 0.6)
+  const dz = Math.round((0.6 + f.d / 2) * TILE)
+  ctx.fillStyle = PALETTE.navy600
+  ctx.fillRect(x - 1, dz - 12, 3, 24)
+  ctx.fillStyle = PALETTE.muted
+  ctx.fillRect(x - 1, dz - 12, 1, 24)
+}
+
+/** Build the static world surface of one floor; the caller caches it. */
+export function createStaticLayer(floor: FloorId): HTMLCanvasElement {
+  const { w, h } = worldSize(floor)
   const canvas = document.createElement('canvas')
-  canvas.width = WORLD_W
-  canvas.height = WORLD_H
+  canvas.width = w
+  canvas.height = h
   const ctx = canvas.getContext('2d')!
   ctx.imageSmoothingEnabled = false
-  drawFloor(ctx)
-  drawWalls(ctx)
-  drawFurnitureLayer(ctx)
+  drawFloor(ctx, floor)
+  drawWalls(ctx, floor)
+  drawFurnitureLayer(ctx, floor)
+  drawLift(ctx, floor)
+  return canvas
+}
+
+/** The static layer cache: one prerendered canvas per floor. */
+const staticCache = new Map<FloorId, HTMLCanvasElement>()
+
+/** The prerendered static surface of one floor (built once, then cached). */
+export function staticLayerFor(floor: FloorId): HTMLCanvasElement {
+  let canvas = staticCache.get(floor)
+  if (!canvas) {
+    canvas = createStaticLayer(floor)
+    staticCache.set(floor, canvas)
+  }
   return canvas
 }
 
@@ -288,8 +320,8 @@ export function pickTargets(metas: AgentMeta[]): Array<{ id: string; x: number; 
   })
 }
 
-function poiPoint(id: string): Pt {
-  return (POIS.find((p) => p.id === id)?.pos as Pt | undefined) ?? [0, 5]
+function poiPoint(id: string, floor: FloorId): Pt {
+  return (POIS.find((p) => p.id === id && p.floor === floor)?.pos as Pt | undefined) ?? [0, 0]
 }
 
 function pathLen(path: Pt[]): number {
@@ -324,10 +356,20 @@ function pointAt(path: Pt[], dist: number): Pt {
  */
 function walkState(meta: AgentMeta, pose: Pose, t: number): { x: number; z: number; walking: boolean } {
   const walkTo = pose.walkTo!
-  const target: Pt =
-    walkTo.kind === 'desk'
-      ? ((DESK_EXIT[walkTo.id] as Pt | undefined) ?? poiPoint('rapat'))
-      : poiPoint(walkTo.id)
+  const floor = meta.desk.floor
+  let target: Pt
+  if (walkTo.kind === 'desk') {
+    // The walk always happens on the walker's own floor; a cross-floor desk
+    // visit plays out at the nearest standup/rapat circle instead (the lift
+    // journey is a separate animation, M2/M3).
+    const agent = rosterAgents().find((a) => a.id === walkTo.id)
+    target =
+      agent && agent.desk.floor === floor
+        ? ((DESK_EXIT[walkTo.id] as Pt | undefined) ?? poiPoint(floor === 3 ? 'standup' : 'rapat', floor))
+        : poiPoint(floor === 3 ? 'standup' : 'rapat', floor)
+  } else {
+    target = poiPoint(walkTo.id, floor)
+  }
   const path = onward(meta, target)
   const seed = (hashId(meta.id) % 1000) / 1000
   const period = 16 + seed * 6
@@ -383,12 +425,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   ctx.fillStyle = EXTRAS.bg
   ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height)
 
-  const centre = worldToPixel(r.vp.x, r.vp.z)
+  const centre = worldToPixel(r.vp.x, r.vp.z, r.vp.floor)
   const ox = cssW / 2 - centre.x * k
   const oy = cssH / 2 - centre.y * k
   /** world → CSS px */
   const toCss = (x: number, z: number) => {
-    const p = worldToPixel(x, z)
+    const p = worldToPixel(x, z, r.vp.floor)
     return { x: ox + p.x * k, y: oy + p.y * k }
   }
   /** blit a zoom-1 world sprite at a CSS position */
@@ -412,20 +454,25 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     )
   }
 
-  // stone batur platform framing the floor — a quiet exterior hint
-  const tl = toCss(-FLOOR.w / 2, -FLOOR.d / 2)
+  // stone batur platform framing the active floor — a quiet exterior hint
+  const { w: worldWpx, h: worldHpx } = worldSize(r.vp.floor)
+  const tl = toCss(-FLOORS[r.vp.floor].w / 2, -FLOORS[r.vp.floor].d / 2)
   ctx.fillStyle = '#1f3123'
-  ctx.fillRect(Math.round(tl.x - 4 * k) * dpr, Math.round(tl.y - 4 * k) * dpr, Math.round((WORLD_W + 8) * k) * dpr, Math.round((WORLD_H + 8) * k) * dpr)
+  ctx.fillRect(Math.round(tl.x - 4 * k) * dpr, Math.round(tl.y - 4 * k) * dpr, Math.round((worldWpx + 8) * k) * dpr, Math.round((worldHpx + 8) * k) * dpr)
   ctx.fillStyle = PALETTE.terra600
-  ctx.fillRect(Math.round(tl.x - 2 * k) * dpr, Math.round(tl.y - 2 * k) * dpr, Math.round((WORLD_W + 4) * k) * dpr, Math.round((WORLD_H + 4) * k) * dpr)
+  ctx.fillRect(Math.round(tl.x - 2 * k) * dpr, Math.round(tl.y - 2 * k) * dpr, Math.round((worldWpx + 4) * k) * dpr, Math.round((worldHpx + 4) * k) * dpr)
 
-  blitWorld({ canvas: r.static, w: WORLD_W, h: WORLD_H }, tl.x, tl.y)
+  blitWorld({ canvas: r.static, w: worldWpx, h: worldHpx }, tl.x, tl.y)
 
   const mode = plateMode(r.vp.zoom)
   const scale = plateScale(r.vp.zoom)
 
+  // The dynamic layer shows the active floor only: desks, chairs, agents,
+  // nameplates and comm envelopes all belong to the floor on screen.
+  const floorMetas = r.metas.filter((m) => m.desk.floor === r.vp.floor)
+
   // desks + chairs, z-sorted (south last) so back rows sit behind front rows
-  const deskOrder = [...r.metas].sort((a, b) => a.desk.z - b.desk.z)
+  const deskOrder = [...floorMetas].sort((a, b) => a.desk.z - b.desk.z)
   for (const meta of deskOrder) {
     const agent = r.byId.get(meta.id)
     const pose = agent ? poseFor(agent, r.now, r.comms) : OFFLINE_POSE
@@ -455,7 +502,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   }
 
   // agents, painter's-algorithm sorted by their current z (south drawn last)
-  const order = r.metas
+  const order = floorMetas
     .map((meta) => {
       const agent = r.byId.get(meta.id)
       const pose = agent ? poseFor(agent, r.now, r.comms) : OFFLINE_POSE
@@ -492,7 +539,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   // Laid out in CSS px (never scaled by the zoom) so 13 nameplates stay
   // readable and inside their desk slot at every zoom level.
   const reserved: Rect[] = []
-  for (const zl of WORLD_LABELS) {
+  for (const zl of labelsOf(r.vp.floor)) {
     const c = toCss(zl.x, zl.z)
     const spr = plaquePlate(zl.text)
     const rect = plaqueRect(zl.text, c.x, c.y)
@@ -584,12 +631,13 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     if (spr) blitLabel(spr, p.x, p.y)
   }
 
-  // comms envelopes: a quick paper-plane hop from sender to recipient
+  // comms envelopes: a quick paper-plane hop from sender to recipient, only
+  // when both ends sit on the active floor (cross-floor comms ride the lift)
   for (const c of r.comms) {
     const age = r.now - c.ts
     if (age < 0 || age > 1.5) continue
-    const from = r.metas.find((m) => m.id === c.from)
-    const to = r.metas.find((m) => m.id === c.to)
+    const from = r.metas.find((m) => m.id === c.from && m.desk.floor === r.vp.floor)
+    const to = r.metas.find((m) => m.id === c.to && m.desk.floor === r.vp.floor)
     if (!from || !to) continue
     const fp = seatPoint(from)
     const tp = seatPoint(to)

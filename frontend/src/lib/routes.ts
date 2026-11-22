@@ -2,11 +2,11 @@
  * Walking routes between a desk and a point of interest. Pure functions, so
  * verify/layout_check.ts can replay every errand against the furniture.
  */
-import { deskExit, nearestNode } from './rooms'
+import { deskExit, nearestNode, type FloorId } from './rooms'
 import { navPath, type Pt } from './nav'
 
 export interface DeskLike {
-  desk: { x: number; z: number; rot: number }
+  desk: { x: number; z: number; rot: number; floor: FloorId }
 }
 
 /** Seat point in world space (the avatar's hip sits this far behind the desk). */
@@ -14,25 +14,25 @@ export function seatPoint(meta: DeskLike): Pt {
   return [meta.desk.x + Math.sin(meta.desk.rot) * 0.42, meta.desk.z + Math.cos(meta.desk.rot) * 0.42]
 }
 
-/** desk exit → nav graph → destination */
+/** desk exit → nav graph → destination, all on the desk's own floor */
 export function onward(meta: DeskLike, to: Pt): Pt[] {
   const exit = deskExit(meta.desk)
-  const a = nearestNode(exit[0], exit[1])
-  const b = nearestNode(to[0], to[1])
+  const a = nearestNode(exit[0], exit[1], meta.desk.floor)
+  const b = nearestNode(to[0], to[1], meta.desk.floor)
   // navPath() leaves out its start node: walk to it first, or the leg from the
   // desk exit runs straight to the *second* node, through whatever is between
   return [[exit[0], exit[1]], [a.x, a.z], ...navPath(a.id, b.id), to]
 }
 
 /**
- * `from` → nav graph → desk exit → seat. `from` must be a point whose straight
- * leg to its nearest node is clear: a POI or a nav node, never a mid-leg spot
- * (use retrace for that).
+ * `from` → nav graph → desk exit → seat, all on the desk's own floor. `from`
+ * must be a point whose straight leg to its nearest node is clear: a POI or a
+ * nav node, never a mid-leg spot (use retrace for that).
  */
 export function homeward(meta: DeskLike, from: Pt): Pt[] {
   const exit = deskExit(meta.desk)
-  const a = nearestNode(from[0], from[1])
-  const b = nearestNode(exit[0], exit[1])
+  const a = nearestNode(from[0], from[1], meta.desk.floor)
+  const b = nearestNode(exit[0], exit[1], meta.desk.floor)
   const seat = seatPoint(meta)
   return [[a.x, a.z], ...navPath(a.id, b.id), [exit[0], exit[1]], seat]
 }

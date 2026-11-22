@@ -425,15 +425,20 @@ Plus (AGENTS.md §5): screenshot desktop 1280×800 + mobile 390×844 per lantai 
 ## Progress
 
 ### M1 — model data per lantai + geometri
-- [ ] T1.1 [test] assertion per-lantai roster_check/layout_check (RED)
-- [ ] T1.2 [fe] rooms.ts + agents.ts (FLOORS, floor field, koordinat baru, LOBBY)
-- [ ] T1.3 [fe] layout.ts floor-aware
-- [ ] T1.4 [fe] nav.ts adjacency per lantai
-- [ ] T1.5 [fe] routes.ts floor-aware
-- [ ] T1.6 [fe] roster.ts TEAM_FLOOR + placement per lantai
-- [ ] T1.7 [fe] viewport.ts + view.ts + focus.ts per lantai
-- [ ] T1.8 [fe] render/labels/Office2D/App/Hud/anim penyesuaian minimal
-- [ ] T1.9 [test] anim_check + visual_check per lantai; semua gate hijau; commit M1
+- [x] T1.1 [test] assertion per-lantai roster_check/layout_check (RED)
+- [x] T1.2 [fe] rooms.ts + agents.ts (FLOORS, floor field, koordinat baru, LOBBY)
+- [x] T1.3 [fe] layout.ts floor-aware
+- [x] T1.4 [fe] nav.ts adjacency per lantai
+- [x] T1.5 [fe] routes.ts floor-aware
+- [x] T1.6 [fe] roster.ts TEAM_FLOOR + placement per lantai
+- [x] T1.7 [fe] viewport.ts + view.ts + focus.ts per lantai
+- [x] T1.8 [fe] render/labels/Office2D/App/Hud/anim penyesuaian minimal
+- [x] T1.9 [test] anim_check + visual_check per lantai; semua gate hijau; commit M1
+
+**Status M1: DONE** (2026-11-22) — semua gate hijau: `tsc --noEmit`, `npm run build`,
+roster/layout/anim/visual check OK per lantai, e2e_review 51 ok / 0 FAIL.
+Koordinat persis sesuai rencana (tanpa penyesuaian); lift placeholder digambar di
+tiap lantai; satu lantai dirender (default L1, tab M2).
 
 ### M2 — lift + tab + deep link
 - [ ] T2.1 [test] assertion journey lift (RED)
