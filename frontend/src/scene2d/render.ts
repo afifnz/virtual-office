@@ -32,7 +32,6 @@ import {
   plaqueRect,
   shortName,
   type LabelAgent,
-  type PlateMode,
   type Rect,
   type Stack,
 } from './labels'
@@ -626,6 +625,3 @@ function countersLine(agent: Agent | undefined): string {
 export function allMetas(): AgentMeta[] {
   return rosterAgents()
 }
-
-/** Re-exported for the headless checker. */
-export type { PlateMode }
