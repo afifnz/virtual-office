@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { MoveIntent } from '../scene/CameraRig'
+import type { MoveIntent } from '../lib/view'
 
 /** On-screen movement pad: one tap moves while held, 56 px targets. */
 export function DPad({ intent }: { intent: React.MutableRefObject<MoveIntent> }) {

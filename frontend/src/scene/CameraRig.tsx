@@ -3,20 +3,11 @@ import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { rosterAgents } from '../lib/roster'
 import { FLOOR, SPOTS, WALLS } from '../lib/rooms'
+import type { MoveIntent, RigCommand } from '../lib/view'
 
-export interface RigCommand {
-  spot: string
-  nonce: number
-  /** fly to an agent's desk instead of a named spot */
-  focus?: { x: number; z: number; rot: number; seated?: boolean }
-  /** portrait mode: get close enough to read the face */
-  tight?: boolean
-}
-
-export interface MoveIntent {
-  x: number
-  z: number
-}
+// Transition shim: these types now live in lib/view.ts. Re-exported here so the
+// rest of the scene keeps compiling until it is removed (office-2d T1.8).
+export type { MoveIntent, RigCommand } from '../lib/view'
 
 const EYE = 1.72
 const SPEED = 4.2

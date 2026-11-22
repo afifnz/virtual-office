@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Scene } from './components/Scene'
-import type { MoveIntent, RigCommand } from './scene/CameraRig'
+import type { MoveIntent, RigCommand } from './lib/view'
 import { Hud } from './components/Hud'
 import { Roster } from './components/Roster'
 import { Feed, type FeedTab } from './components/Feed'

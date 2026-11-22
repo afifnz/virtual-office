@@ -1,4 +1,4 @@
-import type { RigCommand } from '../scene/CameraRig'
+import type { RigCommand } from './view'
 import { agentMeta } from './roster'
 
 /**
