@@ -406,7 +406,9 @@ export function drawBoards(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3, tzName 
   // 2. status board — title only; dots are live (drawStatusBoard)
   const s = SIDE_BOARDS[1]!
   label(ctx, 'PAPAN STATUS', s.x + 10, SIDE_BOARD_TOP + 9, 8, t.muted, 600)
-  label(ctx, 'aktif', s.x + 62, SIDE_BOARD_TOP + 34, 8, t.muted, 500, 0)
+  // "online" (hadir), never "aktif": the legend below already counts *active*
+  // work (bekerja/review/idle/terblokir), so the two words must not collide.
+  label(ctx, 'online', s.x + 78, SIDE_BOARD_TOP + 34, 8, t.muted, 500, 0)
 
   // 3. pinboard: 3×3 sticky notes
   const pin = SIDE_BOARDS[2]!
@@ -520,12 +522,14 @@ export function drawStatusBoard(
 ): void {
   const t = THEME_TOKENS[theme]
   const s = SIDE_BOARDS[1]!
-  const active = agents.filter((a) => a.status !== 'offline').length
+  // "online" = present in /api/status (anything but offline). It is not the
+  // legend's "aktif" (working/reviewing); the count and the word agree now.
+  const online = agents.filter((a) => a.status !== 'offline').length
   ctx.save()
   ctx.font = `700 22px ${FONT}`
   ctx.fillStyle = t.ink
   ctx.textBaseline = 'top'
-  ctx.fillText(`${active}/${agents.length}`, s.x + 10, SIDE_BOARD_TOP + 30)
+  ctx.fillText(`${online}/${agents.length}`, s.x + 10, SIDE_BOARD_TOP + 30)
   ctx.restore()
 
   // one dot per agent on this floor. An empty list is legal — on L1 the only
