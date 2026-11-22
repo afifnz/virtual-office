@@ -2,17 +2,19 @@
  * The 2D office canvas: one <canvas> with pan/zoom and a per-frame painter.
  *
  * Replaces the three.js scene behind the same props. The viewport is integer
- * zoom 1..4 over a 28×20-tile world (TILE=16); the backing store is sized to
- * the CSS box times devicePixelRatio and the frame is blitted with an integer
- * factor so pixel-art stays nearest-neighbour crisp on fractional DPRs.
+ * zoom 1..4 over one floor at a time (TILE=16; L1 28×20, L2 20×16, L3 24×18);
+ * the backing store is sized to the CSS box times devicePixelRatio and the
+ * frame is blitted with an integer factor so pixel-art stays nearest-neighbour
+ * crisp on fractional DPRs.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusPayload, Agent, Comm } from '../lib/types'
 import type { AgentMeta } from '../lib/agents'
 import { agentsFor } from '../lib/roster'
+import { LIFT } from '../lib/rooms'
 import type { MoveIntent, RigCommand } from '../lib/view'
 import { SPOT_VIEW } from '../lib/view'
-import { createStaticLayer, pickTargets, renderFrame } from './render'
+import { pickTargets, placeAgents, renderFrame, staticLayerFor } from './render'
 import { TILE, clampCenter, clampZoom, fitZoom, nearestAt, screenToWorld, type Viewport } from './viewport'
 
 export interface OfficeProps {
@@ -28,8 +30,9 @@ export interface OfficeProps {
 const PAN_SPEED = 6 // world units per second while a key/pad is held
 
 function initialVp(command: RigCommand): Viewport {
-  const spot = SPOT_VIEW[command.spot] ?? SPOT_VIEW.lobby!
-  return { x: spot.x, z: spot.z, zoom: spot.zoom }
+  const floor = command.floor ?? 1
+  const spot = SPOT_VIEW[floor][command.spot] ?? SPOT_VIEW[floor].lobby ?? { x: 0, z: 0, zoom: 2 }
+  return { x: spot.x, z: spot.z, zoom: spot.zoom, floor }
 }
 
 /**
@@ -49,7 +52,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
   const vpRef = useRef<Viewport>(initialVp(command))
   const [zoomLabel, setZoomLabel] = useState(vpRef.current.zoom)
   /** a "tampak" command arrived before the canvas had a size — fit after resize */
-  const fitPending = useRef(SPOT_VIEW[command.spot]?.fit === true)
+  const fitPending = useRef(SPOT_VIEW[vpRef.current.floor][command.spot]?.fit === true)
   const viewRef = useRef({ w: 0, h: 0, dpr: 1 })
   const tRef = useRef(0)
   const readyRef = useRef(false)
@@ -89,15 +92,21 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
   useEffect(() => {
     if (command.focus) {
       fitPending.current = false
-      vpRef.current = { x: command.focus.x, z: command.focus.z, zoom: command.tight ? 4 : 3 }
+      vpRef.current = {
+        x: command.focus.x,
+        z: command.focus.z,
+        zoom: command.tight ? 4 : 3,
+        floor: command.focus.floor,
+      }
     } else {
-      const sv = SPOT_VIEW[command.spot] ?? SPOT_VIEW.lobby!
-      vpRef.current = { x: sv.x, z: sv.z, zoom: sv.zoom }
+      const floor = command.floor ?? vpRef.current.floor
+      const sv = SPOT_VIEW[floor][command.spot] ?? SPOT_VIEW[floor].lobby ?? { x: 0, z: 0, zoom: 2 }
+      vpRef.current = { x: sv.x, z: sv.z, zoom: sv.zoom, floor }
       fitPending.current = sv.fit === true
       if (fitPending.current) {
         const { w, h } = viewRef.current
         if (w > 0 && h > 0) {
-          vpRef.current = { x: 0, z: 0, zoom: fitZoom(w, h) }
+          vpRef.current = { x: 0, z: 0, zoom: fitZoom(floor, w, h), floor }
           fitPending.current = false
         }
       }
@@ -118,6 +127,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
       x: world.x - (w / 2 - w / 2) / (TILE * zoom),
       z: world.z - (h / 2 - h / 2) / (TILE * zoom),
       zoom,
+      floor: vpRef.current.floor,
     }
     setZoomLabel(zoom)
   }, [])
@@ -137,7 +147,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
     viewRef.current = { w, h, dpr }
     // first size (or a pending "tampak"): fit the whole floor, never crop it
     if (fitPending.current) {
-      vpRef.current = { x: 0, z: 0, zoom: fitZoom(w, h) }
+      vpRef.current = { x: 0, z: 0, zoom: fitZoom(vpRef.current.floor, w, h), floor: vpRef.current.floor }
       fitPending.current = false
       setZoomLabel(vpRef.current.zoom)
     }
@@ -149,7 +159,6 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const staticLayer = createStaticLayer()
     resize()
 
     let raf = 0
@@ -189,7 +198,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
         vpRef.current = clampCenter(vpRef.current, w, h)
         const f = frame.current
         renderFrame(ctx, {
-          static: staticLayer,
+          static: staticLayerFor(vpRef.current.floor),
           metas: f.metas,
           byId: f.byId,
           now: f.now,
@@ -203,9 +212,13 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
           t: tRef.current,
         })
 
-        // proximity: nearest agent to the viewport centre
+        // proximity: nearest agent to the viewport centre, on this floor —
+        // an in-transit delegate counts on the floor their journey is on
+        const targets = pickTargets(placeAgents(f.metas, f.byId, f.now, f.comms, tRef.current)).filter(
+          (p) => p.floor === vpRef.current.floor,
+        )
         const centre = screenToWorld(vpRef.current, w, h, w / 2, h / 2)
-        const near = nearestAt(pickTargets(f.metas), centre.x, centre.z, 2.5)
+        const near = nearestAt(targets, centre.x, centre.z, 2.5)
         if (near !== nearRef.current) {
           nearRef.current = near
           onNear(near)
@@ -216,6 +229,22 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
         readyRef.current = true
         ;(window as unknown as { __office2dReady?: boolean }).__office2dReady = true
         ;(window as unknown as { __office2dVp?: () => Viewport }).__office2dVp = () => vpRef.current
+        // verify-office probe hook: per-floor desk/agent/lift facts, no privacy data
+        ;(window as unknown as { __office2dFloors?: () => unknown }).__office2dFloors = () => {
+          const metas = frame.current.metas
+          const byFloor = (fl: number) => metas.filter((m) => m.desk.floor === fl)
+          return {
+            floor: vpRef.current.floor,
+            zoom: vpRef.current.zoom,
+            floors: [1, 2, 3].map((fl) => ({
+              floor: fl,
+              desks: byFloor(fl).length,
+              agents: byFloor(fl).filter((m) => (frame.current.byId.get(m.id)?.status ?? 'offline') !== 'offline')
+                .length,
+              lift: { x: (LIFT[fl as 1 | 2 | 3].shaft.x1 + LIFT[fl as 1 | 2 | 3].shaft.x2) / 2, z: (LIFT[fl as 1 | 2 | 3].shaft.z1 + LIFT[fl as 1 | 2 | 3].shaft.z2) / 2 },
+            })),
+          }
+        }
       }
     }
     raf = requestAnimationFrame(loop)
@@ -291,6 +320,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
             x: world.x - (cx - rect.left - w / 2) / (TILE * zoom),
             z: world.z - (cy - rect.top - h / 2) / (TILE * zoom),
             zoom,
+            floor: vpRef.current.floor,
           }
           setZoomLabel(zoom)
           onMove()
@@ -324,7 +354,10 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
         const { w, h } = viewRef.current
         if (w > 0 && h > 0) {
           const world = screenToWorld(vpRef.current, w, h, e.clientX - rect.left, e.clientY - rect.top)
-          const hit = nearestAt(pickTargets(frame.current.metas), world.x, world.z, 0.9)
+          const targets = pickTargets(placeAgents(frame.current.metas, frame.current.byId, frame.current.now, frame.current.comms, tRef.current)).filter(
+            (p) => p.floor === vpRef.current.floor,
+          )
+          const hit = nearestAt(targets, world.x, world.z, 0.9)
           onPick(hit ?? '')
         }
       }

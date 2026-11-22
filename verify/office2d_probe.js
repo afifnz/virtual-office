@@ -17,6 +17,13 @@
  *   4. repeat at 390x844 with DevTools device emulation.
  *
  * Exit criteria: `ok: true`. Anything in `problems` is a regression.
+ *
+ * MANUAL STEP (offline seed): stop the Go API (or block /api/*) and reload.
+ * The seed roster must still render all 13 desks across L1/L2/L3, every agent
+ * OFFLINE, with the "data lama" banner in the HUD. When the probe sees an
+ * all-offline roster it asserts exactly that (floorsInfo.allOffline +
+ * floorsInfo.staleShown); the visual check of the dimmed desks is the manual
+ * screenshot review.
  */
 (async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -44,14 +51,14 @@
 
   // 1. no panel may sit on top of the canvas
   const panels = {}
-  for (const sel of ['.roster', '.feed', '.card', '.prox-chip', '.zoom-ctrl', '.dpad']) {
+  for (const sel of ['.roster', '.feed', '.card', '.prox-chip', '.zoom-ctrl', '.dpad', '.floor-tabs']) {
     const el = document.querySelector(sel)
     const r = rect(el)
     if (!r) continue
     const visible = el.offsetParent !== null && getComputedStyle(el).display !== 'none'
     panels[sel] = r
     if (!visible) continue
-    if (sel === '.zoom-ctrl' || sel === '.dpad') continue // they live inside the canvas on purpose
+    if (sel === '.zoom-ctrl' || sel === '.dpad' || sel === '.floor-tabs') continue // they live inside the canvas on purpose
     // phone sheets are modal on purpose; only the desktop layout must stay clear
     if (el.classList.contains('is-sheet') || el.classList.contains('is-full')) continue
     if (overlaps(r, canvasRect)) problems.push(`${sel} overlaps the canvas (${JSON.stringify(r)} vs ${JSON.stringify(canvasRect)})`)
@@ -99,22 +106,90 @@
   const zoomText = document.querySelector('.zoom-ctrl span')?.textContent ?? null
   const vp = typeof window.__office2dVp === 'function' ? window.__office2dVp() : null
   if (vp && canvasRect) {
-    const floorW = 448 * vp.zoom
-    const floorH = 320 * vp.zoom
+    // world px per floor at TILE=16: L1 448×320, L2 320×256, L3 384×288
+    const FLOOR_PX = { 1: [448, 320], 2: [320, 256], 3: [384, 288] }
+    const size = FLOOR_PX[vp.floor] ?? FLOOR_PX[1]
+    const floorW = size[0] * vp.zoom
+    const floorH = size[1] * vp.zoom
     if (floorW > canvasRect.w + 1 && vp.zoom > 1) problems.push(`floor ${floorW}px wider than the ${canvasRect.w}px canvas at zoom ${vp.zoom}`)
     if (floorH > canvasRect.h + 1 && vp.zoom > 1) problems.push(`floor ${floorH}px taller than the ${canvasRect.h}px canvas at zoom ${vp.zoom}`)
   } else {
     problems.push('window.__office2dVp() is missing')
   }
 
-  // 4. the canvas is actually painted (a blank canvas is all-transparent)
-  let painted = null
-  try {
+  // 3b. the floor tabs: three of them, and clicking one switches vp.floor
+  let tabs = null
+  const tabEls = [...document.querySelectorAll('.floor-tabs .floor-tab')]
+  if (tabEls.length !== 3) {
+    problems.push(`expected 3 floor tabs, found ${tabEls.length}`)
+  } else if (typeof window.__office2dVp === 'function') {
+    const before = window.__office2dVp().floor
+    // click L2 (index 1), or L3 when already on L2, so the floor must change
+    const idx = before === 2 ? 2 : 1
+    tabEls[idx].click()
+    await sleep(200)
+    const after = window.__office2dVp().floor
+    tabs = { clicked: idx + 1, before, after }
+    if (after === before) problems.push(`clicking floor tab L${idx + 1} did not change vp.floor (${before} → ${after})`)
+    if (!new URLSearchParams(window.location.search).get('floor')) {
+      problems.push('switching floors did not write ?floor= to the URL')
+    }
+  }
+
+  // 3c. the canvas is painted on EVERY floor (blank-floor regression)
+  const paintSample = () => {
     const ctx = canvas.getContext('2d')
     const { data } = ctx.getImageData(0, 0, Math.min(64, canvas.width), Math.min(64, canvas.height))
     let opaque = 0
     for (let i = 3; i < data.length; i += 4) if (data[i] > 0) opaque++
-    painted = opaque / (data.length / 4)
+    return Math.round((opaque / (data.length / 4)) * 100) / 100
+  }
+  const paintedByFloor = {}
+  if (tabEls.length === 3 && canvas) {
+    for (let f = 1; f <= 3; f++) {
+      tabEls[f - 1].click()
+      await sleep(250)
+      const vpNow = typeof window.__office2dVp === 'function' ? window.__office2dVp() : null
+      try {
+        const p = paintSample()
+        paintedByFloor[f] = p
+        if (p < 0.5) problems.push(`L${f} canvas looks blank (${(p * 100).toFixed(0)}% opaque top-left)`)
+      } catch (e) {
+        problems.push(`cannot read the canvas on L${f}: ${String(e)}`)
+      }
+      if (vpNow && vpNow.floor !== f) problems.push(`clicking tab L${f} left vp.floor=${vpNow.floor}`)
+    }
+  }
+
+  // 3d. per-floor facts from the debug hook: seed desk split + lift coordinates
+  //     (the lift is asserted via data here; the visual steel shaft is checked
+  //     by the manual screenshot step — see the header comment)
+  let floorsInfo = null
+  if (typeof window.__office2dFloors === 'function') {
+    floorsInfo = window.__office2dFloors()
+    const split = floorsInfo.floors.map((f) => f.desks)
+    const total = split.reduce((a, b) => a + b, 0)
+    if (total !== 13) problems.push(`seed desks total ${total}, want 13 (offline seed must still render)`)
+    if (split.join(',') !== '1,4,8') problems.push(`seed desks split ${split.join('/')}, want 1/4/8`)
+    for (const f of floorsInfo.floors) {
+      if (!Number.isFinite(f.lift?.x) || !Number.isFinite(f.lift?.z)) {
+        problems.push(`L${f.floor}: lift coordinates missing from __office2dFloors()`)
+      }
+    }
+    // offline path: every agent offline ⇒ the stale banner must be up
+    const allOffline = floorsInfo.floors.every((f) => f.agents === 0)
+    const staleShown = !!document.querySelector('.stale')
+    floorsInfo.allOffline = allOffline
+    floorsInfo.staleShown = staleShown
+    if (allOffline && !staleShown) problems.push('all agents offline but the stale banner (.stale) is not shown')
+  } else {
+    problems.push('window.__office2dFloors() is missing')
+  }
+
+  // 4. the canvas is actually painted (a blank canvas is all-transparent)
+  let painted = null
+  try {
+    painted = paintSample()
     if (painted < 0.5) problems.push(`canvas looks blank (${(painted * 100).toFixed(0)}% opaque in the top-left corner)`)
   } catch (e) {
     problems.push(`cannot read the canvas: ${String(e)}`)
@@ -128,7 +203,10 @@
     zoomText,
     canvas: canvasRect,
     panels,
+    tabs,
     roster,
+    paintedByFloor,
+    floorsInfo,
     painted: painted === null ? null : Math.round(painted * 100) / 100,
     notes,
     problems,

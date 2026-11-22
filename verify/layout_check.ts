@@ -1,18 +1,24 @@
 /**
- * Layout checker: proves the nav graph, POIs and desk exits never cross furniture.
+ * Layout checker (3 floors): proves the nav graph, POIs and desk exits never
+ * cross furniture on any floor, that every floor's graph is fully connected,
+ * and that the lift node + shaft exist on every floor.
  *
  *   frontend/node_modules/.bin/esbuild verify/layout_check.ts --bundle \
  *     --format=esm --platform=node --outfile=/tmp/layout_check.mjs
  *   node /tmp/layout_check.mjs
  */
 import {
-  BLOCK_GAP, CLUSTERS, DESKS, DESK_EXIT, FLOOR, LEAD_DESKS, NAV, NAV_EDGES, OBSTACLES, POIS,
-  SPOTS, WALLS, blockMembers, clusterOf, nearestNode, type Obstacle,
+  BLOCK_GAP, CLUSTERS, DESKS, DESK_EXIT, DOORS, FLOORS, LEAD_DESKS, NAV, NAV_EDGES, POIS, WALLS,
+  blockMembers, clusterOf, doorsOf, edgesOf, liftNode, navOf, nearestNode, obstaclesOf, poisOf,
+  wallsOf, type FloorId, type Obstacle,
 } from '../frontend/src/lib/rooms'
+import { AGENT_BY_ID } from '../frontend/src/lib/agents'
 import { navPath, type Pt } from '../frontend/src/lib/nav'
 import { SIDESTEP, avoid, homeward, onward, retrace, seatPoint } from '../frontend/src/lib/routes'
+import { SPOT_FLOOR, SPOT_VIEW } from '../frontend/src/lib/view'
 
 const RADIUS = 0.35 // walker half-width
+const FLOOR_IDS: FloorId[] = [1, 2, 3]
 let fails = 0
 const fail = (msg: string) => { fails++; console.log('FAIL', msg) }
 const ok = (msg: string) => console.log('ok  ', msg)
@@ -38,13 +44,18 @@ function hits(ax: number, az: number, bx: number, bz: number, o: Obstacle, pad =
   return t0 <= t1
 }
 
-const inRoom = (x: number, z: number) =>
-  Math.abs(x) <= FLOOR.w / 2 - 0.6 && Math.abs(z) <= FLOOR.d / 2 - 0.6
+const inFloor = (f: FloorId, x: number, z: number) =>
+  Math.abs(x) <= FLOORS[f].w / 2 - 0.6 && Math.abs(z) <= FLOORS[f].d / 2 - 0.6
+
+/** A door may sit on the wall line itself (the MASUK door is at z = d/2). */
+const doorInFloor = (f: FloorId, x: number, z: number) =>
+  Math.abs(x) <= FLOORS[f].w / 2 + 0.01 && Math.abs(z) <= FLOORS[f].d / 2 + 0.01
 
 // -------------------------------------------------------------- clusters
 // Team desks are deliberately touching: the six dev desks form one 3 x 2
-// island, the four edu desks a 2 x 2 block, and the devops desk stands alone by
-// the server rack. Every other pair of desks keeps the 1.6-unit aisle.
+// island on L3, the four edu desks a 2 x 2 block on L2, and the devops desk
+// stands alone by the L3 server rack. Every other pair of desks keeps the
+// 1.6-unit aisle. Team identity now comes from desk.floor, not x/z heuristics.
 const PITCH = 1.62
 const ROW_PITCH = 0.78
 /** shortest free distance between two footprints */
@@ -54,7 +65,8 @@ const rectGap = (a: Obstacle, b: Obstacle) => {
   return Math.hypot(dx, dz)
 }
 const spotOf = (id: string) => DESKS.find((d) => d.id === id)
-const obstacleOf = (id: string) => OBSTACLES.find((o) => o.id === `desk-${id}`)!
+const obstacleOf = (id: string) => OBSTACLES_ALL.find((o) => o.id === `desk-${id}`)!
+const OBSTACLES_ALL = FLOOR_IDS.flatMap((f) => obstaclesOf(f))
 
 for (const [name, ids] of Object.entries(CLUSTERS)) {
   const group = ids.map((id) => spotOf(id)).filter((d): d is NonNullable<typeof d> => !!d)
@@ -62,6 +74,10 @@ for (const [name, ids] of Object.entries(CLUSTERS)) {
     fail(`${name}: ${ids.length - group.length} desk tanpa posisi`)
     continue
   }
+  const floor = group[0]!.floor
+  const wantFloor = name === 'dev' ? 3 : name === 'edu' ? 2 : 1
+  if (floor !== wantFloor) fail(`${name}: blok di L${floor}, mau L${wantFloor}`)
+  if (!group.every((d) => d.floor === floor)) fail(`${name}: blok tersebar di beberapa lantai`)
   const xs = [...new Set(group.map((d) => d.x))].sort((a, b) => a - b)
   const zs = [...new Set(group.map((d) => d.z))].sort((a, b) => a - b)
   if (xs.length * zs.length !== group.length) fail(`${name}: blok tidak persegi (${xs.length} x ${zs.length})`)
@@ -82,7 +98,7 @@ for (const [name, ids] of Object.entries(CLUSTERS)) {
     }
   }
   if (worst > BLOCK_GAP) fail(`${name}: blok tidak mepet, celah terbesar ${worst.toFixed(2)}`)
-  else ok(`${name}: ${group.length} meja mepet satu blok (${xs.length} x ${zs.length}, celah ${worst.toFixed(2)})`)
+  else ok(`${name}: ${group.length} meja mepet satu blok ${xs.length} x ${zs.length} di L${floor} (celah ${worst.toFixed(2)})`)
 }
 
 // ------------------------------------------------------------ lead desks
@@ -125,85 +141,100 @@ for (const [name, lead] of Object.entries(LEAD_DESKS)) {
   if (Math.abs(desk.rot - facing) > 1e-6) {
     fail(`${name}: meja lead rot ${desk.rot.toFixed(2)}, harus ${facing.toFixed(2)} supaya menghadap tim`)
   } else {
-    ok(`${name}: meja lead ${lead.id} ${w.toFixed(2)}x${d.toFixed(2)} mepet sisi ${lead.side} blok, menghadap tim (rot ${desk.rot.toFixed(2)})`)
+    ok(`${name}: meja lead ${lead.id} ${w.toFixed(2)}x${d.toFixed(2)} mepet sisi ${lead.side} blok di L${desk.floor}, menghadap tim (rot ${desk.rot.toFixed(2)})`)
   }
 }
 
 // ------------------------------------------------------------ circulation
-const deskObs = OBSTACLES.filter((o) => o.id.startsWith('desk-'))
-let minClear = 99
-for (const d of deskObs) {
-  const id = d.id.slice('desk-'.length)
-  let clear = Math.min(
-    FLOOR.w / 2 - 0.11 - d.x2,
-    d.x1 + FLOOR.w / 2 - 0.11,
-    FLOOR.d / 2 - 0.11 - d.z2,
-    d.z1 + FLOOR.d / 2 - 0.11,
-  )
-  // desks inside one block are meant to touch; everything else keeps the aisle
-  const own = clusterOf(id)
-  for (const o of OBSTACLES) {
-    if (o === d) continue
-    const other = o.id.startsWith('desk-') ? o.id.slice('desk-'.length) : null
-    if (other && own && clusterOf(other) === own) continue
-    clear = Math.min(clear, rectGap(d, o))
+// Desk blocks may not collide with any furniture on their floor, and keep the
+// 1.6 aisle to everything outside their own block.
+for (const f of FLOOR_IDS) {
+  const obs = obstaclesOf(f)
+  const deskObs = obs.filter((o) => o.id.startsWith('desk-'))
+  let minClear = 99
+  for (const d of deskObs) {
+    const id = d.id.slice('desk-'.length)
+    let clear = Math.min(
+      FLOORS[f].w / 2 - 0.11 - d.x2,
+      d.x1 + FLOORS[f].w / 2 - 0.11,
+      FLOORS[f].d / 2 - 0.11 - d.z2,
+      d.z1 + FLOORS[f].d / 2 - 0.11,
+    )
+    // desks inside one block are meant to touch; everything else keeps the aisle
+    const own = clusterOf(id)
+    for (const o of obs) {
+      if (o === d) continue
+      const other = o.id.startsWith('desk-') ? o.id.slice('desk-'.length) : null
+      if (other && own && clusterOf(other) === own) continue
+      clear = Math.min(clear, rectGap(d, o))
+    }
+    minClear = Math.min(minClear, clear)
+    if (clear < 1.6) fail(`L${f} ${d.id}: sirkulasi ${clear.toFixed(2)} < 1.6`)
   }
-  minClear = Math.min(minClear, clear)
-  if (clear < 1.6) fail(`${d.id}: sirkulasi ${clear.toFixed(2)} < 1.6`)
+  ok(`L${f} sirkulasi meja: minimum ${minClear.toFixed(2)} unit ke tetangga / dinding / furniture`)
 }
-ok(`sirkulasi meja: minimum ${minClear.toFixed(2)} unit ke tetangga / dinding`)
 
-// the devops desk must actually stand by the server rack
+// the devops desk must actually stand by the L3 server rack
 const opsDesk = obstacleOf('devops')
-const rack = OBSTACLES.find((o) => o.id === 'server')
-if (!rack) fail('rak server tidak ada di OBSTACLES')
+const rack = obstaclesOf(3).find((o) => o.id === 'server')
+if (!rack) fail('rak server tidak ada di OBSTACLES L3')
 else {
   const gap = rectGap(opsDesk, rack)
   if (gap > 3) fail(`meja devops ${gap.toFixed(2)} dari rak server (harus <= 3)`)
-  else ok(`devops: meja ${gap.toFixed(2)} unit dari rak server`)
+  else ok(`devops: meja ${gap.toFixed(2)} unit dari rak server di L3`)
 }
 
 // ------------------------------------------------------------- nav edges
-let edgeMin = 99
-for (const [a, b] of NAV_EDGES) {
-  const na = NAV.find((n) => n.id === a)
-  const nb = NAV.find((n) => n.id === b)
-  if (!na || !nb) { fail(`edge ${a}-${b}: node tidak ada`); continue }
-  for (const o of OBSTACLES) {
-    if (hits(na.x, na.z, nb.x, nb.z, o)) fail(`edge ${a}->${b} menembus ${o.id}`)
+for (const f of FLOOR_IDS) {
+  const nav = navOf(f)
+  const obs = obstaclesOf(f)
+  let edgeMin = 99
+  for (const [a, b] of edgesOf(f)) {
+    const na = nav.find((n) => n.id === a)
+    const nb = nav.find((n) => n.id === b)
+    if (!na || !nb) { fail(`L${f} edge ${a}-${b}: node tidak ada`); continue }
+    for (const o of obs) {
+      if (hits(na.x, na.z, nb.x, nb.z, o)) fail(`L${f} edge ${a}->${b} menembus ${o.id}`)
+    }
+    edgeMin = Math.min(edgeMin, Math.hypot(na.x - nb.x, na.z - nb.z))
   }
-  edgeMin = Math.min(edgeMin, Math.hypot(na.x - nb.x, na.z - nb.z))
+  ok(`L${f} nav: ${nav.length} node, ${edgesOf(f).length} edge, edge terpendek ${edgeMin.toFixed(2)}`)
 }
-ok(`nav: ${NAV.length} node, ${NAV_EDGES.length} edge, edge terpendek ${edgeMin.toFixed(2)}`)
 
 // --------------------------------------------------- poi + desk exit legs
-for (const p of POIS) {
-  const n = nearestNode(p.pos[0], p.pos[1])
-  if (!inRoom(p.pos[0], p.pos[1])) fail(`poi ${p.id}: di luar ruangan`)
-  for (const o of OBSTACLES) {
-    if (hits(n.x, n.z, p.pos[0], p.pos[1], o)) fail(`poi ${p.id}: kaki ${n.id}->poi menembus ${o.id}`)
+for (const f of FLOOR_IDS) {
+  const obs = obstaclesOf(f)
+  for (const p of poisOf(f)) {
+    const n = nearestNode(p.pos[0], p.pos[1], f)
+    if (!inFloor(f, p.pos[0], p.pos[1])) fail(`L${f} poi ${p.id}: di luar lantai`)
+    for (const o of obs) {
+      if (hits(n.x, n.z, p.pos[0], p.pos[1], o)) fail(`L${f} poi ${p.id}: kaki ${n.id}->poi menembus ${o.id}`)
+    }
+  }
+  for (const d of DESKS.filter((x) => x.floor === f)) {
+    const e = DESK_EXIT[d.id]!
+    const n = nearestNode(e[0], e[1], f)
+    for (const o of obs) {
+      if (o.id === `desk-${d.id}`) continue
+      if (hits(e[0], e[1], n.x, n.z, o)) fail(`L${f} exit ${d.id} (${e[0]},${e[1]})->${n.id} menembus ${o.id}`)
+    }
+    const seat: [number, number] = [d.x + Math.sin(d.rot) * 0.42, d.z + Math.cos(d.rot) * 0.42]
+    if (Math.hypot(seat[0] - e[0], seat[1] - e[1]) < 1.2) fail(`L${f} exit ${d.id} terlalu dekat kursi`)
   }
 }
-for (const d of DESKS) {
-  const e = DESK_EXIT[d.id]!
-  const n = nearestNode(e[0], e[1])
-  for (const o of OBSTACLES) {
-    if (o.id === `desk-${d.id}`) continue
-    if (hits(e[0], e[1], n.x, n.z, o)) fail(`exit ${d.id} (${e[0]},${e[1]})->${n.id} menembus ${o.id}`)
-  }
-  const seat: [number, number] = [d.x + Math.sin(d.rot) * 0.42, d.z + Math.cos(d.rot) * 0.42]
-  if (Math.hypot(seat[0] - e[0], seat[1] - e[1]) < 1.2) fail(`exit ${d.id} terlalu dekat kursi`)
-}
-ok('poi + desk exit: semua kaki lurus bebas furniture')
+ok('poi + desk exit: semua kaki lurus bebas furniture di tiap lantai')
 
 // ------------------------------------------------------- errand replay
-// Every desk to every POI of its team and back, exactly as AgentActor builds
-// the routes — including the walk home from the POI and a mid-route recall.
-// The first leg (seat -> desk exit) runs through the agent's own chair.
+// Every desk to every POI of its team on its own floor and back, exactly as
+// AgentActor builds the routes — including the walk home from the POI and a
+// mid-route recall. The first leg (seat -> desk exit) runs through the agent's
+// own chair.
 const legsClear = (who: string, route: Pt[], skipOwnFirst: boolean, label: string): boolean => {
+  const f = (spotOf(who)?.floor ?? 1) as FloorId
+  const obs = obstaclesOf(f)
   for (let i = 1; i < route.length; i++) {
     const [a, b] = [route[i - 1]!, route[i]!]
-    for (const o of OBSTACLES) {
+    for (const o of obs) {
       const own = o.id === `desk-${who}`
       if (own && ((skipOwnFirst && i === 1) || i === route.length - 1)) continue
       if (hits(a[0], a[1], b[0], b[1], o)) {
@@ -217,8 +248,8 @@ const legsClear = (who: string, route: Pt[], skipOwnFirst: boolean, label: strin
 let trips = 0
 for (const d of DESKS) {
   const meta = { desk: d }
-  const team = d.z > 3 ? 'lobby' : d.x < 0 ? 'dev' : 'edu'
-  for (const p of POIS.filter((q) => q.team === team)) {
+  const team = AGENT_BY_ID[d.id]?.team ?? 'lobby'
+  for (const p of poisOf(d.floor).filter((q) => q.team === team)) {
     const out = [seatPoint(meta), ...onward(meta, p.pos)]
     const home = [p.pos, ...homeward(meta, p.pos)]
     legsClear(d.id, out, true, `${d.id}->${p.id}`)
@@ -233,22 +264,25 @@ for (const d of DESKS) {
     trips++
   }
 }
-ok(`errand: ${trips} perjalanan meja->poi->meja (+ dipanggil di tengah jalan) bebas furniture`)
+ok(`errand: ${trips} perjalanan meja->poi->meja per lantai (+ dipanggil di tengah jalan) bebas furniture`)
 
 // Passing room: walkers keep right by SIDESTEP (lib/routes.ts) when they meet, so
 // every nav edge needs body half-width + sidestep of clearance.
 const PASS = 0.25 + SIDESTEP
-let tight = 0
-for (const [a, b] of NAV_EDGES) {
-  const na = NAV.find((n) => n.id === a)!, nb = NAV.find((n) => n.id === b)!
-  for (const o of OBSTACLES) if (hits(na.x, na.z, nb.x, nb.z, o, PASS)) { tight++; fail(`edge ${a}->${b}: ruang papasan < ${PASS} ke ${o.id}`) }
+for (const f of FLOOR_IDS) {
+  const nav = navOf(f)
+  let tight = 0
+  for (const [a, b] of edgesOf(f)) {
+    const na = nav.find((n) => n.id === a)!, nb = nav.find((n) => n.id === b)!
+    for (const o of obstaclesOf(f)) if (hits(na.x, na.z, nb.x, nb.z, o, PASS)) { tight++; fail(`L${f} edge ${a}->${b}: ruang papasan < ${PASS} ke ${o.id}`) }
+  }
+  if (!tight) ok(`L${f} ruang papasan: semua edge punya >= ${PASS} m ke furniture`)
 }
-if (!tight) ok(`ruang papasan: semua edge punya >= ${PASS} m ke furniture`)
 
 // ------------------------------------------------------ walker meeting
 // Same stepping as AgentActor (route follow + avoid() + eased sidestep), run
-// headless: two walkers must pass without their bodies overlapping, and a
-// colleague standing on the route must not stall anyone.
+// headless on the L3 corridors: two walkers must pass without their bodies
+// overlapping, and a colleague standing on the route must not stall anyone.
 interface Sim { id: string; path: Pt[]; idx: number; x: number; z: number; ox: number; oz: number; yielded: number; still?: boolean }
 const damp = (a: number, b: number, l: number, dt: number) => a + (b - a) * (1 - Math.exp(-l * dt))
 function simulate(walkers: Sim[], seconds: number): { minD: number; done: boolean } {
@@ -289,13 +323,14 @@ function simulate(walkers: Sim[], seconds: number): { minD: number; done: boolea
 }
 const walker = (id: string, path: Pt[], still = false): Sim =>
   ({ id, path: path.slice(1), idx: 0, x: path[0]![0], z: path[0]![1], ox: 0, oz: 0, yielded: 0, still })
-const W: Pt = [-11.0, -6.4], E: Pt = [-1.8, -6.4]
+// L3 corridors: back aisle z=-3.4, front aisle z=2.6, west aisle x=-4.8
+const W3: Pt = [-4.8, -3.4], E3: Pt = [4.8, -3.4]
 const cases: Array<[string, Sim[], number]> = [
-  ['berpapasan di lorong belakang', [walker('a', [W, E]), walker('b', [E, W])], 0.45],
-  ['berpapasan, prioritas terbalik', [walker('b', [W, E]), walker('a', [E, W])], 0.45],
-  ['menyusul dari belakang', [walker('a', [W, [-3.2, -6.4]]), walker('b', [[-9.6, -6.4], E])], 0.45],
-  ['bersilangan di depan pintu tim', [walker('a', [[-11.0, -1.6], [-1.8, -1.6]]), walker('b', [[-7.5, 1.0], [-7.5, -1.6], [-11.0, -1.6]])], 0.45],
-  ['rekan berdiri di jalur', [walker('a', [W, E]), walker('z', [[-7.6, -6.4]], true)], 0.4],
+  ['berpapasan di lorong belakang L3', [walker('a', [W3, E3]), walker('b', [E3, W3])], 0.45],
+  ['berpapasan, prioritas terbalik', [walker('b', [W3, E3]), walker('a', [E3, W3])], 0.45],
+  ['menyusul dari belakang', [walker('a', [W3, [-1.0, -3.4]]), walker('b', [[-3.6, -3.4], E3])], 0.45],
+  ['bersilangan di lorong depan', [walker('a', [[-4.8, 2.6], [4.8, 2.6]]), walker('b', [[0, -3.4], [0, 2.6], [-4.8, 2.6]])], 0.45],
+  ['rekan berdiri di jalur', [walker('a', [W3, E3]), walker('z', [[-1.0, -3.4]], true)], 0.4],
 ]
 for (const [name, ws, need] of cases) {
   const r = simulate(ws, 60)
@@ -305,46 +340,75 @@ for (const [name, ws, need] of cases) {
 }
 
 // -------------------------------------------------------- reachability
-const adj = new Map<string, string[]>()
-for (const [a, b] of NAV_EDGES) {
-  adj.set(a, [...(adj.get(a) ?? []), b])
-  adj.set(b, [...(adj.get(b) ?? []), a])
+for (const f of FLOOR_IDS) {
+  const adj = new Map<string, string[]>()
+  for (const [a, b] of edgesOf(f)) {
+    adj.set(a, [...(adj.get(a) ?? []), b])
+    adj.set(b, [...(adj.get(b) ?? []), a])
+  }
+  // L1 is proven from the entrance, L2/L3 from their lift node (the plan's rule)
+  const start = f === 1 ? 'l1-gate' : `l${f}-lift`
+  const seen = new Set<string>([start])
+  const q = [start]
+  while (q.length) {
+    for (const n of adj.get(q.shift()!) ?? []) if (!seen.has(n)) { seen.add(n); q.push(n) }
+  }
+  const nav = navOf(f)
+  if (seen.size !== nav.length) fail(`L${f} graph tidak terhubung: ${nav.length - seen.size} node yatim`)
+  else ok(`L${f} graph terhubung: ${seen.size}/${nav.length} node dari ${start}`)
+
+  // the lift node exists and is wired into this floor's graph
+  const lift = liftNode(f)
+  if (!nav.some((n) => n.id === lift.id)) fail(`L${f}: node lift tidak ada`)
+  if (!seen.has(lift.id)) fail(`L${f}: node lift tidak tersambung ke grafik`)
 }
-const seen = new Set<string>(['gate'])
-const q = ['gate']
-while (q.length) {
-  for (const n of adj.get(q.shift()!) ?? []) if (!seen.has(n)) { seen.add(n); q.push(n) }
-}
-if (seen.size !== NAV.length) fail(`graph tidak terhubung: ${NAV.length - seen.size} node yatim`)
-else ok(`graph terhubung: ${seen.size}/${NAV.length} node dari pintu masuk`)
 
 for (const p of POIS) {
-  const from = DESK_EXIT[DESKS.find((d) => d.id === (p.team === 'lobby' ? 'default' : p.team))!.id]!
-  const a = nearestNode(from[0], from[1])
-  const b = nearestNode(p.pos[0], p.pos[1])
-  if (navPath(a.id, b.id).length === 0 && a.id !== b.id) fail(`poi ${p.id}: tidak ada jalur dari ${a.id}`)
+  const teamDesk = p.team === 'lobby' ? 'default' : p.team
+  const from = DESK_EXIT[teamDesk]!
+  const a = nearestNode(from[0], from[1], p.floor)
+  const b = nearestNode(p.pos[0], p.pos[1], p.floor)
+  if (navPath(a.id, b.id).length === 0 && a.id !== b.id) fail(`L${p.floor} poi ${p.id}: tidak ada jalur dari ${a.id}`)
 }
-ok('semua poi terjangkau dari meja timnya')
+ok('semua poi terjangkau dari meja timnya di lantai yang sama')
 
-// ------------------------------------------------------------- cameras
-for (const s of Object.values(SPOTS)) {
-  // the overview preset flies above the dollhouse; the room presets stay inside
-  if (s.pos[1] < 5 && !inRoom(s.pos[0], s.pos[2])) fail(`spot ${s.id}: kamera di luar lantai`)
-  if (s.pos[1] < 1.2) fail(`spot ${s.id}: kamera terlalu rendah`)
+// ------------------------------------------------------------- deep links
+// The old ?spot= names map to floors (replaces the deleted 3D camera section).
+const WANT_SPOT_FLOOR: Record<string, FloorId> = { lobby: 1, edu: 2, dev: 3, tampak: 1, luar: 1 }
+for (const [spot, f] of Object.entries(WANT_SPOT_FLOOR)) {
+  if (SPOT_FLOOR[spot] !== f) fail(`SPOT_FLOOR[${spot}] = ${SPOT_FLOOR[spot]}, want ${f}`)
+  if (!SPOT_VIEW[f]?.[spot]) fail(`SPOT_VIEW[L${f}] has no preset for "${spot}"`)
 }
-ok(`spot kamera: ${Object.keys(SPOTS).join(', ')}`)
+ok(`spot -> lantai: ${Object.entries(WANT_SPOT_FLOOR).map(([s, f]) => `${s}=L${f}`).join(', ')}`)
 
-// --------------------------------------------------------------- walls
-for (const w of WALLS) {
-  const len = Math.abs(w.to - w.from)
-  const atLim = w.axis === 'x' ? FLOOR.d / 2 : FLOOR.w / 2
-  const runLim = w.axis === 'x' ? FLOOR.w / 2 : FLOOR.d / 2
-  if (Math.abs(w.at) > atLim || Math.abs(w.from) > runLim + 0.01 || Math.abs(w.to) > runLim + 0.01) {
-    fail(`wall ${w.axis}@${w.at} ${w.from}..${w.to} keluar lantai`)
+// ------------------------------------------------- walls, doors, POIs, lift
+for (const f of FLOOR_IDS) {
+  const fl = FLOORS[f]
+  for (const w of wallsOf(f)) {
+    const len = Math.abs(w.to - w.from)
+    const atLim = w.axis === 'x' ? fl.d / 2 : fl.w / 2
+    const runLim = w.axis === 'x' ? fl.w / 2 : fl.d / 2
+    if (Math.abs(w.at) > atLim || Math.abs(w.from) > runLim + 0.01 || Math.abs(w.to) > runLim + 0.01) {
+      fail(`L${f} wall ${w.axis}@${w.at} ${w.from}..${w.to} keluar lantai ${fl.w}x${fl.d}`)
+    }
+    if (len < 0.5) fail(`L${f} wall ${w.axis}@${w.at}: panjang ${len}`)
   }
-  if (len < 0.5) fail(`wall ${w.axis}@${w.at}: panjang ${len}`)
+  for (const d of doorsOf(f)) {
+    if (!doorInFloor(f, d.x, d.z)) fail(`L${f} door ${d.label}: di luar lantai`)
+  }
+  for (const p of poisOf(f)) {
+    if (!inFloor(f, p.pos[0], p.pos[1])) fail(`L${f} poi ${p.id}: di luar lantai`)
+  }
+  // the lift shaft is a real obstacle on this floor and the walk node stands
+  // clear of it (1 unit west of the door)
+  const shaft = obstaclesOf(f).find((o) => o.id === `lift-${f}`)
+  if (!shaft) fail(`L${f}: shaft lift bukan obstacle`)
+  else {
+    const lift = liftNode(f)
+    if (hits(lift.x, lift.z, lift.x, lift.z, shaft, RADIUS)) fail(`L${f}: node lift di dalam shaft`)
+  }
+  ok(`L${f}: ${wallsOf(f).length} dinding, ${doorsOf(f).length} pintu, ${poisOf(f).length} poi — semua di dalam ${fl.w}x${fl.d}`)
 }
-ok(`dinding: ${WALLS.length} segmen di dalam ${FLOOR.w}x${FLOOR.d}`)
 
 console.log(fails === 0 ? '\nLAYOUT OK' : `\n${fails} MASALAH`)
 process.exit(fails === 0 ? 0 : 1)

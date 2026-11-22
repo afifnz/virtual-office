@@ -9,6 +9,7 @@
  * and the nearest free desk on the 4.5 x 4.0 lattice.
  */
 import { AGENTS, TEAMS, type AgentMeta, type HairStyle, type Look } from './agents'
+import { FLOORS, FLOOR_IDS, edgesOf, navOf, obstaclesOf, wallsOf, type FloorId } from './rooms'
 import {
   DEFAULT_GRID,
   TEAM_CENTRE,
@@ -61,6 +62,9 @@ const DEFAULT_TZ = 'Asia/Jakarta'
 const DEFAULT_FLOOR = { w: 28, d: 20 }
 const WALL_T = 0.22
 const WALKER = 0.35
+
+/** Which floor each team lives on (the frontend is authoritative, not the API). */
+export const TEAM_FLOOR: Record<string, FloorId> = { lobby: 1, edu: 2, dev: 3 }
 
 // ------------------------------------------------------------------ palettes
 
@@ -207,41 +211,41 @@ export function resolveAgentId(token: string): string | null {
   return byName ? byName.id : null
 }
 
-function obstaclesNow(): Obstacle[] {
+function obstaclesNow(floor: FloorId): Obstacle[] {
   return [
-    ...wallObstacles(),
-    ...reg.agents.map((a) => deskObstacle(a.desk, a.id)),
-    ...EXTRA_FURNITURE,
+    ...wallObstacles(floor),
+    ...reg.agents.filter((a) => a.desk.floor === floor).map((a) => deskObstacle(a.desk, a.id)),
+    ...(EXTRA_FURNITURE.get(floor) ?? []),
   ]
 }
 
 /** Walls are footprints too: a desk may not sit inside the partition. */
-function wallObstacles(): Obstacle[] {
-  // Imported lazily from rooms.ts to keep this module free of scene imports at
-  // module-eval time; the values are static.
-  const walls = WALL_SEGMENTS
+function wallObstacles(floor: FloorId): Obstacle[] {
+  // Imported from rooms.ts via setFloorContext at module load; the values are
+  // static and kept per floor.
+  const walls = WALL_SEGMENTS.get(floor) ?? []
   const t = WALL_T / 2
   return walls.map((w, i) =>
     w.axis === 'x'
-      ? { id: `wall-x${i}`, x1: Math.min(w.from, w.to), z1: w.at - t, x2: Math.max(w.from, w.to), z2: w.at + t }
-      : { id: `wall-z${i}`, x1: w.at - t, z1: Math.min(w.from, w.to), x2: w.at + t, z2: Math.max(w.from, w.to) },
+      ? { id: `wall-l${floor}-${i}`, floor, x1: Math.min(w.from, w.to), z1: w.at - t, x2: Math.max(w.from, w.to), z2: w.at + t }
+      : { id: `wall-l${floor}-${i}`, floor, x1: w.at - t, z1: Math.min(w.from, w.to), x2: w.at + t, z2: Math.max(w.from, w.to) },
   )
 }
 
-// Filled in by rooms.ts on import (see setWalls) to avoid an import cycle.
+// Filled in by rooms.ts on import (see setFloorContext) to avoid an import cycle.
 interface WallSegLike {
   axis: 'x' | 'z'
   at: number
   from: number
   to: number
 }
-let WALL_SEGMENTS: WallSegLike[] = []
-let NAV_EDGES_RESOLVED: Edge[] = []
+const WALL_SEGMENTS = new Map<FloorId, WallSegLike[]>()
+const NAV_EDGES_RESOLVED = new Map<FloorId, Edge[]>()
 
-/** rooms.ts calls this once at module load. */
-export function setFloorContext(walls: WallSegLike[], edges: Edge[]): void {
-  WALL_SEGMENTS = walls
-  NAV_EDGES_RESOLVED = edges
+/** rooms.ts calls this once per floor at module load. */
+export function setFloorContext(floor: FloorId, walls: WallSegLike[], edges: Edge[]): void {
+  WALL_SEGMENTS.set(floor, walls)
+  NAV_EDGES_RESOLVED.set(floor, edges)
 }
 
 /** Accept the legacy room name so an older API still lands in the right room. */
@@ -258,21 +262,25 @@ function guessTeam(id: string): string {
   return 'dev'
 }
 
-/** Add a desk for an id the config did not list (status-only agent). */
+/** Add a desk for an id the config did not list (status-only agent), on its team's floor. */
 function ensureAgent(id: string, _index: number): AgentMeta {
   const team = guessTeam(id)
+  const floor = TEAM_FLOOR[team] ?? 1
   const [spot] = planDesks({
     team,
     ids: [id],
     anchors: reg.agents.filter((a) => a.team === team).map((a) => a.desk),
-    obstacles: obstaclesNow(),
-    edges: NAV_EDGES_RESOLVED,
-    floor: reg.floor,
+    obstacles: obstaclesNow(floor),
+    edges: NAV_EDGES_RESOLVED.get(floor) ?? [],
+    floor: FLOORS[floor],
     grid: reg.grid,
     wallT: WALL_T,
     walker: WALKER,
   })
-  const desk: DeskSpot = spot ?? { id, x: TEAM_CENTRE[team]?.[0] ?? 0, z: TEAM_CENTRE[team]?.[1] ?? 0, rot: Math.PI }
+  const tc = TEAM_CENTRE[team]
+  const desk: DeskSpot = spot
+    ? { ...spot, floor }
+    : { id, x: tc?.x ?? 0, z: tc?.z ?? 0, rot: Math.PI, floor }
   const meta: AgentMeta = {
     id,
     name: id,
@@ -299,6 +307,8 @@ export function applyConfig(cfg: OfficeConfig | null): void {
     w: Number(cfg.layout?.floor?.w) || DEFAULT_FLOOR.w,
     d: Number(cfg.layout?.floor?.d) || DEFAULT_FLOOR.d,
   }
+  // R2: cfg.layout.floor is the backend's stale 28x20 — parsed above for
+  // compatibility, but geometry comes from FLOORS (frontend-authoritative).
   next.grid = {
     dx: Number(cfg.layout?.grid?.dx) || DEFAULT_GRID.dx,
     dz: Number(cfg.layout?.grid?.dz) || DEFAULT_GRID.dz,
@@ -333,13 +343,16 @@ export function applyConfig(cfg: OfficeConfig | null): void {
     })
   }
 
-  // A new agent joins its team's lattice; planning order is the roster order,
-  // so the same config always produces the same office.
-  const obstacles: Obstacle[] = [
-    ...wallObstacles(),
-    ...metas.map((m) => deskObstacle(m.desk, m.id)),
-    ...EXTRA_FURNITURE,
-  ]
+  // A new agent joins its team's lattice on its team's floor; planning order
+  // is the roster order, so the same config always produces the same office.
+  const obstaclesByFloor = new Map<FloorId, Obstacle[]>()
+  for (const f of [1, 2, 3] as FloorId[]) {
+    obstaclesByFloor.set(f, [
+      ...wallObstacles(f),
+      ...metas.filter((m) => m.desk.floor === f).map((m) => deskObstacle(m.desk, m.id)),
+      ...(EXTRA_FURNITURE.get(f) ?? []),
+    ])
+  }
   const groups = new Map<string, RosterEntry[]>()
   for (const e of pending) {
     const team = normalizeTeam(e.team) || guessTeam(e.id)
@@ -347,21 +360,24 @@ export function applyConfig(cfg: OfficeConfig | null): void {
     groups.get(team)!.push({ ...e, team })
   }
   for (const [team, list] of groups) {
+    const floor = TEAM_FLOOR[team] ?? 1
     const anchors = metas.filter((m) => m.team === team).map((m) => m.desk)
     const spots = planDesks({
       team,
       ids: list.map((e) => e.id),
       anchors,
-      obstacles,
-      edges: NAV_EDGES_RESOLVED,
-      floor: next.floor,
+      obstacles: obstaclesByFloor.get(floor) ?? [],
+      edges: NAV_EDGES_RESOLVED.get(floor) ?? [],
+      floor: FLOORS[floor],
       grid: next.grid,
       wallT: WALL_T,
       walker: WALKER,
     })
     list.forEach((e, i) => {
-      const desk: DeskSpot = spots[i] ?? { id: e.id, x: 0, z: 0, rot: Math.PI }
-      obstacles.push(deskObstacle(desk, e.id))
+      const desk: DeskSpot = spots[i]
+        ? { ...spots[i]!, floor }
+        : { id: e.id, x: 0, z: 0, rot: Math.PI, floor }
+      obstaclesByFloor.get(floor)!.push(deskObstacle(desk, e.id))
       metas.push({
         id: e.id,
         name: e.name?.trim() || e.id,
@@ -402,12 +418,29 @@ export function applyConfig(cfg: OfficeConfig | null): void {
   reg = next
 }
 
-/** Furniture footprints that are not desks (mirrors lib/rooms.ts OBSTACLES). */
-let EXTRA_FURNITURE: Obstacle[] = []
+/** Furniture footprints that are not desks, per floor (mirrors lib/rooms.ts OBSTACLES). */
+const EXTRA_FURNITURE = new Map<FloorId, Obstacle[]>()
 
-/** rooms.ts calls this once at module load with its static furniture list. */
-export function setFurniture(list: Obstacle[]): void {
-  EXTRA_FURNITURE = list
+/** rooms.ts calls this once per floor at module load with its static furniture list. */
+export function setFurniture(floor: FloorId, list: Obstacle[]): void {
+  EXTRA_FURNITURE.set(floor, list)
+}
+
+/**
+ * Hand the static geometry of every floor to the planner at module load: a new
+ * agent is placed against the same walls, furniture and walkways the
+ * hand-drawn office uses, on the floor its team lives on. (This runs after
+ * rooms.ts has fully evaluated — roster imports rooms, never the reverse.)
+ */
+for (const f of FLOOR_IDS) {
+  const nav = navOf(f)
+  const segments: Edge[] = edgesOf(f).flatMap(([a, b]) => {
+    const na = nav.find((n) => n.id === a)
+    const nb = nav.find((n) => n.id === b)
+    return na && nb ? [{ a: [na.x, na.z] as [number, number], b: [nb.x, nb.z] as [number, number] }] : []
+  })
+  setFloorContext(f, wallsOf(f), segments)
+  setFurniture(f, obstaclesOf(f).filter((o) => !o.id.startsWith('desk-')))
 }
 
 /** Ensure every id in `ids` has a desk, then return the full roster. */

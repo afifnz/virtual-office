@@ -1,53 +1,74 @@
 import { AGENTS } from './agents'
-import { deskObstacle as deskFootprint, type Edge, type Obstacle } from './layout'
-import { setFloorContext, setFurniture } from './roster'
+import { deskObstacle as deskFootprint, type Obstacle } from './layout'
 
 /**
- * The floor is 28 x 20 world units (1 unit ~ 1 m): 7:5, not a corridor.
+ * The office is a 3-storey building, one floor on screen at a time:
  *
- * Sized from the furniture, not the other way round: the dev block is
- * 3 x 1.62 + 2 x 1.03 = 4.86 x 2.08 plus the lead's 1.62-wide desk on its west
- * face, the edu block 2 x 1.62 + 2 x 1.03 = 3.24 x 2.08, and every desk keeps a
- * 1.6-unit aisle to the walls and to the furniture around its block. Lobby
- * 28 x 8, team rooms 14 x 12 each.
+ *  - L1 Lobby   28 x 20 — reception, lounge, meeting room, pantry (1 desk)
+ *  - L2 Tim Edu 20 x 16 — the 2 x 2 edu block, bookshelf, printer (4 desks)
+ *  - L3 Tim Dev 24 x 18 — the 3 x 2 dev island + lead, server rack (8 desks)
+ *
+ * Every desk, wall, door, POI, nav node and obstacle carries its `floor`, and
+ * the accessors below (`wallsOf`, `navOf`, ...) are the single source of
+ * coordinates per floor (AGENTS.md §1.5). Floor sizes were chosen from the
+ * furniture, not the other way round: each block keeps its 1.6-unit aisle on
+ * every side, and the lift core sits in the east of each floor with the same
+ * rule — shaft 2.6 x 3.2 at `halfWidth-2.8 .. halfWidth-0.2`, z -1.0..2.2,
+ * door facing west, walk node 1.0 west of the door at z = 0.6.
+ *
+ * Convention: +z grows south (down screen), the north wall sits at z = -d/2.
  */
-export const FLOOR = { w: 28, d: 20, y: 0 } as const
-export const WALL_H = 3.4
+export type FloorId = 1 | 2 | 3
+export const FLOOR_IDS: FloorId[] = [1, 2, 3]
+
+export const FLOORS: Record<FloorId, { id: FloorId; w: number; d: number; name: string; label: string; sub: string }> = {
+  1: { id: 1, w: 28, d: 20, name: 'Lobby', label: 'LOBBY', sub: 'penerima tamu' },
+  2: { id: 2, w: 20, d: 16, name: 'Tim Edu', label: 'TIM EDU', sub: 'materi kuliah & pelatihan' },
+  3: { id: 3, w: 24, d: 18, name: 'Tim Dev', label: 'TIM DEV', sub: 'pengembangan aplikasi' },
+}
+
 export const WALL_T = 0.22
 
 export interface WallSeg {
+  /** the floor this wall segment belongs to */
+  floor: FloorId
   /** axis 'x' = runs along x at a fixed z, 'z' = runs along z at a fixed x */
   axis: 'x' | 'z'
   at: number
   from: number
   to: number
   h?: number
+  /** 'solid' (default) = concrete; 'glass' = a blue pane in a steel frame */
+  kind?: 'solid' | 'glass'
 }
 
-/**
- * Room split — Pendopo across the front (z 2..10, 28 x 8), Tim Dev back-left
- * (x -14..0, z -10..2) and Tim Edu back-right (x 0..14, z -10..2), both 14 x 12.
- * Doors: main entrance at x = 0 / z = 10, two team doors at x = +-7.5 on the
- * z = 2 partition, one doorway between the teams at x = 0.
- */
+/** The outer shell + partitions, flat with a floor field. */
 export const WALLS: WallSeg[] = [
-  // outer shell
-  { axis: 'x', at: -10, from: -14, to: 14 }, // back
-  { axis: 'z', at: -14, from: -10, to: 10 }, // left
-  { axis: 'z', at: 14, from: -10, to: 10 }, // right
-  // front wall with the main entrance gap (x -2.2 .. 2.2)
-  { axis: 'x', at: 10, from: -14, to: -2.2 },
-  { axis: 'x', at: 10, from: 2.2, to: 14 },
-  // pendopo / team rooms partition, two symmetric doorways at x -9.7..-5.3 and 5.3..9.7
-  { axis: 'x', at: 2, from: -14, to: -9.7 },
-  { axis: 'x', at: 2, from: -5.3, to: 5.3 },
-  { axis: 'x', at: 2, from: 9.7, to: 14 },
-  // dev | edu divider, doorway at z -1.4 .. 1.4
-  { axis: 'z', at: 0, from: -10, to: -1.4 },
-  { axis: 'z', at: 0, from: 1.4, to: 2 },
+  // ---- L1 28x20: shell + the glass wall of the north-east meeting room
+  { floor: 1, axis: 'x', at: -10, from: -14, to: 14 }, // north
+  { floor: 1, axis: 'z', at: -14, from: -10, to: 10 }, // west
+  { floor: 1, axis: 'z', at: 14, from: -10, to: 10 }, // east
+  // south wall with the main entrance gap (x -2.2 .. 2.2)
+  { floor: 1, axis: 'x', at: 10, from: -14, to: -2.2 },
+  { floor: 1, axis: 'x', at: 10, from: 2.2, to: 14 },
+  // meeting-room glass: z=-3.5 with a doorway at x 6.6..9.4, plus x=3.2 return
+  { floor: 1, axis: 'x', at: -3.5, from: 3.2, to: 6.6, kind: 'glass' },
+  { floor: 1, axis: 'x', at: -3.5, from: 9.4, to: 14, kind: 'glass' },
+  { floor: 1, axis: 'z', at: 3.2, from: -10, to: -3.5, kind: 'glass' },
+  // ---- L2 20x16: plain shell (bookshelf & whiteboard hug the north wall)
+  { floor: 2, axis: 'x', at: -8, from: -10, to: 10 },
+  { floor: 2, axis: 'z', at: -10, from: -8, to: 8 },
+  { floor: 2, axis: 'z', at: 10, from: -8, to: 8 },
+  { floor: 2, axis: 'x', at: 8, from: -10, to: 10 },
+  // ---- L3 24x18: plain shell (sprint board & server rack hug the north wall)
+  { floor: 3, axis: 'x', at: -9, from: -12, to: 12 },
+  { floor: 3, axis: 'z', at: -12, from: -9, to: 9 },
+  { floor: 3, axis: 'z', at: 12, from: -9, to: 9 },
+  { floor: 3, axis: 'x', at: 9, from: -12, to: 12 },
 ]
 
 export interface Door {
+  floor: FloorId
   x: number
   z: number
   /** 0 = the frame runs along x (opening faces +-z) */
@@ -58,10 +79,7 @@ export interface Door {
 }
 
 export const DOORS: Door[] = [
-  { x: 0, z: 10, rot: 0, label: 'MASUK', w: 4.4 },
-  { x: -7.5, z: 2, rot: 0, label: 'TIM DEV', w: 4.4 },
-  { x: 7.5, z: 2, rot: 0, label: 'TIM EDU', w: 4.4 },
-  { x: 0, z: 0, rot: Math.PI / 2, label: '', w: 2.8 },
+  { floor: 1, x: 0, z: 10, rot: 0, label: 'MASUK', w: 4.4 },
 ]
 
 export interface DeskSpot {
@@ -69,6 +87,7 @@ export interface DeskSpot {
   x: number
   z: number
   rot: number
+  floor: FloorId
 }
 
 export type { Obstacle }
@@ -129,186 +148,157 @@ export function deskExit(spot: { x: number; z: number; rot: number }): [number, 
   return [spot.x + Math.sin(spot.rot) * 2.0, spot.z + Math.cos(spot.rot) * 2.0]
 }
 
-/** Camera presets; the HUD jumps between them. */
-export interface Spot {
-  id: string
-  label: string
-  pos: [number, number, number]
-  target: [number, number, number]
-  fov: number
-}
-
-export const SPOTS: Record<string, Spot> = {
-  lobby: { id: 'lobby', label: 'Pendopo', pos: [-9.8, 2.4, 9.2], target: [-6.6, 0.9, 5.2], fov: 55 },
-  dev: { id: 'dev', label: 'Tim Dev', pos: [-2.2, 5.6, 2.2], target: [-8.6, 0.3, -4.6], fov: 60 },
-  edu: { id: 'edu', label: 'Tim Edu', pos: [12.4, 5.4, 2.6], target: [6.6, 0.3, -6.2], fov: 60 },
-  tampak: { id: 'tampak', label: 'Tampak', pos: [0, 17, 18], target: [0, 0, -0.5], fov: 42 },
-  luar: { id: 'luar', label: 'Luar', pos: [18, 13, 36], target: [0, 2.4, 4], fov: 44 },
-}
-
-/**
- * Outside the building: the stone batur (28 x 20 floor + a 3-unit veranda on
- * every side), the yard below it, the roof eave height, the gapura on the path
- * and the trees ([x, z, scale]) — all clear of the path and the "luar" camera.
- */
-export const EXTERIOR = {
-  batur: { w: FLOOR.w + 6, d: FLOOR.d + 6 },
-  ground: { y: -0.4, size: 130 },
-  eaveY: 3.0,
-  gapuraZ: 25,
-  trees: [
-    [-22, 6, 1.2],
-    [-20, -10, 1.0],
-    [-24, 16, 1.1],
-    [22, -8, 1.2],
-    [23, 11, 1.0],
-    [27, 19, 1.1],
-    [-9, -19, 1.0],
-    [9, -20, 1.15],
-    [-12, 24, 0.9],
-    [-19, 27, 0.9],
-  ] as Array<[number, number, number]>,
-} as const
-
-export const START_SPOT: Spot = SPOTS.lobby!
-
 export interface Poi {
   id: string
+  /** the floor this POI lives on ('rapat' & 'kopi' exist on more than one) */
+  floor: FloorId
   name: string
   pos: [number, number]
-  act: 'sip' | 'gamelan' | 'pet' | 'read' | 'check' | 'sit' | 'gaze' | 'chat'
+  act: 'sip' | 'pet' | 'read' | 'check' | 'sit' | 'gaze' | 'chat'
   team: 'lobby' | 'dev' | 'edu'
 }
 
-/** Idle agents walk to one of these, do the act, then walk home. */
+/** Idle agents walk to one of these on their own floor, do the act, then walk home. */
 export const POIS: Poi[] = [
-  { id: 'kopi', name: 'warung kopi', pos: [-12.4, 5.4], act: 'sip', team: 'lobby' },
-  { id: 'jendela', name: 'jendela', pos: [-10.4, 9.2], act: 'gaze', team: 'lobby' },
-  { id: 'kucing', name: 'kucing oren', pos: [2.6, 7.4], act: 'pet', team: 'lobby' },
-  { id: 'resepsionis', name: 'meja resepsionis', pos: [-3.0, 6.6], act: 'chat', team: 'lobby' },
-  { id: 'rapat', name: 'meja rapat', pos: [7.4, 4.6], act: 'chat', team: 'lobby' },
-  { id: 'meja-kopi', name: 'meja kopi', pos: [-10.4, 4.2], act: 'sip', team: 'lobby' },
-  { id: 'gamelan', name: 'gamelan', pos: [-11.2, -8.7], act: 'gamelan', team: 'dev' },
-  { id: 'server', name: 'rak server', pos: [-1.9, -8.0], act: 'check', team: 'dev' },
-  { id: 'papan', name: 'papan sprint', pos: [-7.6, -9.2], act: 'read', team: 'dev' },
-  { id: 'buku', name: 'rak buku', pos: [10.6, -8.9], act: 'read', team: 'edu' },
-  { id: 'lesehan', name: 'lesehan', pos: [11.5, -2.6], act: 'sit', team: 'edu' },
+  // L1 — lobby
+  { floor: 1, id: 'resepsionis', name: 'meja resepsionis', pos: [-3.0, 6.6], act: 'chat', team: 'lobby' },
+  { floor: 1, id: 'lounge', name: 'sofa lounge', pos: [10.6, 5.4], act: 'sit', team: 'lobby' },
+  { floor: 1, id: 'rapat', name: 'meja rapat', pos: [8.0, -4.9], act: 'chat', team: 'lobby' },
+  { floor: 1, id: 'kopi', name: 'warung kopi', pos: [-12.4, 5.4], act: 'sip', team: 'lobby' },
+  { floor: 1, id: 'meja-kopi', name: 'meja kopi', pos: [-10.4, 4.2], act: 'sip', team: 'lobby' },
+  { floor: 1, id: 'jendela', name: 'jendela', pos: [-10.4, 9.2], act: 'gaze', team: 'lobby' },
+  // L2 — Tim Edu
+  { floor: 2, id: 'buku', name: 'rak buku', pos: [-2.5, -7.0], act: 'read', team: 'edu' },
+  { floor: 2, id: 'papan-edu', name: 'papan tulis', pos: [2.5, -7.0], act: 'read', team: 'edu' },
+  { floor: 2, id: 'rapat', name: 'nook rapat', pos: [-6.5, 4.4], act: 'chat', team: 'edu' },
+  { floor: 2, id: 'printer', name: 'printer', pos: [5.0, 6.5], act: 'check', team: 'edu' },
+  // L3 — Tim Dev
+  { floor: 3, id: 'papan', name: 'papan sprint', pos: [-2.0, -8.0], act: 'read', team: 'dev' },
+  { floor: 3, id: 'server', name: 'rak server', pos: [7.9, -7.4], act: 'check', team: 'dev' },
+  { floor: 3, id: 'kopi', name: 'pantry kopi', pos: [-10.4, 0.6], act: 'sip', team: 'dev' },
+  { floor: 3, id: 'standup', name: 'meja standup', pos: [7.0, 5.4], act: 'chat', team: 'dev' },
 ]
 
-/** Waypoint graph — every edge is walkable and clear of furniture. */
+/** Waypoint graph — every edge is walkable and clear of furniture. Node ids
+ * carry an `l<f>-` prefix, so a path can never cross floors by construction. */
 export interface NavNode {
   id: string
+  floor: FloorId
   x: number
   z: number
 }
 
 export const NAV: NavNode[] = [
-  // pendopo: a ring round the reception, meeting table and kopi corner
-  { id: 'gate', x: 0, z: 9.3 },
-  { id: 'lobby-nw', x: -8.6, z: 9.3 },
-  { id: 'lobby-ne', x: 10.2, z: 9.3 },
-  { id: 'lobby-nwc', x: -12.3, z: 8.6 },
-  { id: 'lobby-kopi', x: -12.3, z: 5.4 },
-  { id: 'lobby-sw', x: -7.5, z: 3.5 },
-  { id: 'lobby-c', x: -2.0, z: 3.5 },
-  { id: 'lobby-sc', x: 2.6, z: 3.5 },
-  { id: 'lobby-se', x: 7.5, z: 3.5 },
-  { id: 'lobby-e', x: 10.2, z: 3.5 },
-  { id: 'lobby-wc', x: -12.3, z: 3.5 },
-  { id: 'lobby-wm', x: -8.6, z: 3.5 },
-  { id: 'lobby-desk', x: -6.9, z: 4.6 },
-  { id: 'lobby-recep', x: -2.2, z: 6.6 },
-  { id: 'lobby-cat', x: 2.6, z: 6.6 },
-  // dev room: front aisle (z -1.6), west aisle (x -12.42, behind the lead's
-  // chair), east aisle (x -1.8), back aisle (z -6.4), gamelan spur
-  { id: 'inner-door', x: 0, z: 0 },
-  { id: 'dev-door', x: -7.5, z: 1.0 },
-  { id: 'dev-front-w', x: -12.42, z: -1.6 },
-  { id: 'dev-front', x: -7.5, z: -1.6 },
-  { id: 'dev-front-e', x: -1.8, z: -1.6 },
-  { id: 'dev-west', x: -12.42, z: -4.4 },
-  { id: 'dev-back-w', x: -12.42, z: -6.4 },
-  { id: 'dev-back', x: -7.6, z: -6.4 },
-  { id: 'dev-back-e', x: -1.8, z: -6.4 },
-  { id: 'dev-shelf', x: -11.2, z: -6.6 },
-  { id: 'dev-gam', x: -11.2, z: -8.6 },
-  // edu room: same pattern, wider block aisle
-  { id: 'edu-door', x: 7.5, z: 1.0 },
-  { id: 'edu-front-w', x: 3.0, z: -1.6 },
-  { id: 'edu-front', x: 7.5, z: -1.6 },
-  { id: 'edu-front-e', x: 9.4, z: -1.6 },
-  { id: 'edu-front-r', x: 11.9, z: -1.6 },
-  { id: 'edu-back-w', x: 3.0, z: -6.6 },
-  { id: 'edu-back', x: 7.0, z: -6.6 },
-  { id: 'edu-back-e', x: 9.4, z: -6.6 },
-  { id: 'edu-shelf', x: 12.4, z: -6.6 },
+  // ---- L1: the ring round reception, pantry, lounge and the meeting room
+  { id: 'l1-gate', floor: 1, x: 0, z: 9.3 },
+  { id: 'l1-south-w', floor: 1, x: -8.6, z: 9.3 },
+  { id: 'l1-south-e', floor: 1, x: 8.6, z: 9.3 },
+  { id: 'l1-pantry-s', floor: 1, x: -12.3, z: 8.6 },
+  { id: 'l1-pantry', floor: 1, x: -12.3, z: 5.4 },
+  { id: 'l1-west', floor: 1, x: -12.3, z: 3.5 },
+  { id: 'l1-wm', floor: 1, x: -8.6, z: 3.5 },
+  { id: 'l1-c', floor: 1, x: -2.0, z: 3.5 },
+  { id: 'l1-sc', floor: 1, x: 2.6, z: 3.5 },
+  { id: 'l1-e', floor: 1, x: 10.2, z: 3.5 },
+  { id: 'l1-recep', floor: 1, x: -2.2, z: 6.6 },
+  { id: 'l1-lounge', floor: 1, x: 10.2, z: 5.4 },
+  { id: 'l1-meet-door', floor: 1, x: 8.0, z: -2.6 },
+  { id: 'l1-meet-in', floor: 1, x: 8.0, z: -4.4 },
+  { id: 'l1-lift', floor: 1, x: 10.2, z: 0.6 },
+  // ---- L2: two corridors (z 3.4 south, z -2.2 north) joined west and east;
+  // no s<->n edge — the x=0 line would cross the edu block
+  { id: 'l2-lift', floor: 2, x: 6.2, z: 0.6 },
+  { id: 'l2-s', floor: 2, x: 0, z: 3.4 },
+  { id: 'l2-sw', floor: 2, x: -4.5, z: 3.4 },
+  { id: 'l2-se', floor: 2, x: 4.5, z: 3.4 },
+  { id: 'l2-n', floor: 2, x: 0, z: -2.2 },
+  { id: 'l2-nw', floor: 2, x: -4.5, z: -2.2 },
+  { id: 'l2-ne', floor: 2, x: 4.5, z: -2.2 },
+  { id: 'l2-shelf', floor: 2, x: -2.5, z: -6.6 },
+  { id: 'l2-board', floor: 2, x: 2.5, z: -6.6 },
+  { id: 'l2-nook', floor: 2, x: -6.5, z: 3.9 },
+  { id: 'l2-printer', floor: 2, x: 4.6, z: 6.0 },
+  // ---- L3: front corridor (z 2.6), back corridor (z -3.4), west aisle past
+  // the lead desk; the server rack is reached via ops-e, not straight from ne
+  { id: 'l3-lift', floor: 3, x: 8.2, z: 0.6 },
+  { id: 'l3-s', floor: 3, x: 0, z: 2.6 },
+  { id: 'l3-sw', floor: 3, x: -4.8, z: 2.6 },
+  { id: 'l3-se', floor: 3, x: 4.8, z: 2.6 },
+  { id: 'l3-n', floor: 3, x: 0, z: -3.4 },
+  { id: 'l3-nw', floor: 3, x: -4.8, z: -3.4 },
+  { id: 'l3-ne', floor: 3, x: 4.8, z: -3.4 },
+  { id: 'l3-w', floor: 3, x: -4.8, z: -0.39 },
+  { id: 'l3-ops-e', floor: 3, x: 7.4, z: -3.4 },
+  { id: 'l3-rack', floor: 3, x: 7.9, z: -7.2 },
+  { id: 'l3-board', floor: 3, x: -2.0, z: -7.6 },
+  { id: 'l3-pantry', floor: 3, x: -10.4, z: 0.6 },
+  { id: 'l3-standup', floor: 3, x: 7.0, z: 5.0 },
 ]
 
 /** Wall footprints, so a new desk never lands inside a partition. */
 export const WALL_OBSTACLES: Obstacle[] = WALLS.map((w, i) => {
   const t = WALL_T / 2
-  return w.axis === 'x'
-    ? { id: `wall-x${i}`, x1: Math.min(w.from, w.to), z1: w.at - t, x2: Math.max(w.from, w.to), z2: w.at + t }
-    : { id: `wall-z${i}`, x1: w.at - t, z1: Math.min(w.from, w.to), x2: w.at + t, z2: Math.max(w.from, w.to) }
+  const base =
+    w.axis === 'x'
+      ? { x1: Math.min(w.from, w.to), z1: w.at - t, x2: Math.max(w.from, w.to), z2: w.at + t }
+      : { x1: w.at - t, z1: Math.min(w.from, w.to), x2: w.at + t, z2: Math.max(w.from, w.to) }
+  return { id: `wall-l${w.floor}-${i}`, floor: w.floor, ...base }
 })
 
 export const NAV_EDGES: Array<[string, string]> = [
-  // pendopo ring
-  ['gate', 'lobby-nw'],
-  ['gate', 'lobby-ne'],
-  ['gate', 'lobby-c'],
-  ['lobby-nw', 'lobby-nwc'],
-  ['lobby-nwc', 'lobby-kopi'],
-  ['lobby-kopi', 'lobby-wc'],
-  ['lobby-wc', 'lobby-wm'],
-  ['lobby-wm', 'lobby-sw'],
-  ['lobby-nw', 'lobby-wm'] as [string, string],
-  ['lobby-sw', 'lobby-c'],
-  ['lobby-c', 'lobby-sc'],
-  ['lobby-sc', 'lobby-se'],
-  ['lobby-se', 'lobby-e'],
-  ['lobby-e', 'lobby-ne'],
-  ['lobby-wm', 'lobby-desk'],
-  ['lobby-sw', 'lobby-desk'],
-  ['lobby-c', 'lobby-recep'],
-  ['lobby-sc', 'lobby-cat'],
-  // into the team rooms
-  ['lobby-sw', 'dev-door'],
-  ['lobby-se', 'edu-door'],
-  ['dev-door', 'dev-front'],
-  ['edu-door', 'edu-front'],
-  // dev front aisle
-  ['dev-front-w', 'dev-front'],
-  ['dev-front', 'dev-front-e'],
-  ['dev-front-e', 'dev-back-e'],
-  ['dev-front-w', 'dev-west'],
-  ['dev-west', 'dev-back-w'],
-  ['dev-back-w', 'dev-shelf'],
-  ['dev-shelf', 'dev-back'],
-  ['dev-shelf', 'dev-gam'],
-  // dev back aisle
-  ['dev-back-w', 'dev-back'],
-  ['dev-back', 'dev-back-e'],
-  // inner doorway between the rooms
-  ['dev-front-e', 'inner-door'],
-  ['inner-door', 'edu-front-w'],
-  // edu front aisle
-  ['edu-front-w', 'edu-front'],
-  ['edu-front', 'edu-front-e'],
-  ['edu-front-e', 'edu-front-r'],
-  ['edu-front-e', 'edu-back-e'],
-  // edu back aisle
-  ['edu-back-w', 'edu-back'],
-  ['edu-back', 'edu-back-e'],
-  ['edu-back-e', 'edu-shelf'],
-  ['edu-front-w', 'edu-back-w'],
+  // L1: the southern ring + spurs to reception, lounge, meeting room and lift
+  ['l1-gate', 'l1-south-w'],
+  ['l1-south-w', 'l1-pantry-s'],
+  ['l1-pantry-s', 'l1-pantry'],
+  ['l1-pantry', 'l1-west'],
+  ['l1-west', 'l1-wm'],
+  ['l1-wm', 'l1-c'],
+  ['l1-c', 'l1-sc'],
+  ['l1-sc', 'l1-e'],
+  ['l1-e', 'l1-south-e'],
+  ['l1-south-e', 'l1-gate'],
+  ['l1-c', 'l1-recep'],
+  ['l1-sc', 'l1-lounge'],
+  ['l1-e', 'l1-lift'],
+  ['l1-e', 'l1-meet-door'],
+  ['l1-meet-door', 'l1-meet-in'],
+  ['l1-lift', 'l1-meet-door'],
+  // L2: south corridor, north corridor, joined at both ends — never through the block
+  ['l2-s', 'l2-sw'],
+  ['l2-sw', 'l2-nook'],
+  ['l2-s', 'l2-se'],
+  ['l2-se', 'l2-printer'],
+  ['l2-n', 'l2-nw'],
+  ['l2-nw', 'l2-shelf'],
+  ['l2-n', 'l2-ne'],
+  ['l2-ne', 'l2-board'],
+  ['l2-sw', 'l2-nw'],
+  ['l2-se', 'l2-ne'],
+  ['l2-se', 'l2-lift'],
+  ['l2-ne', 'l2-lift'],
+  // L3: one ring + spurs; rack via ops-e (ne->rack would graze the devops desk)
+  ['l3-s', 'l3-sw'],
+  ['l3-sw', 'l3-w'],
+  ['l3-w', 'l3-nw'],
+  ['l3-nw', 'l3-n'],
+  ['l3-n', 'l3-ne'],
+  ['l3-ne', 'l3-se'],
+  ['l3-se', 'l3-s'],
+  ['l3-nw', 'l3-board'],
+  ['l3-ne', 'l3-ops-e'],
+  ['l3-ops-e', 'l3-rack'],
+  ['l3-sw', 'l3-pantry'],
+  ['l3-se', 'l3-standup'],
+  ['l3-se', 'l3-lift'],
+  ['l3-ne', 'l3-lift'],
 ]
 
-/** Nearest nav node to a point, used to enter/exit the graph from a desk. */
-export function nearestNode(x: number, z: number): NavNode {
-  let best = NAV[0]!
+/** Nearest nav node to a point on one floor, used to enter/exit the graph. */
+export function nearestNode(x: number, z: number, floor: FloorId): NavNode {
+  let best = NAV.find((n) => n.floor === floor)!
   let bestD = Infinity
   for (const n of NAV) {
+    if (n.floor !== floor) continue
     const d = (n.x - x) ** 2 + (n.z - z) ** 2
     if (d < bestD) {
       bestD = d
@@ -318,45 +308,78 @@ export function nearestNode(x: number, z: number): NavNode {
   return best
 }
 
+/** The per-floor accessors: one source of coordinates, filtered by floor. */
+export const wallsOf = (f: FloorId): WallSeg[] => WALLS.filter((w) => w.floor === f)
+export const doorsOf = (f: FloorId): Door[] => DOORS.filter((d) => d.floor === f)
+export const poisOf = (f: FloorId): Poi[] => POIS.filter((p) => p.floor === f)
+export const navOf = (f: FloorId): NavNode[] => NAV.filter((n) => n.floor === f)
+export const edgesOf = (f: FloorId): Array<[string, string]> =>
+  NAV_EDGES.filter(([a, b]) => {
+    const na = NAV.find((n) => n.id === a)
+    const nb = NAV.find((n) => n.id === b)
+    return na?.floor === f && nb?.floor === f
+  })
+export const obstaclesOf = (f: FloorId): Obstacle[] => OBSTACLES.filter((o) => o.floor === f)
+
 /** Desk + chair footprint, from the local box (1.62 wide, 0.39 front, 0.64 back). */
 function deskObstacle(d: DeskSpot): Obstacle {
-  return deskFootprint(d, d.id)
+  return { ...deskFootprint(d, d.id), floor: d.floor }
 }
 
 /**
- * Everything on the floor a walker must not enter. Kept in one place so the
+ * The lift core: identical rule on every floor — shaft 2.6 wide x 3.2 deep in
+ * the east, door facing west (at `doorX`), walk node 1.0 west of the door.
+ */
+export const LIFT: Record<FloorId, { shaft: Obstacle; doorX: number; node: NavNode }> = {
+  1: {
+    shaft: { id: 'lift-1', floor: 1, x1: 11.2, z1: -1.0, x2: 13.8, z2: 2.2 },
+    doorX: 11.2,
+    node: { id: 'l1-lift', floor: 1, x: 10.2, z: 0.6 },
+  },
+  2: {
+    shaft: { id: 'lift-2', floor: 2, x1: 7.2, z1: -1.0, x2: 9.8, z2: 2.2 },
+    doorX: 7.2,
+    node: { id: 'l2-lift', floor: 2, x: 6.2, z: 0.6 },
+  },
+  3: {
+    shaft: { id: 'lift-3', floor: 3, x1: 9.2, z1: -1.0, x2: 11.8, z2: 2.2 },
+    doorX: 9.2,
+    node: { id: 'l3-lift', floor: 3, x: 8.2, z: 0.6 },
+  },
+}
+
+/** The walkable lift node on one floor (west of the door, z = 0.6). */
+export function liftNode(f: FloorId): NavNode {
+  return LIFT[f].node
+}
+
+/**
+ * Everything on the floors a walker must not enter. Kept in one place so the
  * nav graph, the POIs and the layout check all agree with the scene.
  */
 export const OBSTACLES: Obstacle[] = [
   ...DESKS.map(deskObstacle),
-  // pendopo — big pieces hug the walls
-  { id: 'resepsionis', x1: -4.27, z1: 5.62, x2: -3.53, z2: 8.38 },
-  { id: 'meja-rapat', x1: 5.8, z1: 5.5, x2: 9.0, z2: 7.7 },
-  { id: 'meja-kopi', x1: -11.35, z1: 4.7, x2: -9.45, z2: 6.5 },
-  { id: 'kopi', x1: -13.9, z1: 3.9, x2: -13.2, z2: 6.9 },
-  { id: 'sofa', x1: 12.95, z1: 4.2, x2: 13.85, z2: 6.6 },
-  { id: 'sofa-table', x1: 11.15, z1: 5.05, x2: 12.45, z2: 5.75 },
-  { id: 'kucing', x1: 2.36, z1: 7.96, x2: 2.84, z2: 8.44 },
-  { id: 'berkas', x1: -13.3, z1: 0.64, x2: -11.9, z2: 1.16 },
-  { id: 'materi', x1: 11.3, z1: 0.64, x2: 12.7, z2: 1.16 },
-  // dev room — the gamelan sits in the back-left corner, clear of the lead's desk
-  { id: 'gamelan', x1: -13.885, z1: -9.85, x2: -12.115, z2: -7.75 },
-  { id: 'server', x1: -1.0, z1: -9.85, x2: -0.1, z2: -8.75 },
-  { id: 'papan-dev', x1: -9.4, z1: -9.78, x2: -5.8, z2: -9.62 },
-  // edu room
-  { id: 'buku', x1: 9.7, z1: -10.0, x2: 12.3, z2: -9.58 },
-  { id: 'lesehan', x1: 10.4, z1: -5.7, x2: 13.8, z2: -3.1 },
-  { id: 'papan-edu', x1: 5.2, z1: -9.78, x2: 8.8, z2: -9.62 },
+  // L1 — lobby: reception counter, meeting table, lounge, pantry, lift
+  { id: 'resepsionis', floor: 1, x1: -4.27, z1: 5.62, x2: -3.53, z2: 8.38 },
+  { id: 'meja-rapat', floor: 1, x1: 6.4, z1: -7.6, x2: 9.6, z2: -5.4 },
+  { id: 'sofa', floor: 1, x1: 12.95, z1: 4.2, x2: 13.85, z2: 6.6 },
+  { id: 'sofa-table', floor: 1, x1: 11.15, z1: 5.05, x2: 12.45, z2: 5.75 },
+  { id: 'kopi', floor: 1, x1: -13.9, z1: 3.9, x2: -13.2, z2: 6.9 },
+  { id: 'meja-kopi', floor: 1, x1: -11.35, z1: 4.7, x2: -9.45, z2: 6.5 },
+  LIFT[1].shaft,
+  // L2 — Tim Edu: bookshelf, whiteboard, meeting nook, printer, lift
+  { id: 'buku', floor: 2, x1: -4.0, z1: -7.9, x2: -1.0, z2: -7.5 },
+  { id: 'papan-edu', floor: 2, x1: 1.0, z1: -7.85, x2: 4.0, z2: -7.65 },
+  { id: 'meja-nook', floor: 2, x1: -7.3, z1: 4.9, x2: -5.7, z2: 6.1 },
+  { id: 'printer', floor: 2, x1: 5.6, z1: 6.2, x2: 6.4, z2: 6.8 },
+  LIFT[2].shaft,
+  // L3 — Tim Dev: sprint board, server rack, pantry, standup table, lift
+  { id: 'papan', floor: 3, x1: -4.0, z1: -8.85, x2: 0.0, z2: -8.65 },
+  { id: 'server', floor: 3, x1: 7.5, z1: -8.9, x2: 8.4, z2: -8.0 },
+  { id: 'kopi', floor: 3, x1: -11.9, z1: -1.5, x2: -11.2, z2: 1.5 },
+  { id: 'standup', floor: 3, x1: 6.2, z1: 6.0, x2: 7.8, z2: 6.8 },
+  LIFT[3].shaft,
 ]
 
-/**
- * Hand the static geometry to the roster planner: a new agent is placed against
- * the same walls, furniture and walkways the hand-drawn office uses.
- */
-const NAV_SEGMENTS: Edge[] = NAV_EDGES.flatMap(([a, b]) => {
-  const na = NAV.find((n) => n.id === a)
-  const nb = NAV.find((n) => n.id === b)
-  return na && nb ? [{ a: [na.x, na.z] as [number, number], b: [nb.x, nb.z] as [number, number] }] : []
-})
-setFloorContext(WALLS, NAV_SEGMENTS)
-setFurniture(OBSTACLES.filter((o) => !o.id.startsWith('desk-')))
+// The static geometry is handed to the roster planner by roster.ts itself at
+// module load (roster imports rooms, never the other way round — no cycle).

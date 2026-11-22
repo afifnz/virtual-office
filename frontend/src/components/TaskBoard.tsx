@@ -101,7 +101,8 @@ export function TaskBoard({
                         <span>{t.tools} alat</span>
                         <time>{relTime(t.last, now)}</time>
                       </footer>
-                      {t.blocked ? <p className="task-blocked">{t.blocked.reason}</p> : null}
+                      {/* privacy: never show the raw blocked reason — a generic line + tool count only */}
+                      {t.blocked ? <p className="task-blocked">butuh izin · {t.blocked.tools} alat</p> : null}
                     </article>
                   )
                 })}

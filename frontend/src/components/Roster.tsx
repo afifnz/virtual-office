@@ -1,15 +1,30 @@
 import { useState } from 'react'
-import { agentMeta, teamIds, teamMeta } from '../lib/roster'
+import { agentMeta } from '../lib/roster'
+import { FLOORS } from '../lib/rooms'
 import type { Agent, StatusPayload } from '../lib/types'
 import { relTime, statusLabel } from '../lib/format'
 
-/** Rooms in scene order; a roster may add a custom team, which lands last. */
-const ORDER = (): string[] => teamIds()
+type FloorId = 1 | 2 | 3
+
+/** Floors in climb order; every floor shows even when it has no agents yet. */
+const FLOOR_ORDER: FloorId[] = [1, 2, 3]
+
+/** Compact per-group status summary, e.g. "4 aktif · 1 idle". */
+function floorSummary(agents: Agent[]): string {
+  const counts = new Map<string, number>()
+  for (const a of agents) counts.set(a.status, (counts.get(a.status) ?? 0) + 1)
+  const parts = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([status, n]) => `${n} ${statusLabel(status)}`)
+  return parts.join(' · ')
+}
 
 /**
- * Agent list: a docked sidebar on desktop, a bottom sheet on a phone. Each team
- * is a collapsible group (the sheet starts with every team open; a header tap
- * folds it away), and clicking a row flies to that desk.
+ * Agent list: a docked sidebar on desktop, a bottom sheet on a phone. Rows are
+ * grouped by floor (L1 LOBBY / L2 TIM EDU / L3 TIM DEV); each group header
+ * shows the agent count and a compact status summary, and a header tap folds
+ * the group away. Clicking a row flies to that desk — App switches to the
+ * agent's floor and focuses it through onPick.
  */
 export function Roster({
   status,
@@ -24,18 +39,15 @@ export function Roster({
   onClose: () => void
   mobile: boolean
 }) {
-  const byId = new Map<string, Agent>()
-  for (const a of status?.agents ?? []) byId.set(a.id, a)
+  const [folded, setFolded] = useState<number[]>([])
+  const toggleFloor = (floor: number) =>
+    setFolded((prev) => (prev.includes(floor) ? prev.filter((f) => f !== floor) : [...prev, floor]))
 
-  const [folded, setFolded] = useState<string[]>([])
-  const toggleTeam = (team: string) =>
-    setFolded((prev) => (prev.includes(team) ? prev.filter((t) => t !== team) : [...prev, team]))
-
-  const rows = ORDER().map((team) => {
+  const rows = FLOOR_ORDER.map((floor) => {
     const agents = (status?.agents ?? [])
-      .filter((a) => agentMeta(a.id).team === team)
+      .filter((a) => agentMeta(a.id).desk.floor === floor)
       .sort((a, b) => a.id.localeCompare(b.id))
-    return { team, agents }
+    return { floor, agents }
   })
 
   return (
@@ -47,20 +59,21 @@ export function Roster({
         </button>
       </div>
       <div className="roster-body">
-        {rows.map(({ team, agents }) => {
-          const open = !folded.includes(team)
+        {rows.map(({ floor, agents }) => {
+          const open = !folded.includes(floor)
           return (
-            <section key={team} className={`roster-team ${open ? '' : 'is-folded'}`}>
+            <section key={floor} className={`roster-team ${open ? '' : 'is-folded'}`}>
               <h3>
                 <button
                   type="button"
                   className="team-toggle"
                   aria-expanded={open}
-                  onClick={() => toggleTeam(team)}
+                  onClick={() => toggleFloor(floor)}
                 >
-                  <i className={`team-bar ${team}`} aria-hidden="true" />
-                  {teamMeta(team).label}
+                  <i className={`team-bar floor-${floor}`} aria-hidden="true" />
+                  L{floor} {FLOORS[floor].label}
                   <span>{agents.length}</span>
+                  <small className="roster-summary">{floorSummary(agents)}</small>
                   <b aria-hidden="true">{open ? '▾' : '▸'}</b>
                 </button>
               </h3>

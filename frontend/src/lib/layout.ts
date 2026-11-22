@@ -10,6 +10,7 @@
  *
  * Everything here is pure and deterministic: same input, same office.
  */
+import type { FloorId } from './rooms'
 
 export interface DeskPoint {
   x: number
@@ -17,8 +18,10 @@ export interface DeskPoint {
   rot: number
 }
 
+/** A desk placed by the planner: a point plus the roster id it belongs to. */
 export interface DeskSpot extends DeskPoint {
   id: string
+  floor: FloorId
 }
 
 export interface Obstacle {
@@ -27,6 +30,8 @@ export interface Obstacle {
   z1: number
   x2: number
   z2: number
+  /** which floor the footprint lives on (rooms.ts fills it; geometry ignores it) */
+  floor?: FloorId
 }
 
 /** A straight walkable segment the desk must not block. */
@@ -46,11 +51,11 @@ export const DEFAULT_GRID: GridSpec = { dx: 4.5, dz: 4.0, aisle: 1.6 }
 /** Desk footprint: 1.62 wide, 0.39 in front of the seat, 0.64 behind it. */
 export const DESK_FOOTPRINT = { halfW: 0.81, front: 0.39, back: 0.64 }
 
-/** Default room centre per team, used when a team has no desk yet. */
-export const TEAM_CENTRE: Record<string, [number, number]> = {
-  lobby: [0, 6.0],
-  dev: [-7.6, -4.4],
-  edu: [7.0, -4.4],
+/** Default room centre per team — on the floor the team lives on. */
+export const TEAM_CENTRE: Record<string, { floor: FloorId; x: number; z: number }> = {
+  lobby: { floor: 1, x: 0, z: 6.0 },
+  dev: { floor: 3, x: 0, z: -0.39 },
+  edu: { floor: 2, x: 0, z: 0.6 },
 }
 
 /** A desk's axis-aligned footprint on the floor, for any of the four right-angle rotations. */
@@ -170,6 +175,8 @@ export function clearance({ spot, id, obstacles, floor, wallT }: ClearanceInput)
 export interface PlanInput {
   /** team the new desks belong to */
   team: string
+  /** which floor the desks are planned on (stamped onto every DeskSpot) */
+  teamFloor?: FloorId
   /** ids to place, in roster order */
   ids: string[]
   /** desks that team already has (they define the preferred lattice origin) */
@@ -213,14 +220,14 @@ function latticePoints(origin: [number, number], grid: GridSpec): Array<[number,
  * Grid origins to try, nearest to the team first: the team's own lattice (so a
  * new desk lines up with the hand-placed ones), then a floor-wide sweep.
  */
-function origins(input: PlanInput, centre: [number, number]): Array<[number, number]> {
+function origins(input: PlanInput, centre: { x: number; z: number }): Array<[number, number]> {
   const seen = new Set<string>()
   const out: Array<{ o: [number, number]; d: number }> = []
   const push = (x: number, z: number) => {
     const key = `${round(x)},${round(z)}`
     if (seen.has(key)) return
     seen.add(key)
-    out.push({ o: [round(x), round(z)], d: Math.hypot(x - centre[0], z - centre[1]) })
+    out.push({ o: [round(x), round(z)], d: Math.hypot(x - centre.x, z - centre.z) })
   }
 
   const anchor = centroid(input.anchors)
@@ -249,7 +256,7 @@ function tryLattice(input: PlanInput, origin: [number, number], grid: GridSpec):
   for (const id of input.ids) {
     let chosen: DeskSpot | null = null
     for (const [x, z] of points) {
-      const spot: DeskSpot = { id, x, z, rot }
+      const spot: DeskSpot = { id, x, z, rot, floor: input.teamFloor ?? 1 }
       if (clearance({ spot, id, obstacles, floor: input.floor, wallT: input.wallT }) < grid.aisle) continue
       const own = deskObstacle(spot, id)
       if (input.edges.some((e) => segRectDist(e.a, e.b, own) < walker)) continue
@@ -270,7 +277,8 @@ function tryLattice(input: PlanInput, origin: [number, number], grid: GridSpec):
 export function planDesks(input: PlanInput): DeskSpot[] {
   if (!input.ids.length) return []
   const grid = input.grid ?? DEFAULT_GRID
-  const centre = TEAM_CENTRE[input.team] ?? centroid(input.anchors) ?? [0, 0]
+  const teamCentre = TEAM_CENTRE[input.team]
+  const centre = { x: teamCentre?.x ?? 0, z: teamCentre?.z ?? 0 }
 
   let best: DeskSpot[] = []
   for (const origin of origins(input, centre)) {
@@ -283,7 +291,8 @@ export function planDesks(input: PlanInput): DeskSpot[] {
 
 /** Candidates for a single desk, exposed for tests and the layout check. */
 export function candidates(team: string, anchors: DeskPoint[], grid: GridSpec): Array<{ x: number; z: number }> {
-  const centre = TEAM_CENTRE[team] ?? centroid(anchors) ?? [0, 0]
+  const teamCentre = TEAM_CENTRE[team]
+  const centre: [number, number] = teamCentre ? [teamCentre.x, teamCentre.z] : (centroid(anchors) ?? [0, 0])
   const anchor = centroid(anchors) ?? centre
   return latticePoints([round(anchor[0]), round(anchor[1])], grid).map(([x, z]) => ({ x, z }))
 }

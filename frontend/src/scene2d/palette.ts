@@ -1,31 +1,46 @@
 /**
- * The 2D office colour palette — transcribes docs/design/office-2d.md §2.
+ * The 2D office colour palette — transcribes docs/design/office-3-floors.md §2.
  *
- * Terracotta + navy high-contrast, 2–3 tones per family, status colours shared
- * with the panel chrome so a dot on the canvas is the same colour as a dot in
- * the sidebar. No gradients, no blur: a shadow is the next solid tone down.
+ * Modern office building: a cool grey-blue concrete ramp carries walls, floors
+ * and plates; glass panes are 2–3 solid blue tones (never a real alpha
+ * gradient); steel paints the lift, legs and frames; warm-white ceiling lights
+ * are the one bright note; a single amber accent marks active states. Status
+ * colours are shared with the panel chrome so a dot on the canvas is the same
+ * colour as a dot in the sidebar. No gradients, no blur: a shadow is the next
+ * solid tone down.
  */
 export const PALETTE = {
-  // navy — walls, surfaces, plates, lines (design §2.1)
-  navy900: '#101828',
-  navy800: '#182238',
-  navy700: '#24304A',
-  navy600: '#33415F',
-  // terracotta — the one warm accent (Pendopo floor, active buttons, furniture)
-  terra600: '#8F4520',
-  terra500: '#C4602C',
-  terra400: '#E07B3E',
-  terra300: '#F0A268',
-  // sand / wood — desk tops, floor edges, speech bubbles
-  sand500: '#C2A176',
-  sand400: '#D9B98C',
-  sand300: '#E8CFA8',
-  sand200: '#F2E2C4',
-  // text on navy
-  ink: '#F4E9D6',
-  inkDim: '#C9CFDD',
-  muted: '#93A0BC',
-  line: '#33415F',
+  // concrete — cool grey-blue ramp: walls, floor surfaces, plates, lines
+  concrete100: '#E4EAF0', // white concrete: desk tops, reception counter
+  concrete200: '#C7D2DE', // light concrete: desk front panels, L2 floor
+  concrete500: '#3B4A5E', // mid concrete: trim, plinth edges
+  concrete600: '#2E3B4D', // wall band body, plinth
+  concrete700: '#24303F', // hollow fills, plate borders
+  concrete800: '#1A2330', // plate bodies, panel backgrounds
+  concrete900: '#121924', // deepest surface: page-adjacent walls, offline plates
+  // glass — blue panes in solid tones (partition walls, meeting table tops)
+  glass300: '#7FA3C0', // pane highlight, mullion glint
+  glass500: '#456E8F', // the pane itself
+  glass700: '#2C4A66', // pane shadow tone
+  // steel — the lift shaft, door panels, legs, frames, server rack
+  steel300: '#7E8B99', // steel highlight edge
+  steel500: '#525F6D', // steel body
+  steel700: '#39434F', // steel shadow, chair graphite
+  // ceiling light — warm white strips and pools
+  lamp: '#F2E7C4',
+  // foliage — the only living green in the room: plants and planters. Two
+  // tones so a leaf mass reads as a silhouette instead of a flat blob.
+  foliage: '#5E7F63',
+  foliageDark: '#41583F',
+  foliageLight: '#7EA184',
+  // the one warm accent — active states, lift call, blocked-adjacent warmth
+  amber: '#E8A33D',
+  amberDeep: '#9A6A1E', // accent border/shadow tone
+  // text on dark surfaces
+  ink: '#EDF1F6',
+  inkDim: '#C3CDD9',
+  muted: '#8A97A9',
+  line: '#2E3B4D',
 } as const
 
 /** Agent status colours (design §2.2) — identical on canvas and panels. */
@@ -45,10 +60,16 @@ export const SCREEN = {
   green: '#9CE8A8',
   blue: '#8FB8E8',
   paper: '#EFE4CC',
-  bubbleInk: '#241812',
+  bubbleInk: '#1A2027',
 } as const
 
-/** Team accents (design §2.7) — kept from the existing TEAMS data. */
+/**
+ * Team identity accents (design §2.7) — kept from the existing TEAMS data so
+ * a desk border, a roster bar and a floor tab always agree. They are identity
+ * colours, not floor colours: dev = cool blue, edu = warm amber-yellow,
+ * lobby = neutral warm terracotta-tan (the only surviving warm note besides
+ * the amber accent).
+ */
 export const TEAM = {
   lobby: '#D4805C',
   dev: '#82AAC8',
@@ -56,27 +77,41 @@ export const TEAM = {
 } as const
 
 /**
- * Zone floor motifs (design §3.1). Three visually distinct floors: Pendopo
- * terracotta checker, Tim Dev navy plank with a seam, Tim Edu woven bamboo.
+ * Per-floor slab & motif tones (design §3.1). L1 polished concrete with
+ * terrazzo flecks + entry mat; L2 light concrete with a soft zone rug under
+ * the edu block + glass wall band; L3 dark polished concrete with a steel
+ * cable tray and warm ceiling-light strips.
  */
-export const ZONE_FLOOR = {
-  lobby: { a: '#C4602C', b: '#E07B3E', edge: '#E8CFA8' },
-  dev: { plank: '#1F2A42', seam: '#16203A', duct: '#C99A3C' },
-  edu: { bamboo: '#D9B36B', line: '#C49A4E', mat: '#E8CFA8' },
+export const FLOOR_MOTIF = {
+  lobby: {
+    slab: '#39434F',
+    fleck: '#4A5665',
+    fleckLight: '#5C6A7B',
+    mat: '#2A313B', // entry mat at the MASUK door
+    matEdge: '#525F6D',
+  },
+  edu: {
+    slab: '#C7D2DE',
+    seam: '#B4C0CD',
+    rug: '#8E99AC', // soft zone rug under the 2×2 edu block
+    rugEdge: '#77839A',
+    band: '#456E8F', // glass wall band along the north wall
+  },
+  dev: {
+    slab: '#232C38',
+    seam: '#1B222D',
+    tray: '#39434F', // steel cable tray
+    lamp: '#F2E7C4', // ceiling-light strip core
+  },
 } as const
 
 /** Misc canvas colours the design mentions outside the main families. */
 export const EXTRAS = {
-  /** the page behind the canvas ("lukisan malam") */
-  bg: '#0B1120',
-  /** dark text on terracotta / blocked chip (12.1:1) */
-  inkOnTerra: '#1A1208',
+  /** the page behind the canvas */
+  bg: '#0A0F16',
+  /** dark text on the amber accent / blocked chip */
+  inkOnAmber: '#191104',
   /** stale-data banner */
-  staleBg: '#5A3A1A',
-  staleText: '#FFD9A8',
-  /** plant greens */
-  plantDark: '#4E7A55',
-  plantLight: '#6FA878',
-  /** the orange cat */
-  cat: '#D9863A',
+  staleBg: '#4A3A16',
+  staleText: '#FFE1A8',
 } as const
