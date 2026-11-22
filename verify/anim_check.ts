@@ -26,6 +26,8 @@ import {
   worldToPixel,
   worldToScreen,
 } from '../frontend/src/scene2d/viewport'
+import { glyphFor, textWidth } from '../frontend/src/scene2d/pixelfont'
+import { PALETTE, STATUS, TEAM } from '../frontend/src/scene2d/palette'
 
 let fails = 0
 const fail = (msg: string) => {
@@ -267,6 +269,25 @@ if (clamped.z > halfD - visH / 2 + 0.001 || clamped.z < -(halfD - visH / 2) - 0.
 const fit = clampCenter({ x: 5, z: 5, zoom: 1 }, 2000, 2000)
 if (fit.x !== 0 || fit.z !== 0) fail(`clampCenter should pin centre to origin when the floor fits: ${fit.x},${fit.z}`)
 else ok('pan is clamped so the floor never leaves the view; centre pinned when it fits')
+
+// --------------------------------------------------------------- 9. pixel font
+
+if (textWidth('TEST') !== (4 * 6 - 1)) fail(`textWidth(TEST) = ${textWidth('TEST')}, want 23`)
+if (textWidth('TEST', 2) !== 46) fail(`textWidth(TEST,2) = ${textWidth('TEST', 2)}, want 46`)
+if (textWidth('') !== 0) fail('textWidth("") should be 0')
+if (textWidth('AB') !== (2 * 6 - 1)) fail(`textWidth(AB) = ${textWidth('AB')}, want 11`)
+if (glyphFor('a').rows.join() !== glyphFor('A').rows.join()) fail('glyphFor is not case-insensitive')
+if ((glyphFor('A').rows[0] ?? 0) === 0) fail('glyph A has an empty first row')
+else ok(`pixel font: 5×7 glyphs, textWidth("TEST")=${textWidth('TEST')}, deterministic`)
+
+// --------------------------------------------------------------- 10. palette
+
+if (TEAM.lobby !== '#D4805C' || TEAM.dev !== '#82AAC8' || TEAM.edu !== '#DEB860') {
+  fail('team accents drifted from design §2.7')
+}
+if (STATUS.blocked !== '#FFC93B') fail('blocked chip colour drifted from design §2.2')
+if (PALETTE.navy900 !== '#101828' || PALETTE.terra500 !== '#C4602C') fail('core palette drifted from design §2.1')
+else ok('palette matches the design tokens (team accents, blocked yellow, navy/terra)')
 
 // --------------------------------------------------------------- final verdict
 
