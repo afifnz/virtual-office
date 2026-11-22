@@ -400,8 +400,18 @@ AV_W_RATIO = 0.60      # sprite width / height
 
 
 def avatar(look: dict, height: float, status: str = "working",
-           blocked_color: str = "#FFC93B") -> Image.Image:
+           blocked_color: str = "#FFC93B", pose: str = "stand",
+           layer: str = "all") -> Image.Image:
     """A clean-vector chibi, anti-aliased, feet flush with the bottom centre.
+
+    ``pose`` — "stand" (the look sheet) or "seated": knees out, shins down, feet
+    flat, arms bent forward with the elbows at desk height. A seated figure is
+    what the section needs: a standing figure behind a desk reads as a mannequin
+    with stiff legs, which is exactly what the front desk flagged.
+    ``layer`` — "all"/"body" draw the figure, "hands" draws ONLY the hands at the
+    typing position, on a transparent canvas of the same size. The scene draws
+    body → desk → keyboard → hands, so the hands land ON the keys instead of
+    floating in front of the desk slab.
 
     Drawn on a surface **4x the requested height** and reduced exactly once with
     LANCZOS, so every edge keeps real sub-pixel coverage — the same result a
@@ -416,6 +426,8 @@ def avatar(look: dict, height: float, status: str = "working",
     U = hgt * s / AV_UNITS                       # one design unit in device px
     W2 = int(round(hgt * AV_W_RATIO * s)) + 2 * s
     H2 = int(round(hgt * s))
+    if layer == "hands":                         # overlay pass, see _typing_hands
+        return _typing_hands(look, height, s, U, W2, H2)
     img = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
     stats = AV_STATS.setdefault(look.get("name", "?"),
                                 {"primitives": 0, "gradients": 0, "calls": 0})
@@ -443,13 +455,14 @@ def avatar(look: dict, height: float, status: str = "working",
         w = max(1, round(ow * U))
         if prim == "e":
             g = [round(v) for v in geo]
-            ld.ellipse(g, fill=255)
+            ld.ellipse(g, fill=(255, 255, 255, 255))
         elif prim == "r":
             g = [round(v) for v in geo]
-            ld.rounded_rectangle(g, radius=max(1, round(r if r is not None else U)), fill=255)
+            ld.rounded_rectangle(g, radius=max(1, round(r if r is not None else U)),
+                                 fill=(255, 255, 255, 255))
         else:
             g = [(round(x), round(y)) for x, y in geo]
-            ld.polygon(g, fill=255)
+            ld.polygon(g, fill=(255, 255, 255, 255))
         _av_grad(lay, lay.split()[3], shade(base, kh), shade(base, kl), horiz, stats)
         if ok is not None:
             col = shade(base, ok)
@@ -466,13 +479,32 @@ def avatar(look: dict, height: float, status: str = "working",
     hips = 33.4 - (tall - 1.0) * 10
 
     # ---- shoes and legs (pants: two tones + outline)
-    for side in (-1, 1):
-        lx = X(side * leg_gap) - leg_w * U / 2
-        part("r", (lx, Y(hips - 1.0), lx + leg_w * U, Y(41.4)), pants, ok=0.46, r=2.0 * U)
-        part("r", (lx - 1.2 * U, Y(40.5), lx + (leg_w + 1.4) * U, Y(43.4)),
-             shade(pants, 0.55), ok=0.28, r=1.8 * U)
-        part("r", (lx - 0.6 * U, Y(42.9), lx + (leg_w + 0.8) * U, Y(43.7)),
-             "#E7EAEE", ok=0.66, r=0.8 * U)
+    if pose == "seated":
+        # Seated: the thighs are foreshortened (they point at the viewer), so the
+        # leg reads as KNEE + SHIN + flat foot. Two straight bars are what made
+        # the last pass look like a mannequin standing behind a counter. The legs
+        # are also LIGHTER than the outline and separated by a real gap: the team
+        # wears near-black trousers, and a solid dark mass reads as a chair.
+        for side in (-1, 1):
+            kx = X(side * 6.3)
+            part("r", (kx - 2.9 * U, Y(31.6), kx + 2.9 * U, Y(36.4)), pants,
+                 ok=0.60, kh=1.62, kl=1.06, r=2.3 * U)          # knee / thigh end
+            part("r", (kx - 2.1 * U, Y(35.2), kx + 2.1 * U, Y(42.0)), pants,
+                 ok=0.60, kh=1.34, kl=0.96, r=1.6 * U)          # shin
+            part("r", (kx - 1.5 * U, Y(36.0), kx - 0.6 * U, Y(41.4)),
+                 shade(pants, 1.95), ok=None, r=0.5 * U)        # lit front edge
+            part("e", (kx - 2.9 * U, Y(41.2), kx + 3.3 * U, Y(43.7)),
+                 shade(pants, 0.62), ok=0.28)                   # shoe, toe forward
+            part("r", (kx - 3.1 * U, Y(42.9), kx + 3.5 * U, Y(43.9)), "#E7EAEE",
+                 ok=0.66, r=0.7 * U)                            # sole
+    else:
+        for side in (-1, 1):
+            lx = X(side * leg_gap) - leg_w * U / 2
+            part("r", (lx, Y(hips - 1.0), lx + leg_w * U, Y(41.4)), pants, ok=0.46, r=2.0 * U)
+            part("r", (lx - 1.2 * U, Y(40.5), lx + (leg_w + 1.4) * U, Y(43.4)),
+                 shade(pants, 0.55), ok=0.28, r=1.8 * U)
+            part("r", (lx - 0.6 * U, Y(42.9), lx + (leg_w + 0.8) * U, Y(43.7)),
+                 "#E7EAEE", ok=0.66, r=0.8 * U)
 
     # ---- torso: shoulders wide, waist narrow (tapered silhouette, not a box)
     tw = 15.2 * build
@@ -495,18 +527,32 @@ def avatar(look: dict, height: float, status: str = "working",
          shade(shirt, 0.62), ok=None)
     part("r", (X(-tw / 2 + 2.2), Y(ty0 + 5.4), X(tw / 2 - 2.2), Y(ty0 + 7.0)),
          look["accent"], ok=0.72, r=0.7 * U)
+    if pose == "seated":
+        # the lap: drawn OVER the bottom of the torso, so what hangs below the
+        # desk is a lap (pants) and then the knees — never a bare belly
+        part("r", (X(-8.2), Y(30.4), X(8.2), Y(34.0)), pants, ok=0.58, kh=1.45,
+             kl=0.96, r=2.6 * U)
 
     # ---- arms: sleeve, cuff, hand
     for side in (-1, 1):
         ax = X(side * (tw / 2 - 0.2))
-        part("r", (ax - 2.3 * U, Y(ty0 + 1.6), ax + 2.3 * U, Y(ty0 + 9.6)),
-             shade(shirt, 0.92), ok=0.52, r=2.2 * U)
-        part("e", (ax - 1.8 * U, Y(ty0 + 9.4), ax + 1.8 * U, Y(ty0 + 13.0)),
-             skin, ok=0.55, kh=1.06, kl=0.88)       # hand
+        if pose == "seated":
+            # upper arm hangs to the desk, elbow at the desk line, forearm
+            # foreshortened away from the viewer — the hand is drawn in the
+            # overlay pass so it lands on the keyboard
+            part("r", (ax - 2.3 * U, Y(ty0 + 1.6), ax + 2.3 * U, Y(26.6)),
+                 shade(shirt, 0.92), ok=0.52, r=2.2 * U)
+            part("e", (ax - 2.1 * U, Y(25.2), ax + 2.1 * U, Y(27.4)),
+                 shade(shirt, 0.88), ok=0.50)           # elbow / cuff
+        else:
+            part("r", (ax - 2.3 * U, Y(ty0 + 1.6), ax + 2.3 * U, Y(ty0 + 9.6)),
+                 shade(shirt, 0.92), ok=0.52, r=2.2 * U)
+            part("e", (ax - 1.8 * U, Y(ty0 + 9.4), ax + 1.8 * U, Y(ty0 + 13.0)),
+                 skin, ok=0.55, kh=1.06, kl=0.88)       # hand
 
     # ---- neck + head
     part("r", (X(-2.6), Y(16.4), X(2.6), Y(21.6)), skin, ok=0.52, kh=0.94, kl=0.80, r=1.8 * U)
-    hrx, hry, hcy = 7.8, 8.4, 10.0
+    hrx, hry, hcy = 7.8 * (1 + (build - 1.0) * 0.7), 8.4, 10.0
     for side in (-1, 1):                            # ears sit BEHIND the head
         part("e", (X(side * hrx - 1.2), Y(hcy + 0.2), X(side * hrx + 1.2), Y(hcy + 3.4)),
              skin, ok=0.50, kh=1.02, kl=0.84)
@@ -525,7 +571,7 @@ def avatar(look: dict, height: float, status: str = "working",
     # ---- hair: base mass + highlight tone + outline
     style = look.get("style", "crop")
     cap_box = (X(-hrx - 0.4), Y(hcy - hry - 0.6), X(hrx + 0.4), Y(hcy - 2.2))
-    part("e", cap_box, hair, ok=0.5, kh=1.95, kl=0.95)
+    part("e", cap_box, hair, ok=0.5, kh=1.38, kl=0.95)
     # fringe: the hairline itself differs per style, so the eight looks stay
     # distinguishable at 50 px instead of reading as palette swaps
     if style == "side":
@@ -551,12 +597,34 @@ def avatar(look: dict, height: float, status: str = "working",
                   (X(0.0), Y(hcy - 4.0)), (X(hrx - 1.2), Y(hcy - 5.6)),
                   (X(hrx + 0.4), Y(hcy - 3.4)), (X(hrx + 0.4), Y(hcy - 6.6)),
                   (X(-hrx - 0.4), Y(hcy - 6.6))]
-    else:                                                   # crop / short
+    elif style == "short":
+        # short: rounded crown with a small quiff at the front — reads as a
+        # different head shape from crop at 150 px, not just a different tint
+        fringe = [(X(-hrx - 0.4), Y(hcy - 3.2)), (X(-4.2), Y(hcy - 4.6)),
+                  (X(-1.4), Y(hcy - 5.8)), (X(1.6), Y(hcy - 4.4)),
+                  (X(4.0), Y(hcy - 5.0)), (X(hrx + 0.4), Y(hcy - 3.0)),
+                  (X(hrx + 0.4), Y(hcy - 6.6)), (X(-hrx - 0.4), Y(hcy - 6.6))]
+    else:                                                   # crop
         fringe = [(X(-hrx - 0.4), Y(hcy - 3.8)), (X(-3.0), Y(hcy - 4.8)),
                   (X(0.4), Y(hcy - 4.2)), (X(3.4), Y(hcy - 5.0)),
                   (X(hrx + 0.4), Y(hcy - 3.6)), (X(hrx + 0.4), Y(hcy - 6.6)),
                   (X(-hrx - 0.4), Y(hcy - 6.6))]
-    part("p", fringe, hair, ok=0.5, kh=1.6, kl=0.95)
+    part("p", fringe, hair, ok=0.5, kh=1.26, kl=0.95)
+    if style == "crop" and look.get("build", 1.0) >= 1.08:
+        # the team has two crops. The heavier build gets a squared crown and
+        # sideburns, the lighter one keeps the rounded fade — the two B's must
+        # differ in SILHOUETTE, because their shirt hexes are 7 % apart.
+        part("r", (X(-hrx - 1.5), Y(hcy - hry - 1.0), X(hrx + 1.5), Y(hcy - 4.6)),
+             hair, ok=0.5, kh=1.34, kl=0.95, r=1.1 * U)
+        for side in (-1, 1):
+            part("r", (X(side * (hrx + 0.1)) - 0.9 * U, Y(hcy - 1.4),
+                       X(side * (hrx + 0.1)) + 0.9 * U, Y(hcy + 3.6)),
+                 hair, ok=0.5, kh=1.20, kl=0.95, r=0.7 * U)
+    if style == "short" and look.get("build", 1.0) >= 1.02:
+        # ... and two shorts: the stockier one gets a crew-cut crown, the slimmer
+        # one keeps the quiff, so YOGA and WAHYU are not the same head
+        part("r", (X(-hrx - 0.9), Y(hcy - hry - 0.2), X(hrx + 0.9), Y(hcy - 5.2)),
+             hair, ok=0.5, kh=1.32, kl=0.95, r=1.0 * U)
     # a second hair tone as a soft sheen: the gradient on the mass itself, no
     # floating highlight band (that read as a headband at 50 px)
     if style in ("short", "side", "long"):
@@ -572,15 +640,15 @@ def avatar(look: dict, height: float, status: str = "working",
                        Y(hcy + 11.0)), hair, ok=0.5, kh=1.3, kl=0.95, r=1.5 * U)
     if style == "bun":
         part("e", (X(1.2), Y(hcy - hry - 0.4), X(7.6), Y(hcy - hry + 6.0)),
-             hair, ok=0.5, kh=1.7, kl=0.95)
+             hair, ok=0.5, kh=1.38, kl=0.95)
     if style == "curly":
         for k in range(4):
             part("e", (X(-hrx + k * 4.0 - 1.6), Y(hcy - hry - 1.4), X(-hrx + k * 4.0 + 2.6),
-                       Y(hcy - hry + 3.4)), hair, ok=0.5, kh=1.4, kl=0.95)
+                       Y(hcy - hry + 3.4)), hair, ok=0.5, kh=1.30, kl=0.95)
     if style == "messy":
         part("p", [(X(-hrx), Y(hcy - 4.0)), (X(-3.4), Y(hcy - hry - 2.6)),
                    (X(-0.6), Y(hcy - 5.0)), (X(2.4), Y(hcy - hry - 3.2)),
-                   (X(hrx), Y(hcy - 3.6))], hair, ok=0.5, kh=1.4, kl=0.95)
+                   (X(hrx), Y(hcy - 3.6))], hair, ok=0.5, kh=1.30, kl=0.95)
     if look.get("peci"):
         part("r", (X(-hrx - 0.8), Y(hcy - hry - 1.0), X(hrx + 0.8), Y(hcy - 2.4)),
              "#20202A", ok=0.5, kh=1.35, kl=0.9, r=1.2 * U)
@@ -640,6 +708,58 @@ def avatar(look: dict, height: float, status: str = "working",
                    (X(chx), Y(chy + 2.8)), (X(chx - 2.8), Y(chy))],
                   fill=hex_rgb(blocked_color), outline="#1A1206")
 
+    return img.resize((max(1, W2 // s), max(1, H2 // s)), Image.LANCZOS)
+
+
+def _typing_hands(look: dict, height: float, s: int, U: float, W2: int, H2: int) -> Image.Image:
+    """Hands-only overlay for the seated pose: two hands resting on the keys, with
+    a short sleeve cuff below each that ends at the desk line (where the forearm
+    disappears behind the slab). The left hand sits a touch lower than the right,
+    so the pose reads as *typing* instead of as two identical mittens."""
+    img = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
+    stats = AV_STATS.setdefault(look.get("name", "?"),
+                                {"primitives": 0, "gradients": 0, "calls": 0})
+    cx = W2 / 2.0
+    skin, shirt = look["skin"], look["shirt"]
+
+    def X(v):
+        return cx + v * U
+
+    def Y(v):
+        return v * U
+
+    def part(base, box, ok, prim="r", r=1.2, kh=1.06, kl=0.88):
+        lay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        ld = _CountDraw(ImageDraw.Draw(lay), stats)
+        g = [round(v) for v in box]
+        rad = max(1, round(r * U))
+        if prim == "e":
+            ld.ellipse(g, fill=(255, 255, 255, 255))
+        else:
+            ld.rounded_rectangle(g, radius=rad, fill=(255, 255, 255, 255))
+        _av_grad(lay, lay.split()[3], shade(base, kh), shade(base, kl), False, stats)
+        col = shade(base, ok)
+        if prim == "e":
+            ld.ellipse(g, outline=col, width=max(1, round(0.9 * U)))
+        else:
+            ld.rounded_rectangle(g, radius=rad, outline=col, width=max(1, round(0.9 * U)))
+        comp(img, lay)
+
+    for side, hy in ((-1, 23.4), (1, 23.0)):        # hy = top of the hand
+        hx = X(side * 3.4)
+        part(shirt, (hx - 1.8 * U, Y(hy + 2.3), hx + 1.8 * U, Y(hy + 3.7)), 0.50, r=0.7)
+        part(skin, (hx - 2.2 * U, Y(hy), hx + 2.2 * U, Y(hy + 2.6)), 0.55, r=1.5)
+        t0, t1 = hx - side * 2.1 * U, hx - side * 0.3 * U
+        part(skin, (min(t0, t1), Y(hy + 0.4), max(t0, t1), Y(hy + 1.9)),
+             0.50, prim="e")                          # thumb, toward the space bar
+        for k in (-0.75, 0.75):                       # two finger notches
+            part(shade(skin, 0.70), (hx + k * U - 0.22 * U, Y(hy + 0.15),
+                                     hx + k * U + 0.22 * U, Y(hy + 1.9)),
+                 0.62, r=0.2)
+        # the shadow the hand throws onto the keys: this is what says "on the
+        # keyboard" instead of "two blobs hovering near it"
+        part(shade(skin, 0.42), (hx - 2.3 * U, Y(hy + 2.1), hx + 2.3 * U, Y(hy + 2.75)),
+             0.60, r=0.3)
     return img.resize((max(1, W2 // s), max(1, H2 // s)), Image.LANCZOS)
 
 
@@ -1514,8 +1634,8 @@ SIDE_MARGIN = 20
 SIDE_GRID_SHIFT = 30          # grid sits 30 px left of centre: the rack needs room
 SIDE_FRONT_FLOOR = SIDE_SLAB_TOP - 8                     # 640: front feet line
 SIDE_BACK_FLOOR = SIDE_FRONT_FLOOR - LANE_DY             # 596: back feet line
-SIDE_DESK_TOP = round(34 * SIDE_K)                       # 94: tabletop above floor
-SIDE_DESK_THICK = round(6 * SIDE_K)                      # 17: tabletop thickness
+SIDE_DESK_TOP = round(21 * SIDE_K)                       # 58: tabletop above floor
+SIDE_DESK_THICK = round(2.2 * SIDE_K)                    # 6: tabletop slab thickness
 
 
 def side_rows(fid: str) -> dict[str, int]:
@@ -2140,6 +2260,201 @@ def _prop_anchors(layout: dict) -> dict:
             "plant": max(22.0, first["cx"] - 157)}
 
 
+def _soft_shadow(img: Image.Image, box, alpha: int, blur: float, s: int) -> None:
+    """One blurred black shape, composited. Every prop that touches the floor or
+    a desk top gets one: a contact shadow is what stops a prop from looking
+    pasted on, and its absence is the first thing the eye catches at 2x.
+    ``box`` is in device px (already scaled); only the blur is scaled here."""
+    sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(sh).ellipse(list(box), fill=(0, 0, 0, alpha))
+    comp(img, sh.filter(ImageFilter.GaussianBlur(max(0.6, blur * s))))
+
+
+def _desk_side(img: Image.Image, dr, cx: float, fy: float, k: float, s: int,
+               d: dict, row: int) -> float:
+    """A desk in profile, built as an object instead of a bar:
+
+    * tabletop slab with a lit TOP LIP and a FRONT EDGE one tone darker — that
+      pair of tones is what gives it thickness at 150 px;
+    * a modesty apron under the slab (hides the lap: without it the belly shows
+      through the knee hole);
+    * two side panels standing on the floor, with a lit inner edge;
+    * a soft drop shadow on the floor, cast to the viewer's right.
+
+    Returns the tabletop y (device px) for the keyboard/monitor to sit on.
+    """
+    u = SIDE_K * k * s                                   # device px per design unit
+    dw, th = 37.5 * u, SIDE_DESK_THICK * k * s
+    ty = fy - SIDE_DESK_TOP * k * s
+    light = d["mode"] == "light"
+    wood = shade(d["desk"], 0.90 if row == 0 else 1.0)
+    # the desk is pure white in the light theme: a lighter lip would vanish, so
+    # the TOP SURFACE is a cool tint of `muted` and the FRONT EDGE one tone down
+    lip = over(d["desk_top"], 0.16, d["muted"])
+    face = shade(wood, 0.84)
+    apron = shade(wood, 0.76)
+    panel = shade(wood, 0.70)
+    panel_hi = shade(wood, 0.92)
+
+    _soft_shadow(img, (cx - dw * 0.46, fy - 2.6 * u, cx + dw * 0.52, fy + 4.2 * u),
+                 44 if light else 58, 3.0, s)
+    # side panels: 5 px wide, on the floor, lit edge on the inside + a crisp
+    # outline (a pale leg on a pale floor needs an edge, not more fill)
+    for side in (-1, 1):
+        px_ = cx + side * (dw / 2 - 6.0 * u)
+        dr.rectangle([px_ - 2.0 * u, ty + th, px_ + 2.0 * u, fy], fill=hex_rgb(panel),
+                     outline=shade(panel, 0.62), width=max(1, round(0.3 * u)))
+        hi0, hi1 = px_ - side * 2.0 * u, px_ - side * 1.0 * u
+        dr.rectangle([min(hi0, hi1), ty + th, max(hi0, hi1), fy], fill=hex_rgb(panel_hi))
+        dr.rectangle([px_ - 2.0 * u, fy - 1.4 * u, px_ + 2.0 * u, fy],
+                     fill=hex_rgb(shade(panel, 0.66)))      # foot pad
+        _soft_shadow(img, (px_ - 4.0 * u, fy - 1.6 * u, px_ + 4.0 * u, fy + 1.4 * u),
+                     96 if light else 110, 1.0, s)          # AO at the foot
+    # apron: one tone darker than the slab, inset from both ends
+    dr.rectangle([cx - dw / 2 + 5.0 * u, ty + th, cx + dw / 2 - 5.0 * u, ty + th + 9 * k * s],
+                 fill=hex_rgb(apron), outline=shade(apron, 0.72),
+                 width=max(1, round(0.3 * u)))
+    dr.rectangle([cx - dw / 2 + 5.0 * u, ty + th, cx + dw / 2 - 5.0 * u, ty + th + 1.4 * k * s],
+                 fill=hex_rgb(shade(apron, 0.62)))          # AO where apron meets slab
+    # slab: body, lit top lip, darker front edge
+    rr(dr, (cx - dw / 2, ty, cx + dw / 2, ty + th), 1.6 * u, fill=hex_rgb(wood),
+       outline=shade(wood, 0.78), width=max(1, round(0.35 * u)))
+    dr.rectangle([cx - dw / 2 + 1.0 * u, ty, cx + dw / 2 - 1.0 * u, ty + 2.1 * k * s],
+                 fill=hex_rgb(lip))                       # top surface, seen edge-on
+    dr.rectangle([cx - dw / 2 + 1.0 * u, ty + th - 2.2 * k * s, cx + dw / 2 - 1.0 * u, ty + th],
+                 fill=hex_rgb(face))                      # front edge, one tone down
+    dr.line([(cx - dw / 2 + 1.0 * u, ty + 2.1 * k * s), (cx + dw / 2 - 1.0 * u, ty + 2.1 * k * s)],
+            fill=hex_rgb(shade(face, 0.94)))              # shadow under the lip
+    return ty
+
+
+def _keyboard_mouse(dr, img: Image.Image, cx: float, ty: float, k: float, s: int,
+                    d: dict) -> None:
+    """Keyboard + mouse on the tabletop, seen edge-on with a hint of top face:
+    a dark front face, a lighter top with two rows of key ticks, and a mouse to
+    the agent's right. Both get a contact shadow on the desk."""
+    u = SIDE_K * k * s
+    light = d["mode"] == "light"
+    kw, kh = 13.7 * u, 2.4 * u                        # 38 x 7 px at row scale 1
+    kx = cx
+    _soft_shadow(img, (kx - kw / 2 - 1, ty - kh - 1.4 * u, kx + kw / 2 + 1, ty + 0.5 * u),
+                 78 if light else 88, 1.2, s)
+    rr(dr, (kx - kw / 2, ty - kh, kx + kw / 2, ty), 0.7 * u,
+       fill=hex_rgb("#232A34" if light else "#1B2027"))
+    dr.rectangle([kx - kw / 2 + 1.0 * u, ty - kh, kx + kw / 2 - 1.0 * u, ty - kh * 0.52],
+                 fill=hex_rgb("#6B7684" if light else "#5D6875"))   # top face
+    for r in range(2):                                            # key rows
+        for i in range(11):
+            tick = kx - kw / 2 + 2.0 * u + i * (kw - 4.0 * u) / 10.5
+            dr.rectangle([tick, ty - kh + (0.55 + r * 0.62) * u,
+                          tick + 0.55 * u, ty - kh + (1.02 + r * 0.62) * u],
+                         fill=hex_rgb("#C3CBD5" if light else "#A6B0BC"))
+    mx = cx + 8.6 * u                                             # mouse, right hand
+    _soft_shadow(img, (mx - 2.2 * u, ty - 1.5 * u, mx + 2.2 * u, ty + 0.3 * u),
+                 48 if light else 66, 0.9, s)
+    rr(dr, (mx - 2.1 * u, ty - 3.3 * u, mx + 2.1 * u, ty), 1.5 * u,
+       fill=hex_rgb("#3D4551" if light else "#2C333C"), outline="#1B2028",
+       width=max(1, round(0.3 * u)))
+    dr.line([(mx, ty - 3.1 * u), (mx, ty - 1.9 * u)],
+            fill=hex_rgb("#B9C2CC" if light else "#7A8592"), width=max(1, round(0.4 * u)))
+
+
+def _monitor_side(img: Image.Image, dr, cx: float, ty: float, k: float, s: int,
+                  d: dict, col: str) -> None:
+    """Monitor: foot plate → neck → panel turned toward the agent.
+
+    The panel is a parallelogram skewed toward the agent (the side it faces) and
+    carries a 2 px side face on the far edge, so it reads as a real object with
+    depth that is turned toward the figure — not a rectangle hovering at head
+    height. Foot, neck and panel each touch what is below them; the foot casts a
+    contact shadow on the desk.
+    """
+    u = SIDE_K * k * s
+    light = d["mode"] == "light"
+    mw, mh = 13.6 * u, 8.2 * u                        # 38 x 23 px at row scale 1
+    metal = over(d["desk_top"], 0.30, d["muted"])
+    metal_dk = shade(metal, 0.74)
+    bezel = shade(d["desk"], 0.46)
+    neck_h = 3.0 * u
+    py1 = ty - neck_h
+    py0 = py1 - mh
+    skew = 0.9 * u                                    # top edge toward the agent
+
+    _soft_shadow(img, (cx - 5.6 * u, ty - 1.7 * u, cx + 5.6 * u, ty + 0.5 * u),
+                 86 if light else 96, 1.1, s)
+    rr(dr, (cx - 5.2 * u, ty - 1.7 * u, cx + 5.2 * u, ty), 0.6 * u, fill=hex_rgb(metal_dk))
+    dr.rectangle([cx - 5.2 * u, ty - 1.7 * u, cx + 5.2 * u, ty - 0.8 * u],
+                 fill=hex_rgb(metal))                 # lit foot edge
+    dr.rectangle([cx - 1.1 * u, py1, cx + 1.1 * u, ty - 1.0 * u], fill=hex_rgb(metal_dk))
+    dr.rectangle([cx - 1.1 * u, py1, cx - 0.4 * u, ty - 1.0 * u], fill=hex_rgb(metal))
+    # panel: far side face first (it is behind), then the bezel quad, then screen
+    dr.polygon([(cx + mw / 2, py0), (cx + mw / 2 + 1.5 * u, py0 + 0.7 * u),
+                (cx + mw / 2 + 1.5 * u, py1 + 0.7 * u), (cx + mw / 2, py1)],
+               fill=hex_rgb(shade(bezel, 0.72)))
+    dr.polygon([(cx - mw / 2, py0 + skew), (cx + mw / 2, py0),
+                (cx + mw / 2, py1), (cx - mw / 2, py1 - skew * 0.4)],
+               fill=hex_rgb(bezel))
+    dr.polygon([(cx - mw / 2 + 1.2 * u, py0 + skew + 1.2 * u), (cx + mw / 2 - 1.2 * u, py0 + 1.2 * u),
+                (cx + mw / 2 - 1.2 * u, py1 - 1.4 * u), (cx - mw / 2 + 1.2 * u, py1 - 1.4 * u - skew * 0.4)],
+               fill=hex_rgb(over(col, 0.30 if light else 0.38, "#0B1119")))
+    dr.line([(cx - mw / 2 + 1.2 * u, py0 + skew + 1.2 * u), (cx + mw / 2 - 1.2 * u, py0 + 1.2 * u)],
+            fill=col + "88")                          # glass sheen along the top
+    for i, (a, w) in enumerate((("FF", 0.7), ("CC", 0.55), ("99", 0.45))):
+        dr.line([(cx - mw / 2 + 2.4 * u, py0 + skew + (1.9 + i * 2.1) * u),
+                 (cx - mw / 2 + 2.4 * u + (8.4 - i * 2.0) * u, py0 + (1.9 + i * 2.1) * u)],
+                fill=col + a, width=max(1, round(w * u)))   # "code" lines, status colour
+    dr.ellipse([cx + mw / 2 - 2.6 * u, py1 - 2.2 * u, cx + mw / 2 - 1.4 * u, py1 - 1.0 * u],
+               fill=hex_rgb(col))                     # power LED
+
+
+def _chair_side(img: Image.Image, dr, cx: float, fy: float, k: float, s: int,
+                d: dict, row: int) -> None:
+    """A task chair in profile: backrest (drawn BEHIND the agent, so its two
+    wings show beside the neck), seat cushion under the lap, gas cylinder and a
+    five-star base with casters. Without the base the chair merges into the body
+    and the agent looks like it is standing in a box."""
+    u = SIDE_K * k * s
+    light = d["mode"] == "light"
+    # the chair is a COOL GREY (from muted), not a shade of the desk: the team
+    # wears near-black trousers, so a grey-blue shell is the only tone that
+    # separates the chair from the legs and from the white desk at 150 px
+    back = over(d["desk_top"], 0.34, d["muted"])
+    back_in = over(d["desk_top"], 0.22, d["muted"])
+    seat = over(d["desk_top"], 0.40, d["muted"])
+    metal = shade(over(d["desk_top"], 0.55, d["muted"]), 0.86)
+    metal_dk = shade(metal, 0.66)
+
+    _soft_shadow(img, (cx - 10.6 * u, fy - 2.2 * u, cx + 10.6 * u, fy + 4.0 * u),
+                 72 if light else 86, 2.0, s)
+    # backrest 40..84 px above the floor: its top sits just behind the neck, and
+    # it is 4 px wider than the shoulders so two wings stay visible beside them
+    rr(dr, (cx - 13.4 * u, fy - 30.2 * u, cx + 13.4 * u, fy - 14.4 * u), 3.8 * u,
+       fill=hex_rgb(back), outline=shade(back, 0.66), width=max(1, round(0.6 * u)))
+    dr.line([(cx - 12.6 * u, fy - 29.4 * u), (cx + 12.6 * u, fy - 29.4 * u)],
+            fill=hex_rgb(shade(back, 1.34)))            # rim light on the shell
+    rr(dr, (cx - 11.2 * u, fy - 28.8 * u, cx + 11.2 * u, fy - 15.4 * u), 2.8 * u,
+       fill=hex_rgb(back_in))
+    dr.line([(cx - 11.2 * u, fy - 28.8 * u), (cx + 11.2 * u, fy - 28.8 * u)],
+            fill=hex_rgb(shade(back_in, 1.22)))
+    # seat cushion: 31..36 px above the floor, right under the lap
+    rr(dr, (cx - 8.0 * u, fy - 13.0 * u, cx + 8.0 * u, fy - 11.2 * u), 1.4 * u,
+       fill=hex_rgb(seat))
+    dr.line([(cx - 7.8 * u, fy - 13.0 * u), (cx + 7.8 * u, fy - 13.0 * u)],
+            fill=hex_rgb(shade(seat, 1.24)))
+    # five-star base: 4 legs visible in elevation + casters, hub at 3,4 u
+    hub = (cx, fy - 3.4 * u)
+    for dx, drop in ((-0.96, 0.0), (-0.58, 0.9), (0.58, 0.9), (0.96, 0.0)):
+        ex, ey = cx + dx * 9.4 * u, fy - 0.9 * u - drop * u
+        dr.line([hub, (ex, ey)], fill=hex_rgb(metal_dk), width=max(1, round(1.1 * u)))
+        dr.ellipse([ex - 1.5 * u, ey - 1.2 * u, ex + 1.5 * u, ey + 1.2 * u],
+                   fill=hex_rgb(metal), outline=shade(metal_dk, 0.8),
+                   width=max(1, round(0.3 * u)))              # caster
+    dr.rectangle([cx - 0.7 * u, fy - 11.2 * u, cx + 0.7 * u, fy - 3.2 * u],
+                 fill=hex_rgb(metal_dk))                     # gas cylinder
+    dr.rectangle([cx - 0.7 * u, fy - 11.2 * u, cx - 0.2 * u, fy - 3.2 * u],
+                 fill=hex_rgb(metal))
+
+
 def draw_side_scene(img: Image.Image, d: dict, fid: str = "L3", s: int = 1) -> dict:
     """The side elevation into `img` — a standalone (1000 x 688)*s scene canvas.
     Returns the 1x layout (used for the plates, which are drawn at 1x).
@@ -2305,59 +2620,38 @@ def draw_side_scene(img: Image.Image, d: dict, fid: str = "L3", s: int = 1) -> d
                 dr.ellipse([(rx + 8 + j * 7) * s, sy + 6 * s, (rx + 12 + j * 7) * s,
                             sy + 10 * s], fill=hex_rgb(led if j == 0 else d["muted"]))
         layout["info"].append((rx - rw / 2, SIDE_FRONT_FLOOR - rh, rx + rw / 2, SIDE_FRONT_FLOOR))
+        _soft_shadow(img, ((anc["plant"] - 13) * s, (SIDE_FRONT_FLOOR - 3) * s,
+                           (anc["plant"] + 13) * s, (SIDE_FRONT_FLOOR + 5) * s),
+                     58 if light else 72, 2.4, s)          # pot contact shadow
         _plant_side(dr, anc["plant"] * s, SIDE_FRONT_FLOOR * s, s, k=1.35)
         layout["info"].append((anc["plant"] - 14, SIDE_FRONT_FLOOR - 62,
                                anc["plant"] + 14, SIDE_FRONT_FLOOR))
 
-    # 9 · furniture per row, back to front, then by x: shadow, chair back, agent
-    #     (feet on its row's floor line), then the desk over the lap
+    # 9 · furniture per row, back to front, then by x. Order per agent:
+    #     contact shadow → chair (behind) → agent body → desk → keyboard+mouse →
+    #     agent's hands → monitor. The desk is opaque in front of the lap and the
+    #     hands sit ON the keys, so the figure reads as seated and typing instead
+    #     of standing behind a bar with its arms hanging.
     for a in layout["agents"]:
         cx, fy, k = a["cx"] * s, a["floor_y"] * s, a["scale"]
-        K = SIDE_K * k
-        sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        ImageDraw.Draw(sh).ellipse([cx - 40 * K * s, fy - 4 * s, cx + 40 * K * s, fy + 5 * s],
-                                   fill=(0, 0, 0, 45 if light else 60))
-        comp(img, sh.filter(ImageFilter.GaussianBlur(2 * s)))
-        rr(dr, (cx - 12 * K * s, fy - 46 * K * s, cx + 12 * K * s, fy - 16 * K * s),
-           4 * K * s, fill=hex_rgb(shade(d["desk"], 0.60 if a["row"] else 0.50)))  # chair back
-        spr = avatar(LOOKS[a["id"]], a["avatar_h"] * s, a["status"], d["status"]["blocked"])
-        comp(img, spr, (int(cx - spr.width / 2), int(fy - spr.height)))
-        dw, ty = 46 * K * s, fy - SIDE_DESK_TOP * k * s           # desk in profile
-        # the back row's desk sits one step further away: same shape, one shade
-        # down, so the two rows read as depth instead of one continuous bar
-        desk_col = shade(d["desk"], 0.90 if a["row"] == 0 else 1.0)
-        rr(dr, (cx - dw / 2, ty, cx + dw / 2, ty + SIDE_DESK_THICK * k * s), 2 * K * s,
-           fill=hex_rgb(desk_col))
-        dr.line([(cx - dw / 2 + 2 * s, ty), (cx + dw / 2 - 2 * s, ty)],
-                fill=hex_rgb(shade(d["desk_top"], 1.25)), width=max(1, s))
-        leg_col = over(d["desk_top"], 0.45, d["muted"])   # white legs on a pale
-        for side in (-1, 1):                              # floor are invisible
-            lx = cx + side * (dw / 2 - 6 * K * s)
-            dr.rectangle([lx - 1.5 * K * s, ty + SIDE_DESK_THICK * k * s,
-                          lx + 1.5 * K * s, fy], fill=hex_rgb(leg_col))
-            dr.rectangle([lx - 1.5 * K * s, ty + SIDE_DESK_THICK * k * s,
-                          lx - 0.5 * K * s, fy], fill=hex_rgb(shade(leg_col, 0.82)))
-        col = d["status"][a["status"]]                            # screen = status
-        # the screen is sized from the FIGURE, not from the desk: 0,24 × 0,19 of
-        # the avatar height, standing on the desk to the figure's right. Sized
-        # from the desk it grew into the face.
+        u = SIDE_K * k * s
         av = a["avatar_h"]
-        mw, mh = 0.28 * av * s, 0.20 * av * s
-        mx = cx + 0.12 * av * s
-        gap = 0.05 * av * s
-        my = ty - gap - mh
-        metal = over(d["desk_top"], 0.30, d["muted"])            # a stand you can
-        dr.rectangle([mx + mw / 2 - 4 * s, ty - gap, mx + mw / 2 + 4 * s, ty],
-                     fill=hex_rgb(metal))                         # actually see
-        dr.rectangle([mx + mw / 2 - 9 * s, ty - 3 * s, mx + mw / 2 + 9 * s, ty],
-                     fill=hex_rgb(shade(metal, 0.84)))            # the foot
-        rr(dr, (mx, my, mx + mw, my + mh), 2 * K * s, fill=over(col, 0.16, "#0A0F18"),
-           outline=shade(d["desk"], 0.55), width=max(1, s))
-        dr.line([(mx + 3 * s, my + mh * 0.26), (mx + mw - 3 * s, my + mh * 0.26)],
-                fill=col + "CC", width=max(1, s))
-        dr.line([(mx + 3 * s, my + mh * 0.46), (mx + mw * 0.62, my + mh * 0.46)],
-                fill=col + "77", width=max(1, s))
-        layout["info"].append((cx - dw / 2 / s, ty / s, cx + dw / 2 / s, a["floor_y"]))
+        _soft_shadow(img, (cx - 12.4 * u, fy - 2.2 * u, cx + 12.4 * u, fy + 4.0 * u),
+                     64 if light else 78, 2.2, s)         # feet / seat contact
+        _chair_side(img, dr, cx, fy, k, s, d, a["row"])
+        spr = avatar(LOOKS[a["id"]], av * s, a["status"], d["status"]["blocked"],
+                     pose="seated")
+        comp(img, spr, (int(cx - spr.width / 2), int(fy - spr.height)))
+        ty = _desk_side(img, dr, cx, fy, k, s, d, a["row"])
+        _keyboard_mouse(dr, img, cx, ty, k, s, d)
+        hands = avatar(LOOKS[a["id"]], av * s, a["status"], d["status"]["blocked"],
+                       pose="seated", layer="hands")
+        comp(img, hands, (int(cx - hands.width / 2), int(fy - hands.height)))
+        # the monitor stands on the desk at the agent's right, turned toward him;
+        # 38 px wide so it clears the torso (52 px) instead of clipping into it
+        _monitor_side(img, dr, cx + 16.4 * u, ty, k, s, d, d["status"][a["status"]])
+        layout["info"].append((cx / s - 37.5 * u / s, ty / s, cx / s + 37.5 * u / s,
+                               a["floor_y"]))
         layout["info"].append((a["cx"] - SIDE_AV_BOX_HW, a["head_top"],
                                a["cx"] + SIDE_AV_BOX_HW, a["floor_y"]))
     return layout
@@ -2447,6 +2741,172 @@ def render_side_mobile(d: dict, path: Path, floor: str = "L3") -> None:
                 fill=d["accent_ink"] if active else d["muted"])
     img.save(path)
     print("wrote", path, img.size)
+
+
+def desk_detail_check(page: Image.Image, layout: dict, out: Path) -> dict:
+    """Evidence sheet for the front desk: two adjacent front-row desks cut out of
+    the FINAL mockup at 2x, numbered, plus five 4x insets so each claim (stand,
+    keys+mouse, hands on keys, desk edge/leg, chair base) can be verified without
+    squinting. Nothing is redrawn: every pixel is the mockup's own."""
+    front = sorted((a for a in layout["agents"] if a["row"] == 1), key=lambda a: a["cx"])
+    a1, a2 = front[len(front) // 2 - 1], front[len(front) // 2]
+    u = SIDE_K
+    ty1 = a1["floor_y"] - SIDE_DESK_TOP
+    x0 = int(a1["cx"] - 37.5 * u - 14)
+    x1 = int(a2["cx"] + 37.5 * u + 14)
+    y0 = int(min(a["head_top"] for a in (a1, a2)) - 30)
+    y1 = int(a1["floor_y"] + 16)
+    crop = page.crop((CANVAS[0] + x0, CANVAS[1] + y0,
+                      CANVAS[0] + x1, CANVAS[1] + y1)).convert("RGB")
+    z = 2
+    big = crop.resize((crop.width * z, crop.height * z), Image.LANCZOS)
+
+    def at(dx_units: float, dy_px: float):
+        """A callout dot in the crop's own coordinates (2x)."""
+        return (int((a1["cx"] + dx_units * u - x0) * z), int((ty1 + dy_px - y0) * z))
+
+    marks = [
+        (at(16.4, -3.0 - 4.1 * u), "1", "monitor: foot → neck → panel, "
+                                          "berputar ke agen, bayangan di meja"),
+        (at(6.0, -1.0), "2", f"keyboard {round(13.7 * u)}×{round(2.4 * u)} px + mouse, "
+                             "di atas meja"),
+        (at(-3.4, -4.4), "3", "tangan agen di atas tuts (overlay setelah keyboard)"),
+        (at(-30.0, 1.0), "4", f"meja: slab {SIDE_DESK_THICK} px + bibir atas + "
+                              "tepi depan 1 tone lebih gelap + apron"),
+        (at(9.0, -1.0), "5", "kursi: sandaran, dudukan, kolom gas, kaki bintang 5 + caster"),
+        (at(-22.0, SIDE_DESK_TOP + 2.4), "6", "bayangan kontak di lantai (meja, kursi, kaki)"),
+    ]
+    # 4x insets: (label, centre in scene px, region size)
+    insets = [
+        ("monitor + stand", (a1["cx"] + 16.4 * u, ty1 - 11.0), (52, 34)),
+        ("keyboard + mouse", (a1["cx"] + 3.0 * u, ty1 - 3.0), (52, 29)),
+        ("tangan di tuts", (a1["cx"], ty1 - 6.0), (52, 29)),
+        ("tepi meja + kaki", (a1["cx"] - 12.75 * u, ty1 + 17), (52, 29)),
+        ("kursi + kaki bintang", (a1["cx"] + 4.0 * u, a1["floor_y"] - 12), (52, 29)),
+    ]
+    iw, ih = 200, 112
+    legend_w = 372
+    fig = Image.new("RGB", (24 + big.width + 20 + legend_w + 24,
+                            92 + big.height + 26 + ih + 52),
+                    hex_rgb(DAY["page"]))
+    fd = ImageDraw.Draw(fig, "RGBA")
+    fd.text((24, 20), "DESK DETAIL CHECK · dua meja, zoom 2×", font=font(16, bold=True),
+            fill=hex_rgb(DAY["ink"]))
+    fd.text((24, 46), f"crop {crop.width}×{crop.height} px dari l3-side-day.png "
+                      f"({a1['name']} + {a2['name']}) — piksel mockup final, bukan render ulang",
+            font=font(10), fill=hex_rgb(DAY["muted"]))
+    fig.paste(big, (24, 92))
+    fd.rounded_rectangle([24, 92, 24 + big.width, 92 + big.height], radius=8,
+                         outline=DAY["border"] + "88", width=1)
+    for (mx, my), num, _label in marks:
+        cx_, cy_ = 24 + mx, 92 + my
+        fd.ellipse([cx_ - 10, cy_ - 10, cx_ + 10, cy_ + 10], fill="#B4553FEE",
+                   outline="#FFFFFFEE", width=2)
+        fd.text((cx_, cy_), num, font=font(10.5, bold=True), fill="#FFFFFF", anchor="mm")
+    lx = 24 + big.width + 20
+    fd.text((lx, 92), "YANG DIPERIKSA", font=font(9.5, bold=True, mono=True),
+            fill=hex_rgb(DAY["muted"]))
+    y = 116
+    for _pt, num, label in marks:
+        fd.ellipse([lx, y + 1, lx + 16, y + 17], fill="#B4553FEE")
+        fd.text((lx + 8, y + 9), num, font=font(9, bold=True), fill="#FFFFFF", anchor="mm")
+        wrapped = _wrap(label, font(9.5), legend_w - 30)
+        for i, ln in enumerate(wrapped):
+            fd.text((lx + 24, y + 2 + i * 13), ln, font=font(9.5), fill=hex_rgb(DAY["ink"]))
+        y += 14 + 13 * len(wrapped)
+    # ---- the 4x inset row
+    iy = 92 + big.height + 26
+    iz = 4
+    for k, (label, (ccx, ccy), (rw, rh)) in enumerate(insets):
+        bx = 24 + k * (iw + 10)
+        box = (int(CANVAS[0] + ccx - rw / 2), int(CANVAS[1] + ccy - rh / 2),
+               int(CANVAS[0] + ccx - rw / 2) + rw, int(CANVAS[1] + ccy - rh / 2) + rh)
+        piece = page.crop(box).convert("RGB").resize((iw, ih), Image.LANCZOS)
+        fig.paste(piece, (bx, iy))
+        fd.rounded_rectangle([bx, iy, bx + iw, iy + ih], radius=6,
+                             outline=DAY["border"] + "AA", width=1)
+        fd.text((bx + 6, iy + ih + 4), f"{k + 1} · {label} (4×)", font=font(9, bold=True),
+                fill=hex_rgb(DAY["muted"]))
+    fd.text((24, fig.height - 22),
+            f"avatar {SIDE_AVATAR_H} px · meja {SIDE_DESK_TOP} px dari garis lantai "
+            f"({SIDE_DESK_TOP / SIDE_AVATAR_H * 100:.0f}% tinggi agen), tebal {SIDE_DESK_THICK} px "
+            f"· kursi dudukan 31–36 px · semua prop punya bayangan kontak",
+            font=font(9.5, bold=True), fill=hex_rgb(DAY["accent"]))
+    fig.save(out)
+    print("wrote", out, fig.size)
+    return {"crop": crop.size, "agents": (a1["name"], a2["name"]),
+            "insets": [i[0] for i in insets]}
+
+
+def _wrap(text: str, f, width: int) -> list[str]:
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        if f.getlength(trial) <= width:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def avatar_distinctness(verbose: bool = True) -> dict:
+    """How many of the 8 L3 agents can be told apart from SILHOUETTE + COLOUR only
+    (no nameplate). The check is a feature vector per agent, not an opinion:
+
+      silhouette : hair class, build bucket, glasses, headphones, stubble
+      colour     : shirt RGB distance
+
+    An agent counts as readable when it is at least 1,0 away from every other
+    agent, where a hair-class change is worth 1,0, a build-bucket change 1,0, each
+    accessory 0,5, and the shirt distance contributes min(1, ΔRGB/90)."""
+    ids = [d[0] for d in DESKS]
+
+    def bucket(b: float) -> str:
+        return "slim" if b < 0.97 else ("mid" if b <= 1.05 else "wide")
+
+    feats = {}
+    for did in ids:
+        lk = LOOKS[did]
+        feats[did] = {"hair": lk.get("style", "crop"),
+                      "build": bucket(lk.get("build", 1.0)),
+                      "acc": tuple(k for k in ("glasses", "headphones", "stubble")
+                                   if lk.get(k)),
+                      "shirt": hex_rgb(lk["shirt"])}
+    rows, readable, worst = [], 0, (9.9, None)
+    for i, a in enumerate(ids):
+        best, pair = 9.9, None
+        for b in ids:
+            if b == a:
+                continue
+            fa, fb = feats[a], feats[b]
+            d = 0.0
+            d += 1.0 if fa["hair"] != fb["hair"] else 0.0
+            d += 1.0 if fa["build"] != fb["build"] else 0.0
+            d += 0.5 * len(set(fa["acc"]) ^ set(fb["acc"]))
+            rgbd = sum((fa["shirt"][k] - fb["shirt"][k]) ** 2 for k in range(3)) ** 0.5
+            d += min(1.0, rgbd / 90.0)
+            if d < best:
+                best, pair = d, b
+        ok = best >= 1.0
+        readable += ok
+        if best < worst[0]:
+            worst = (best, (a, pair))
+        rows.append((LOOKS[a]["name"], best, LOOKS[pair]["name"], ok))
+    if verbose:
+        print("distinctness L3 (silhouette + shirt colour, tanpa label):")
+        for name, best, near, ok in rows:
+            print(f"  {name:<6} jarak terdekat {best:.2f} ke {near:<6} "
+                  f"{'OK' if ok else 'TERLALU DEKAT'}")
+        print(f"  → {readable}/{len(ids)} agen terbaca (target ≥ 6/8) · "
+              f"pasangan terlemah {LOOKS[worst[1][0]]['name']}↔{LOOKS[worst[1][1]]['name']} "
+              f"({worst[0]:.2f})")
+    if readable < 6:
+        raise SystemExit(f"distinctness gate FAILED: only {readable}/8 agents are "
+                         f"readable from silhouette + colour")
+    return {"readable": readable, "total": len(ids), "rows": rows}
 
 
 def side_report(fid: str = "L3") -> None:
@@ -2583,7 +3043,8 @@ def avatar_proof(page: Image.Image, layout: dict, agent_id: str, out: Path) -> d
     box = (int(round(a["cx"] - hw)), int(round(CANVAS[1] + a["head_top"])),
            int(round(a["cx"] + hw)), int(round(CANVAS[1] + a["floor_y"])))
     crop = page.crop(box).convert("RGB")
-    spr = avatar(LOOKS[agent_id], a["avatar_h"], a["status"], DAY["status"]["blocked"])
+    spr = avatar(LOOKS[agent_id], a["avatar_h"], a["status"], DAY["status"]["blocked"],
+                 pose="seated")
     px = spr.load()
     W, H = spr.size
     cols: set = set()
@@ -2767,6 +3228,7 @@ def main(argv: list[str] | None = None) -> None:
             side_wall_gate(lay)
     side_report("L3")
     side_metrics("L3")
+    avatar_distinctness()
 
     if args.side:
         # single section render, e.g. --side --theme night --out x.png [--mobile]
@@ -2804,6 +3266,7 @@ def main(argv: list[str] | None = None) -> None:
     render_mobile(SKY, HERE / "sky-lobby-mobile.png")                # L3 · Gelap
     side_day = render_side(DAY, HERE / "l3-side-day.png")            # L3 · tampak samping
     avatar_proof(side_day, side_layout("L3"), "coder2", HERE / "avatar-zoom-check.png")
+    desk_detail_check(side_day, side_layout("L3"), HERE / "desk-detail-check.png")
     render_side(SKY, HERE / "l3-side-night.png")
     render_side_mobile(DAY, HERE / "l3-side-mobile-day.png")
     render_side_mobile(SKY, HERE / "l3-side-mobile-night.png")

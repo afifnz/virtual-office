@@ -711,7 +711,7 @@ sekadar peringatan, supaya mockup tidak bisa "lulus" dengan label bertumpuk.
 | Tinggi band per lantai | atap **40 px** · soffit 18 px · **kaca 485 px (di dalam ruangan)** · ruangan **548 px** lantai→plafon · floor plane 60 px · slab 40 px = **688 px** (pas kanvas) |
 | Berapa baris yang masih terbaca | **2** (4 depan + 4 belakang), baris belakang +44 px di layar dan skala 0,94; baris ke-3 tidak muat — 12 slot × 200 px melewati kanvas |
 | Apakah 8 agen L3 muat | **ya** — grid **200 px** per baris (4 slot = 600 px), baris belakang digeser **100 px**; overlap bbox avatar **0,0 %**, 0 label bertabrakan, 0 kepala tertutup |
-| Tinggi avatar & meja | avatar **150 px** (baris depan) / **141 px** (belakang ×0,94) · meja 94 px dari garis lantai, lebar 128 px, tebal 17 px · monitor 42×30 px dengan stand 8 px |
+| Tinggi avatar & meja | avatar **150 px** (baris depan) / **141 px** (belakang ×0,94) · meja **58 px** dari garis lantai (0,39 × avatar), slab **6 px**, lebar 128 px, 2 panel samping + apron · monitor **38×23 px** dengan foot 27×3,3 px + leher 6 px · kursi sandaran ±37 px + dudukan + kaki bintang 5 + caster |
 | Konsekuensi kamera | view samping **adalah potongan**, bukan seluruh lantai; UI harus menyebut "potongan L3" dan pan horizontal menggantikan pan 2 arah |
 
 ### 12.2 Proporsi: verdict bos, dijawab dengan angka
@@ -794,6 +794,37 @@ digambar ulang untuk profil samping (meja, kursi, monitor, rak server) — biaya
 2, bukan tambahan di luar rencana. (4) Walkability tidak boleh ikut berubah:
 `layout_check` tetap memakai graf 2D.
 
+### 12.3 Kualitas penggambaran: meja, monitor, kursi, pose, bayangan
+
+Front desk memeriksa dua meja pada zoom 2× dan menemukan enam cacat yang membuat
+mockup terasa "belum jadi". Semuanya diperbaiki **tanpa mengubah komposisi** (rasio
+ruangan 1:3,65, dua baris 4+4, slot 200 px, plafon 548 px tetap sama); yang berubah
+hanya cara objek digambar.
+
+| Cacat | Perbaikan (angka yang dipakai implementasi) |
+|---|---|
+| Monitor mengambang, ada yang tidak menghadap agen | urutan **foot 27×3,3 px → leher 6 px → panel 38×23 px**; panel paralelogram dengan tepi atas digeser 0,9 unit ke arah agen + sisi jauh 1,5 px; foot diberi bayangan kontak di meja (alpha 86/96). Posisi `cx + 16,4 unit` = +46 px, jadi tidak lagi menimpa pipi/torso |
+| Meja seperti balok tanpa kaki/ketebalan | top **58 px** (0,39 × avatar) dengan slab 6 px: bibir atas 2,1 px (tint `over(desk_top,0,16,muted)`) + tepi depan 2,2 px satu tone lebih gelap + apron 9 px + 2 panel samping 5 px + foot pad + bayangan jatuh (alpha 44/58, blur 3) |
+| Agen tidak sedang bekerja | `pose="seated"`: lutut 31,6–36,4 unit, betis 35,2–42,0 dengan garis highlight, sepatu rata, pangkuan menutup pinggang. Tangan = **overlay terpisah** yang digambar setelah keyboard: 2 tangan di ±3,4 unit, kiri 0,4 unit lebih rendah, 2 notch jari + bayangan tangan di tuts. Keyboard 38×7 px + mouse 11×9 px di meja |
+| Avatar nyaris identik | siluet yang berbeda per look: crop **kotak** (BIMA, build 1,12) vs crop **membulat** (BAGAS); side sweep (RAKA); long (LARAS); messy + headphone (DIMAS); short quiff (YOGA) vs short crew-cut (WAHYU, build 1,04); bun (SARI). Lebar kepala ikut `build` (`hrx = 7,8 × (1 + (build−1) × 0,7)`). Gate `avatar_distinctness()`: **8/8 ≥ ambang 1,0**, pasangan terlemah YOGA↔WAHYU 1,18, BIMA↔BAGAS 1,38 |
+| Kursi menyatu dengan badan | sandaran 40–84 px di atas lantai, **±37 px** (4 px lebih lebar dari bahu → dua sayap terlihat di samping leher), dudukan 31–36 px, kolom gas, **kaki bintang 5** (4 terlihat di elevasi, R = 26 px) + caster Ø 8 px; warna abu-abu dingin `over(desk_top,0,34,muted)`, bukan turunan meja |
+| Lantai tanpa kontak | helper `_soft_shadow()` untuk **semua** prop: meja, kaki meja, kursi+caster, kaki agen, monitor, keyboard, mouse, tanaman, rak, rak server (alpha 44–110 sesuai tema) |
+
+**Bug raster yang ikut ketemu.** `ImageDraw` dengan `fill=255` pada kanvas `RGBA`
+menghasilkan `(255,0,0,0)` — alpha 0 — sehingga gradien tidak pernah ter-paste dan
+seluruh avatar hanya tergambar sebagai **outline**: bentuk kecil (kaki, tangan) terbaca
+sebagai loop kosong dan rambut sebagai ikat kepala putih. Perbaikannya satu baris
+(`fill=(255,255,255,255)`), dan efeknya terukur: warna unik di dalam siluet naik dari
+**1.477 → 2.147**, alpha parsial 1.773, tepi siluet 100 % blending.
+
+**Bukti.** `docs/design/mockups/desk-detail-check.png` — crop 437×196 px dari mockup
+final (BAGAS + RAKA) diperbesar 2×, enam penanda bernomor di atas seni, plus lima inset
+4× (monitor+stand, keyboard+mouse, tangan di tuts, tepi meja+kaki, kursi+kaki bintang).
+Karena crop-nya piksel mockup final, lembar ini tidak bisa "membaguskan" render.
+`avatar-zoom-check.png` memuat delapan look L3 pada 2× untuk memeriksa variasi siluet.
+
+![Gambar 8 — Detail dua meja pada zoom 2× dari mockup final (BAGAS + RAKA), dengan enam penanda bernomor dan lima inset 4×: monitor berstand yang berputar ke agen, keyboard + mouse di atas meja, tangan agen di tuts, tepi meja + kaki, kursi dengan kaki bintang, dan bayangan kontak di lantai.](docs/design/mockups/desk-detail-check.png,15.5)
+
 ---
 
 ## 13. Daftar pustaka
@@ -835,6 +866,8 @@ digambar ulang untuk profil samping (meja, kursi, monitor, rak server) — biaya
 | Neon Metro (alternatif) | `docs/design/mockups/neon-metro.png` (1280×800) |
 | Perbandingan scene-tech (top-down) | `docs/design/mockups/scene-tech-compare.png` (1280×800) |
 | Avatar sebelum/sesudah | `docs/design/mockups/avatar-before-after.png` (1280×640) |
+| **Detail meja/monitor/kursi** — 2 meja @2× + 5 inset @4× | `docs/design/mockups/desk-detail-check.png` (1314×674) |
+| Zoom avatar (8 look @2× + crop @4×) | `docs/design/mockups/avatar-zoom-check.png` (1220×808) |
 | Token & kontras dua mode | `docs/design/mockups/tokens.py`, `tokens.json` (78 pasangan) |
 | Renderer mockup | `docs/design/mockups/render_mockups.py` |
 | Modul tema + uji | `frontend/src/lib/theme.ts`, `verify/theme_check.ts` |

@@ -193,8 +193,8 @@ seluruh angka di bawah turun dari situ:
 | Elemen | Ukuran | Catatan |
 |---|---|---|
 | Avatar | **150 px** tinggi (baris depan), **141 px** (belakang, ×0,94) | lihat §7 |
-| Meja (profil) | top **94 px** di atas garis lantai, tebal 17 px, lebar 128 px, 2 kaki 4 px | monitor **42×30 px** di cx+18 dengan stand 8 px — bukan di depan wajah |
-| Kursi | sandaran 67×84 px | di belakang agen; baris belakang satu tone lebih gelap |
+| Meja (profil) | top **58 px** di atas garis lantai (0,39 × avatar), slab **6 px**, lebar 128 px, 2 panel samping 5 px + apron | bibir atas 1 tone terang, tepi depan 1 tone gelap; monitor **38×23 px** di cx+16,4 unit dengan stand 3 px + foot — lihat §7.7 |
+| Kursi | sandaran **±37 px** (sayap terlihat di samping bahu), dudukan 31–36 px, kolom gas, kaki bintang 5 + caster | di belakang agen; baris belakang satu tone lebih gelap — lihat §7.9 |
 | Curtain wall | **1 lembar kaca menerus** 1000×485 px + **3 mullion** 3 px (4 teluk × 250 px) + 1 transom di 62 % | jangan digambar per-pane: 10 pane ber-shadow = gambar ter-tile |
 | Enam papan | tinggi **148 px** (≈1,0 × avatar), band y 132–280 | digantung di **rail** 124–132, **di depan kaca** |
 | Nameplate | tinggi **24 px**, radius 11, font 11,5 | lihat §7.4 |
@@ -366,6 +366,12 @@ Tiga aturan yang tidak boleh dilanggar, karena inilah yang dulu gagal:
 3. **Setiap material dua tone + outline**, dan tidak ada bagian yang hanya
    `fillRect`/blok. Kulit, rambut, kemeja, celana, sepatu semuanya gradien dua stop
    dengan stroke `shade(warna, 0,5)` selebar 1 unit.
+4. **Mask harus opaque di kanal alpha.** Di Pillow, `fill=255` pada gambar `RGBA`
+   menghasilkan `(255, 0, 0, 0)` — alpha **0** — sehingga gradien tidak pernah
+   ter-paste dan avatar hanya tergambar sebagai outline. Yang benar:
+   `fill=(255, 255, 255, 255)`. Gejalanya khas: bentuk kecil (kaki, tangan, lensa)
+   terbaca sebagai "loop" kosong dan rambut terbaca sebagai ikat kepala putih.
+   Gate: `avatar proof` harus melaporkan > 1.500 warna unik di dalam siluet.
 
 ### 7.1 Proporsi (1 unit = 1/44 tinggi avatar)
 
@@ -486,14 +492,125 @@ dan menulis `docs/design/mockups/avatar-zoom-check.png` (crop 4×):
 | Tinggi ruangan (lantai→plafon, termasuk jendela) | **548 px** | 520–560 px | angka yang dipakai rasio |
 | Rasio ruangan:avatar | **1:3,65** (548 : 150) | 1:3–1:4 | verdict bos, diukur |
 | Band di atas plafon | **40 px** | ≤ 40 px | slab + coping + fascia |
-| Warna unik dalam siluet (sprite) | **1477** | pixel-art ≤ 12, vector ≥ 40 | gradien + anti-aliasing |
-| Warna unik di crop mockup | **3515** | — | termasuk latar (gradien ikut bergeser) |
-| Piksel tepi siluet yang **blending** | **1367 / 1367 = 100 %** | pixel-art 0 % | tidak ada upscale nearest |
-| Piksel alpha parsial | **4956** | > 0 | tepi sub-piksel nyata |
-| Operasi gambar | **53–63 path/isi + 28–32 gradien** | — | dihitung saat render |
+| Warna unik dalam siluet (sprite) | **2147** | pixel-art ≤ 12, vector ≥ 40 | gradien + anti-aliasing |
+| Warna unik di crop mockup | **4408** | — | termasuk latar (gradien ikut bergeser) |
+| Piksel tepi siluet yang **blending** | **479 / 479 = 100 %** | pixel-art 0 % | tidak ada upscale nearest |
+| Piksel alpha parsial | **1773** | > 0 | tepi sub-piksel nyata |
+| Operasi gambar | **63–75 path/isi + 33–37 gradien** | — | dihitung saat render (body + overlay tangan) |
 
 Cara memeriksa ulang: `python3 docs/design/mockups/render_mockups.py` — baris
 `avatar proof BAGAS: ...` dan `side gate L3: ...` tercetak di stdout.
+
+### 7.7 Resep meja (profil) — objek, bukan balok
+
+Meja digambar sebagai **tiga lapis + dua kaki**, dengan urutan gambar yang tetap:
+`bayangan lantai → kursi → badan agen → meja → keyboard/mouse → tangan → monitor`.
+Meja **opaque di depan pangkuan**, karena itu ia digambar sesudah badan.
+
+| Bagian | Ukuran | Warna |
+|---|---|---|
+| Top (garis lantai) | **58 px** di atas garis lantai = **0,39 × tinggi avatar** | `shade(desk, 0,90)` baris belakang, `1,0` baris depan |
+| Slab | tebal **6 px**, lebar **128 px**, radius 1,6 unit | `desk` |
+| Bibir atas (top surface, terlihat menyamping) | **2,1 px** di tepi atas slab | `over(desk_top, 0,16, muted)` — **tint**, bukan `shade(k>1)`: meja tema terang putih murni, versi lebih terang akan hilang |
+| Tepi depan (front edge) | **2,2 px** di tepi bawah slab | `shade(desk, 0,84)` = **1 tone lebih gelap** |
+| Apron (modesty panel) | tinggi **9 px**, inset **5 px** dari kedua ujung | `shade(desk, 0,76)` + garis AO 1,4 px di bawah slab |
+| Panel samping (kaki) | **5 px** lebar, di `±(64 − 6)` px, dari bawah apron ke lantai | `shade(desk, 0,70)` + outline 0,3 unit + tepi dalam terang + foot pad |
+| Bayangan jatuh | elips `rx = 0,46 × lebar`, alpha 44 (terang) / 58 (gelap), blur 3 px | hitam |
+| AO kaki | elips 8×3 px di tiap foot pad, alpha 96 / 110, blur 1 px | hitam |
+
+**Kenapa 58 px dan bukan 94 px.** Dengan kepala chibi 38 % tinggi, meja setinggi
+0,44 × avatar jatuh tepat di **dagu** (94 px pada avatar 150 px): yang terlihat hanya
+kepala di atas balok, tangan tidak mungkin menyentuh meja, dan pangkuan menggantung
+di lubang lutut. 58 px membuat garis meja memotong dada bawah — tangan bisa di tuts,
+lutut dan kaki terlihat di bawah meja, dan proporsi meja:agen tetap masuk akal untuk
+gaya chibi. Komposisi (rasio ruangan, dua baris, slot) **tidak berubah**.
+
+### 7.8 Resep monitor — kaki → leher → panel, menghadap agen
+
+| Bagian | Ukuran | Catatan |
+|---|---|---|
+| Foot | **27 × 3,3 px** | `metal_dk` + tepi atas 0,9 px lebih terang, di atas meja |
+| Leher | **6 px** lebar, **8,3 px** tinggi | `metal_dk` + highlight 0,8 px di sisi kiri |
+| Panel | **38 × 23 px** | bezel `shade(desk, 0,46)`, layar `over(status, 0,30, #0B1119)` |
+| Arah | paralelogram, tepi atas digeser **0,9 unit** ke arah agen + **sisi jauh 1,5 px** | inilah "menghadap agen" yang bisa digambar di elevasi |
+| Posisi | `cx + 16,4 unit` = **+46 px** dari pusat agen | membersihkan torso (±26 px) dan kepala (±13 px); 42 px pernah menimpa pipi |
+| Isi layar | 3 baris "kode" warna status + LED 1,2 px di pojok | layar = status, sama dengan papan status |
+| Bayangan kontak | elips 10×1,9 px di bawah foot, alpha 86 / 96, blur 1,1 px | tanpa ini monitor terbaca melayang |
+
+### 7.9 Resep kursi — sandaran + dudukan + kaki bintang
+
+Kursi digambar **sebelum** agen, jadi yang terlihat adalah sayap sandaran di samping
+leher, bukan badan kursi yang menempel di punggung.
+
+| Bagian | Ukuran | Catatan |
+|---|---|---|
+| Sandaran | **40–84 px** di atas lantai, lebar **±37 px**, radius 3,8 unit | `over(desk_top, 0,34, muted)` — **abu-abu dingin**, bukan turunan meja: celana tim hampir hitam, satu-satunya tone yang memisahkan kursi dari kaki dan dari meja putih |
+| Panel dalam sandaran | inset 2,2 unit | `over(desk_top, 0,22, muted)` + garis rim light di tepi atas |
+| Dudukan | **31–36 px** di atas lantai, lebar ±22 px | tepat di bawah pangkuan (lap 33–46 px) |
+| Kolom gas | 4 px lebar, 31 → 9 px | `metal_dk` + highlight |
+| Kaki bintang | 4 kaki terlihat di elevasi (`x = ±0,96R`, `±0,58R`), **R = 26 px** | `metal_dk`, lebar 1,1 unit |
+| Caster | Ø 8 px | `metal` + outline, menyentuh lantai |
+| Bayangan | elips `rx 10,6 unit`, alpha 72 / 86, blur 2 px | kontak kursi + caster |
+
+### 7.10 Pose agen: duduk + mengetik (overlay dua lapis)
+
+`avatar(..., pose="seated")` mengubah tiga hal, tanpa mengubah tinggi 150 px:
+
+| Bagian | Rentang (unit) | Catatan |
+|---|---|---|
+| Pangkuan (lap) | 30,4–34,0, lebar ±8,2 | digambar **sesudah** torso, jadi tidak ada perut terbuka di lubang lutut |
+| Lutut | 31,6–36,4, lebar 5,8 | `kh=1,62` → lebih terang dari outline; dua kaki dipisah 12,6 unit |
+| Betis | 35,2–42,0, lebar 4,2 | + garis highlight 0,9 unit di depan (kaki terbaca sebagai silinder, bukan batang) |
+| Sepatu | 41,2–43,7 | sol `#E7EAEE` |
+| Lengan | bahu 21,8 → siku 26,6 | berhenti di garis meja; tangan **tidak** digambar di lapisan ini |
+
+Tangan adalah **overlay terpisah** (`layer="hands"`) yang digambar setelah keyboard:
+
+- dua tangan di `x = ±3,4 unit`, kotak 4,4 × 2,6 unit, tangan kiri **0,4 unit lebih
+  rendah** dari kanan (pose mengetik, bukan boneka);
+- dua notch jari + bayangan tangan di atas tuts (alpha 0,42) — inilah yang membuat
+  "tangan di keyboard" terbaca, bukan dua blob yang melayang;
+- manset lengan 0,7 unit tepat di bawah tangan, berakhir di garis meja.
+
+### 7.11 Bayangan kontak (wajib untuk setiap prop)
+
+Tidak ada prop yang boleh "menempel" tanpa kontak. Semua memakai satu helper
+(`_soft_shadow`): elips hitam + Gaussian blur, alpha dan blur per objek.
+
+| Objek | Bayangan | Alpha (terang/gelap) |
+|---|---|---|
+| Meja | elips `0,46 × lebar` di lantai | 44 / 58, blur 3 |
+| Kaki meja | elips 8 × 3 px per foot pad | 96 / 110, blur 1 |
+| Kursi + caster | elips `rx 10,6 unit` | 72 / 86, blur 2 |
+| Kaki agen | elips `rx 12,4 unit` | 64 / 78, blur 2,2 |
+| Monitor (foot di meja) | elips 10 × 1,9 px | 86 / 96, blur 1,1 |
+| Keyboard | elips 40 × 2,4 px | 78 / 88, blur 1,2 |
+| Mouse | elips 4,4 × 1,8 px | 48 / 66, blur 0,9 |
+| Tanaman / rak / rak server | elips di garis lantai barisnya | 34–50 |
+
+### 7.12 Variasi look: 6 dari 8 harus terbaca tanpa label
+
+Yang membedakan **bukan** warna kemeja saja (empat agen memakai biru tua yang
+berdekatan di `agents.ts`), melainkan **siluet**:
+
+| Agen | Siluet | Warna | Aksesori |
+|---|---|---|---|
+| BIMA | crop **kotak** (crown persegi, ±1,5 unit lebih lebar) + kepala lebar (build 1,12) | slate blue | stubble |
+| RAKA | **side sweep**, kepala sempit (build 0,90) | navy | kacamata |
+| LARAS | **long** (dua panel sampai bahu) | rose | female |
+| DIMAS | **messy** (3 spike) + headphone over-ear | charcoal | headphone, stubble |
+| BAGAS | crop **membulat** (fade) | steel blue | stubble |
+| YOGA | **short + quiff** | khaki | kacamata |
+| SARI | **bun** (sanggul di atas-belakang) | sage | female |
+| WAHYU | **short crew-cut** (build 1,04) | pine | kacamata, stubble |
+
+Aturan turunan data (bukan field baru): `hrx = 7,8 × (1 + (build − 1) × 0,7)` —
+kepala ikut lebar/sempit sesuai `build`; `crop` dengan `build ≥ 1,08` mendapat crown
+persegi + sideburn; `short` dengan `build ≥ 1,02` mendapat crew-cut, sisanya quiff.
+Gate terukur: `avatar_distinctness()` mencetak jarak terdekat tiap agen
+(**8/8 ≥ ambang 1,0**, pasangan terlemah YOGA↔WAHYU 1,18; BIMA↔BAGAS 1,38) dan
+**berhenti** kalau hasilnya < 6/8. Bukti visual: `avatar-zoom-check.png` (8 look @2×)
+dan `desk-detail-check.png` (2 meja @2× + 5 inset @4×).
 
 ## 8. Tipografi
 
