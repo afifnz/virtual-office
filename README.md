@@ -446,10 +446,12 @@ done
   agen baru dapat meja di lattice, penempatan deterministik, `look` stabil per id.
 - `anim_check` — pemetaan pose dari `/api/status`, transform world↔pixel, clamp
   zoom, dan chip blocked tidak membocorkan `reason` mentah.
-- `visual_check` — gate T1.9: 13 meja terlihat pada 1280×800 dan 390×844, tidak
-  ada nameplate/chip yang bertumpuk atau menutupi plakat zona, tidak ada plat
-  keluar kanvas, lebar nama ≤ lebar slot meja, dan `offline` beda dari `idle`
-  tanpa mengandalkan warna.
+- `visual_check` — gate legibilitas/geometri: 13 meja terlihat pada 1280×800 dan
+  390×844; nama depan penuh (bukan stub 3 huruf) di zoom 1 dengan font 2×;
+  tidak ada nameplate/chip yang bertumpuk atau menutupi plakat zona; tidak ada
+  plat keluar kanvas (clamp ≥1 px); zoom default HP = 1 (integer, clamp 1..4);
+  lebar nama ≤ slot meja pada skala 1×; dan `offline` beda dari `idle` tanpa
+  mengandalkan warna.
 
 Pemeriksaan yang butuh layout engine (`verify/office2d_probe.js`) dijalankan di
 browser: buka build preview, tempel isi file itu di Console (atau
@@ -484,9 +486,15 @@ meja, `?spot=lobby|dev|edu|luar` ke satu zona.
   di DPR pecahan. Label diukur dalam **CSS px** (`scene2d/labels.ts`) agar
   lebarnya tidak ikut membesar bersama zoom — pitch meja hanya 26 px, jadi plat
   berukuran px dunia akan saling menimpa (bug "OM BT" pada gate T1.9).
-- **View default = zoom-fit seluruh lantai** (`fitZoom`): 100 % pada 1280×800
-  (kanvas 1000×688, lantai 896×640) dan 50 % pada 390×844 (lantai 448×320,
-  pan horizontal). `?spot=lobby|dev|edu` tetap ada untuk masuk ke satu zona.
+- **Nama terbaca tanpa membuka panel.** Setiap plat membawa nama depan penuh
+  (maks 6 huruf). Pada zoom 1 font pixel diskalakan 2× (glyph 14 px) supaya
+  terbaca di HP; plat yang lebih lebar dari pitch meja ditata `placeStacks`
+  (stagger vertikal, overlap 0). Zoom ≥2 memakai skala 1 karena dunianya sudah
+  2× lebih besar.
+- **View default = zoom-fit seluruh lantai** (`fitZoom`): zoom 2 (label 200 %)
+  pada 1280×800 (kanvas 1000×688, lantai 896×640) dan zoom 1 (label 100 %,
+  lantai 448×320, pan horizontal) pada 390×844. `?spot=lobby|dev|edu` tetap ada
+  untuk masuk ke satu zona.
 - **Status tidak pernah hanya warna**: `offline` = kursi kosong navy + plat
   berlubang + "Z Z Z" + chip `offline`; `idle` = chibi duduk, dot cincin, chip
   `idle`; `blocked` = chip kuning + gelembung "!"; `working` = monitor hidup +
@@ -495,9 +503,10 @@ meja, `?spot=lobby|dev|edu|luar` ke satu zona.
   teks generik ("butuh izin"), tidak ada isi pesan/judul yang digambar.
 - **Outage ≠ kantor kosong**: meja & kursi digambar dari `rosterAgents()`, bukan
   dari payload status, jadi API mati tetap menampilkan 13 meja offline.
-- **Layout panel**: HUD 56 px di atas, sidebar agen 280 px di kanan (hanya saat
-  terbuka), toolbar 56 px di bawah — kanvas tidak pernah tertutup panel. Di HP
-  sidebar & feed menjadi bottom sheet, D-pad kiri-bawah, zoom kanan-bawah.
+- **Layout panel**: HUD 56 px di atas, rail kanan 280 px (roster di atas, feed
+  dock di kakinya — keduanya hanya memakan lebar kanvas saat terbuka), toolbar
+  56 px di bawah — kanvas tidak pernah tertutup panel. Di HP sidebar & feed
+  menjadi bottom sheet, D-pad kiri-bawah, zoom kanan-bawah.
 - **Roster scroll**: `.roster-body` memakai `flex:1 1 auto; min-height:0;
   overflow-y:auto` (regresi cc2add3), dibuktikan `verify/office2d_probe.js`.
 - **Tanpa dependensi baru**: `three`, `@react-three/fiber`, `@react-three/drei`,
