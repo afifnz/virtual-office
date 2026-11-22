@@ -26,6 +26,29 @@ export function citySize(): { w: number; h: number } {
   return { w: 1000, h: 485 }
 }
 
+/**
+ * Sun / moon placement, in fractions of the sky sheet.
+ *
+ * The six boards hang from y 132 (rail at 124), so the only sky a disc can live
+ * in without being cut by a board is the strip above the rail. The old halo
+ * (r 66-92 at y 0.10) reached 40 px *behind* the ARSITEKTUR card: the panel is
+ * opaque, but the disc was painted first, so its glow stopped dead at the card
+ * edge and read as the sky shining through the panel. Keep `y + halo` above
+ * `SIDE_RAIL_TOP`; `verify/render_check.ts` enforces it for every theme.
+ */
+export const SUN_MOON = {
+  day: { x: 0.72, y: 0.07, disc: 13, halo: 30 },
+  night: { x: 0.78, y: 0.07, disc: 10, halo: 30 },
+} as const
+
+/** Bounding box of the sun/moon (disc + halo) in city-local px. */
+export function sunMoonBox(theme: ThemeName, w = 1000, h = 485): { x1: number; y1: number; x2: number; y2: number } {
+  const s = SUN_MOON[theme]
+  const cx = s.x * w
+  const cy = s.y * h
+  return { x1: cx - s.halo, y1: cy - s.halo, x2: cx + s.halo, y2: cy + s.halo }
+}
+
 /** Paint the skyline into a context whose origin is the top of the glass. */
 export function drawCity(
   ctx: CanvasRenderingContext2D,
@@ -46,40 +69,39 @@ export function drawCity(
   ctx.fillStyle = sky
   ctx.fillRect(0, 0, w, h)
 
-  // ---- sun / moon
+  // ---- sun / moon, inside the strip above the board rail (see SUN_MOON)
+  const sm = SUN_MOON[theme]
+  const sx = w * sm.x
+  const sy = h * sm.y
   if (theme === 'day') {
-    const sx = w * 0.72
-    const sy = h * 0.1
-    const halo = ctx.createRadialGradient(sx, sy, 2, sx, sy, 92)
+    const halo = ctx.createRadialGradient(sx, sy, 2, sx, sy, sm.halo)
     halo.addColorStop(0, 'rgba(255,255,255,0.95)')
     halo.addColorStop(0.35, 'rgba(255,255,255,0.35)')
     halo.addColorStop(1, 'rgba(255,255,255,0)')
     ctx.fillStyle = halo
     ctx.beginPath()
-    ctx.arc(sx, sy, 92, 0, Math.PI * 2)
+    ctx.arc(sx, sy, sm.halo, 0, Math.PI * 2)
     ctx.fill()
     ctx.fillStyle = '#FFFFFF'
     ctx.beginPath()
-    ctx.arc(sx, sy, 13, 0, Math.PI * 2)
+    ctx.arc(sx, sy, sm.disc, 0, Math.PI * 2)
     ctx.fill()
   } else {
-    const mx = w * 0.78
-    const my = h * 0.1
-    const halo = ctx.createRadialGradient(mx, my, 2, mx, my, 66)
+    const halo = ctx.createRadialGradient(sx, sy, 2, sx, sy, sm.halo)
     halo.addColorStop(0, 'rgba(243,197,123,0.34)')
     halo.addColorStop(1, 'rgba(243,197,123,0)')
     ctx.fillStyle = halo
     ctx.beginPath()
-    ctx.arc(mx, my, 66, 0, Math.PI * 2)
+    ctx.arc(sx, sy, sm.halo, 0, Math.PI * 2)
     ctx.fill()
     ctx.fillStyle = '#F5E7C6'
     ctx.beginPath()
-    ctx.arc(mx, my, 10, 0, Math.PI * 2)
+    ctx.arc(sx, sy, sm.disc, 0, Math.PI * 2)
     ctx.fill()
     ctx.fillStyle = t.skyMid
     ctx.globalAlpha = 0.55
     ctx.beginPath()
-    ctx.arc(mx + 4, my - 3, 8, 0, Math.PI * 2)
+    ctx.arc(sx + 4, sy - 3, sm.disc * 0.8, 0, Math.PI * 2)
     ctx.fill()
     ctx.globalAlpha = 1
   }

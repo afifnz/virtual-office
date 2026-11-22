@@ -67,6 +67,13 @@ function label(ctx: Ctx, text: string, x: number, y: number, size: number, colou
   ctx.restore()
 }
 
+/**
+ * A hanging board. Opaque by design: the skyline is painted first and must never
+ * show through a card, so the fill is `surfaceSolid` at alpha 1 (never
+ * `surfaceGlass`) and a 4 % noise grid breaks the flat tone the way paper does.
+ * `verify/render_check.ts` asserts the backdrop is opaque and that nothing
+ * translucent is painted over it afterwards.
+ */
 function card(ctx: Ctx, theme: ThemeName, x: number, y: number, w: number, h: number): void {
   const t = THEME_TOKENS[theme]
   ctx.save()
@@ -76,6 +83,11 @@ function card(ctx: Ctx, theme: ThemeName, x: number, y: number, w: number, h: nu
   rr(ctx, x, y, w, h, 8)
   ctx.fill()
   ctx.stroke()
+  // paper grain: deterministic 1 px dots, inside the card only
+  ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.035)' : 'rgba(255,255,255,0.04)'
+  for (let gy = y + 5; gy < y + h - 4; gy += 5) {
+    for (let gx = x + 4 + ((gy * 3) % 7); gx < x + w - 4; gx += 6) ctx.fillRect(gx, gy, 1, 1)
+  }
   ctx.fillStyle = theme === 'day' ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.08)'
   ctx.fillRect(x + 6, y + 1, w - 12, 1)
   ctx.restore()

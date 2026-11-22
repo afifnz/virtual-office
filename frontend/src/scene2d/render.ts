@@ -51,6 +51,7 @@ import {
   SIDE_BOARDS,
   SIDE_FLOOR_BACK,
   SIDE_FLOOR_FRONT,
+  SIDE_GLASS_TOP,
   SIDE_H,
   SIDE_W,
   sideTransform,
@@ -121,9 +122,9 @@ export function createStaticLayer(floor: FloorId, theme: ThemeName, tzName = 'WI
   // Painted straight into the static sheet (no extra city canvas per cache).
   ctx.save()
   ctx.beginPath()
-  ctx.rect(0, 58, SIDE_W, 485)
+  ctx.rect(0, SIDE_GLASS_TOP, SIDE_W, 485)
   ctx.clip()
-  ctx.translate(0, 58)
+  ctx.translate(0, SIDE_GLASS_TOP)
   drawCity(ctx, theme, floor, SIDE_W, 485)
   ctx.restore()
   drawCurtainWall(ctx, theme)
