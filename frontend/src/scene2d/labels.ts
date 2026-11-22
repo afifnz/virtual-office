@@ -135,6 +135,13 @@ export interface LabelAgent {
   cx: number
   /** head top y, CSS px */
   topY: number
+  /**
+   * the drawn head box (CSS px). Desk rows sit 1.62 world units apart, so at
+   * zoom 2 the plate stack of the front row can reach the head of the row
+   * behind: a speech bubble that would land there is dropped instead of
+   * pointing at the wrong agent (see buildStacks).
+   */
+  head: Rect
   offline: boolean
   /** status word for the chip; '' hides the chip */
   chip: string
@@ -152,9 +159,18 @@ export interface LabelAgent {
  * 13 plates are already 2× wide there); chips join at zoom 2 and counters at
  * zoom ≥3. `scale` is the pixel-font scale (see plateScale) and is applied to
  * every plate size so the layout and the painted sprite never disagree.
+ *
+ * A plate may never sit on a colleague's head: back-to-back desk rows stand
+ * 1.62 world units apart, which is 52 CSS px at zoom 2, while a three-plate
+ * stack is 38 px above the head — so the top plate of the front row can land on
+ * the hair of the agent behind and read as *their* plate. The top decorative
+ * plate (bubble, Zzz, counters, chip) is dropped until the stack clears; the
+ * nameplate itself is never dropped, and the status dot on it keeps the state
+ * visible.
  */
 export function buildStacks(agents: readonly LabelAgent[], mode: PlateMode, scale = 1): Stack[] {
-  return agents.map((a) => {
+  const heads = agents.map((a) => a.head)
+  return agents.map((a, index) => {
     const stack: Stack = { id: a.id, cx: a.cx, bottom: a.topY - NAME_GAP, plates: [] }
     const nameText = shortName(a.name)
     stack.plates.push({
@@ -163,19 +179,30 @@ export function buildStacks(agents: readonly LabelAgent[], mode: PlateMode, scal
       h: plateHeight('name', scale),
     })
     if (mode !== 'compact') {
-      if (a.chip) stack.plates.push({ key: 'chip', w: plateWidth(a.chip, { scale }), h: plateHeight('chip', scale) })
-      if (mode === 'detail' && a.counters && !a.offline) {
-        stack.plates.push({
-          key: 'counters',
-          w: plateWidth(a.counters, { scale }),
-          h: plateHeight('counters', scale),
-        })
-      }
       if (a.offline) {
+        // an abandoned station says it with the "Z Z Z" tile, not a status
+        // chip: one plate is all the row pitch leaves room for
         stack.plates.push({ key: 'zzz', w: plateWidth('Z Z Z', { scale }), h: plateHeight('zzz', scale) })
-      } else if (a.bubble) {
-        stack.plates.push({ key: 'bubble', w: bubbleWidth(a.bubble, scale), h: plateHeight('bubble', scale) })
+      } else {
+        if (a.chip) stack.plates.push({ key: 'chip', w: plateWidth(a.chip, { scale }), h: plateHeight('chip', scale) })
+        if (mode === 'detail' && a.counters) {
+          stack.plates.push({
+            key: 'counters',
+            w: plateWidth(a.counters, { scale }),
+            h: plateHeight('counters', scale),
+          })
+        }
+        if (a.bubble) stack.plates.push({ key: 'bubble', w: bubbleWidth(a.bubble, scale), h: plateHeight('bubble', scale) })
       }
+    }
+    // drop decorative plates from the top until nothing covers a colleague's head
+    while (stack.plates.length > 1) {
+      const top = stack.plates[stack.plates.length - 1]!
+      if (top.key === 'name') break
+      const totalH = stack.plates.reduce((sum, p) => sum + p.h, 0) + (stack.plates.length - 1) * PLATE_GAP * scale
+      const rect: Rect = { x: a.cx - top.w / 2, y: stack.bottom - totalH, w: top.w, h: top.h }
+      if (!heads.some((h, i) => i !== index && rectsOverlap(rect, h))) break
+      stack.plates.pop()
     }
     return stack
   })

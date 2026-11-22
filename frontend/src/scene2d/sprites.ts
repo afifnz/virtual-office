@@ -13,6 +13,10 @@ import { PALETTE, SCREEN, STATUS } from './palette'
 
 export const CHIBI_W = 12
 export const CHIBI_H = 16
+/** The drawn head block (8×7 at the top of the chibi): the box a nameplate or
+ *  speech bubble must never sit on when it belongs to somebody else. */
+export const HEAD_W = 8
+export const HEAD_H = 7
 
 const OUTLINE = '#1A2027' // cool near-black for eyes, outlines, shoes
 

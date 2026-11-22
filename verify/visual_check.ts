@@ -45,7 +45,7 @@ import {
   type LabelAgent,
   type Rect,
 } from '../frontend/src/scene2d/labels'
-import { CHIBI_H } from '../frontend/src/scene2d/sprites'
+import { CHIBI_H, HEAD_H, HEAD_W } from '../frontend/src/scene2d/sprites'
 import {
   MAX_ZOOM,
   MIN_ZOOM,
@@ -93,6 +93,7 @@ function labelsFor(vp: Viewport, canvasW: number, canvasH: number, statuses: Map
         name: meta.name,
         cx: head.x,
         topY: head.y - CHIBI_H * vp.zoom,
+        head: { x: head.x - (HEAD_W / 2) * vp.zoom, y: head.y - CHIBI_H * vp.zoom, w: HEAD_W * vp.zoom, h: HEAD_H * vp.zoom },
         offline,
         chip: mode === 'compact' ? '' : offline ? 'offline' : status === 'idle' ? 'idle' : status === 'blocked' ? 'butuh izin' : status === 'reviewing' ? 'review' : 'terminal',
         bubble: mode !== 'compact' && !offline && (status === 'working' || status === 'reviewing' || status === 'blocked') ? (status === 'blocked' ? '!' : '...') : '',
@@ -297,6 +298,28 @@ for (const f of FLOOR_IDS) {
       }
     }
     if (onPlaque === 0) ok(`${scr.name} L${f}: no plate covers a zone plaque`)
+
+    // ------------------- 6b. no plate sits on a colleague's head (zoom ≥2)
+    // A plate that lands on another agent's head reads as *that* agent's label
+    // (a bubble tail touching someone's hair is the worst offender). From zoom
+    // 2 up buildStacks drops the bubble instead of letting it reach a
+    // colleague's head. At zoom 1 the 2× compact nameplates are deliberately
+    // wider than the desk pitch — placeStacks staggers them — so the rule
+    // starts at zoom 2, where a plate and a head are the same scale.
+    if (scale === 1) {
+      const heads = agents.map((a) => ({ id: a.id, ...a.head }))
+      let onHead = 0
+      for (const p of placed) {
+        for (const hd of heads) {
+          if (hd.id === p.id) continue
+          if (rectsOverlap(p, hd)) {
+            onHead++
+            if (onHead <= 5) fail(`${scr.name} L${f}: plate ${p.id}/${p.key} covers ${hd.id}'s head`)
+          }
+        }
+      }
+      if (onHead === 0) ok(`${scr.name} L${f}: no plate covers another agent's head (${placed.length} plates)`)
+    }
 
     // --------------------------- 7. nameplates fit their slot at 1×, read at 2×
     const slot = deskSlot(zoom)

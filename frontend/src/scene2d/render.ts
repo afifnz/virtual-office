@@ -45,6 +45,8 @@ import { getSprite, type Sprite } from './sprites'
 import {
   CHIBI_W,
   CHIBI_H,
+  HEAD_H,
+  HEAD_W,
   agentSprite,
   drawChair,
   drawDesk,
@@ -752,6 +754,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
       name: meta.name,
       cx: head.x,
       topY: head.y - CHIBI_H * k,
+      head: { x: head.x - (HEAD_W / 2) * k, y: head.y - CHIBI_H * k, w: HEAD_W * k, h: HEAD_H * k },
       offline,
       chip,
       bubble,
