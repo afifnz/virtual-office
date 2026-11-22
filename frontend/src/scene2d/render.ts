@@ -39,7 +39,7 @@ import {
   type Stack,
 } from './labels'
 import { EXTRAS, FLOOR_MOTIF, PALETTE, SCREEN, STATUS, TEAM } from './palette'
-import { drawText } from './pixelfont'
+import { drawText, textWidth } from './pixelfont'
 import { drawProp, propLayer, propsOf } from './props'
 import { getSprite, type Sprite } from './sprites'
 import {
@@ -248,6 +248,14 @@ function drawLift(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   ctx.fillRect(x, y, w, h)
   ctx.fillStyle = PALETTE.steel500
   ctx.fillRect(x + 2, y + 2, w - 4, h - 4)
+  // face plate: a lit top edge and two quiet seams, so the shaft is not a
+  // blank slab next to the furnished floor
+  ctx.fillStyle = PALETTE.steel300
+  ctx.fillRect(x + 2, y + 2, w - 4, 1)
+  ctx.fillStyle = PALETTE.concrete600
+  for (const fx of [x + Math.round(w * 0.55), x + Math.round(w * 0.8)]) {
+    ctx.fillRect(fx, y + 13, 1, h - 15)
+  }
   // door frame on the west face, centred on the walk node (z = 0.6)
   const dz = Math.round((0.6 + f.d / 2) * TILE)
   ctx.fillStyle = PALETTE.concrete800
@@ -260,19 +268,22 @@ function drawLift(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   ctx.fillStyle = PALETTE.concrete800
   ctx.fillRect(x + 6, dz - 12, 1, 24)
   ctx.fillRect(x + 7, dz - 12, 1, 24)
-  // floor indicator above the doors: dark plate, amber number
-  const label = `L${floor}`
-  const iw = 14
-  const ix = x - 1
-  const iy = dz - 24
+  // floor indicator on the shaft header: a dark plate across the top of the
+  // shaft with the amber floor number centred in it
+  const hh = 9
+  const hx = x + 2
+  const hy = y + 2
+  const hw = w - 4
   ctx.fillStyle = PALETTE.concrete900
-  ctx.fillRect(ix, iy, iw, 9)
+  ctx.fillRect(hx, hy, hw, hh)
   ctx.fillStyle = PALETTE.steel500
-  ctx.fillRect(ix, iy, iw, 1)
-  ctx.fillRect(ix, iy + 8, iw, 1)
-  ctx.fillRect(ix, iy, 1, 9)
-  ctx.fillRect(ix + iw - 1, iy, 1, 9)
-  drawText(ctx, label, ix + 3, iy + 1, 1, PALETTE.amber)
+  ctx.fillRect(hx, hy, hw, 1)
+  ctx.fillRect(hx, hy + hh - 1, hw, 1)
+  ctx.fillRect(hx, hy, 1, hh)
+  ctx.fillRect(hx + hw - 1, hy, 1, hh)
+  const label = `L${floor}`
+  const tw = textWidth(label, 1)
+  drawText(ctx, label, hx + Math.round((hw - tw) / 2), hy + 1, 1, PALETTE.amber)
 }
 
 /**
