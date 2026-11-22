@@ -153,21 +153,22 @@ Kanvas 1000×688 (HUD 56 px di atas, toolbar 56 px di bawah, sidebar 280 px).
 | Band | Tinggi | Isi |
 |---|---|---|
 | Kota | 310 px | skyline + langit (lihat §6) |
-| Plafon | 26 px | 3 strip lampu + pool cahaya |
+| Plafon | 26 px | soffit + **satu** cove cahaya menerus (bukan 3 strip) |
 | Dinding/interior | 260 px | curtain wall, partisi kaca, meja, agen, prop |
 | Floor finish | 70 px | garis lane, bayangan, kabel tray |
 | Slab | 22 px | garis atas 1 px highlight |
 
-Garis lantai per lane: **640 / 647 / 654 px** (lane belakang → depan).
+Garis lantai per lane: **614 / 634 / 654 px** (lane belakang → depan).
 
 | Elemen | Ukuran | Catatan |
 |---|---|---|
-| Avatar | 50 px tinggi (× skala lane) | lihat §7 |
+| Avatar | 54 px tinggi (× skala lane: 48,6 / 51,3 / 54) | lihat §7 |
 | Meja (profil) | top 34 px di atas garis lantai, tebal 6 px, 2 kaki 3 px | monitor 24×15 px di stand 6 px |
 | Kursi | sandaran 22×29 px | di belakang agen |
-| Mullion curtain wall | 2 px tiap 96,8 px | warna `--wall` |
+| Curtain wall | 1 lembar kaca menerus + **3 mullion** 3 px (4 teluk × 242 px) + 1 transom | jangan digambar per-pane: 10 pane ber-shadow = gambar ter-tile |
 | Partisi kaca | dari plafon −20 px sampai lantai | resep §5.2 |
 | Nameplate | tinggi 19 px, radius 9 | lihat §7.4 |
+| Slot agen | **≥ 78 px** antar pusat agen | §4.2 |
 | Kamera | span agen + 1,5 unit padding → 960 px | **88,7 px/unit = 120 px/agen** |
 
 **Kamera adalah potongan, bukan seluruh lantai.** L3 selebar 24 unit; kalau dipaksa
@@ -177,9 +178,9 @@ masuk, hasilnya 41 px/unit dan agen bertabrakan. UI harus menyebut "potongan L3"
 
 | Lane | Skala | Offset y | Arti |
 |---|---|---|---|
-| 0 | 0,92 | 0 px | paling belakang (dekat jendela) |
-| 1 | 0,96 | +7 px | tengah |
-| 2 | 1,00 | +14 px | paling depan (dekat penonton) |
+| 0 | 0,90 | 0 px | paling belakang (dekat jendela) |
+| 1 | 0,95 | +20 px | tengah |
+| 2 | 1,00 | +40 px | paling depan (dekat penonton) |
 
 Aturan:
 1. lane awal dari ambang `z` per lantai;
@@ -193,6 +194,25 @@ Bukti kenapa ini wajib: L3 punya tiga pasangan `x` identik (`coder`/`coder2` di
 −1,62; `planner`/`reviewer` di 0; `uiux`/`tester` di 1,62). Dengan elevasi murni
 satu agen dari tiap pasangan hilang.
 
+### 4.2 Slot horizontal wajib (bukan hanya offset vertikal)
+
+Lane saja **tidak cukup**: offset vertikal 20 px tidak memisahkan dua label selebar
+52 px yang pusatnya sama. Aturan tambahan, dijalankan `side_slots()`:
+
+1. urutkan agen menurut `cx` dunia (lalu `lane`) — urutan kiri→kanan tetap urutan
+   `rooms.ts`;
+2. tiap agen mendapat satu slot: pusat berikutnya minimal **78 px** (= lebar label
+   52 px + napas) dari pusat sebelumnya; pasangan yang bertabrakan digeser ke kiri/
+   kanan, bukan ditumpuk;
+3. bila pita melewati kanvas, seluruh pita digeser masuk lalu dinaikkan lagi bila
+   mentok — tidak ada agen yang boleh keluar dari margin 20 px.
+
+Hasil terukur di L3 (8 agen): `BIMA 153 · DIMAS 260 · BAGAS 338 · YOGA 416 ·
+RAKA 494 · SARI 572 · LARAS 650 · WAHYU 847`, jarak pusat minimum **78,0 px**.
+Pola yang terbaca: baris belakang (DIMAS/YOGA/SARI, +20 px) menyela di antara
+baris depan (BIMA/BAGAS/RAKA/LARAS) — dua baris meja yang jelas, bukan satu baris
+datar.
+
 ## 5. Perlakuan kaca
 
 ### 5.1 Resep per permukaan
@@ -203,7 +223,7 @@ satu agen dari tiap pasangan hilang.
 | Tab lantai | `--surface-glass` | 12 px (aktif: tanpa blur) | 1 px (0,16 / 0,20) | atas 1 px (0,30 / 0,85) | 4 % |
 | Roster | `--surface-glass` @ 0,78 | 18 px | 1 px | atas 1 px | 4 % |
 | Zoom control | `--surface-glass` @ 0,80 | 12 px | 1 px | atas 1 px | 4 % |
-| Curtain wall (kanvas) | pane alpha **0,20** | pre-render | mullion 2 px | 1 px atas | 3 % |
+| Curtain wall (kanvas) | **satu** lembar alpha 0,20 | pre-render | mullion 3 px (×3) + 1 transom | 1 px atas | 3 % |
 | Partisi kaca (kanvas) | alpha **0,42** | — (alpha bertingkat) | lihat §5.2 | sheen | 3 % |
 
 ### 5.2 Resep kaca di kanvas — parameter pasti
@@ -242,7 +262,7 @@ padam dan jendela yang menyala hilang.
 │  ▃▅▇ bangunan dekat  (layer 2)               │
 │ veil (22 % malam / 8 % siang) + jendela      │
 └──────────────────────────────────────────────┘
-   mullion 2 px tiap 96,8 px · transom di 42 %
+   satu lembar kaca alpha 0,20 · mullion 3 px ×3 (4 teluk × 242 px) · 1 transom di 62 %
 ```
 
 | Aspek | Siang (Terang) | Malam (Gelap) |
@@ -264,53 +284,85 @@ padam dan jendela yang menyala hilang.
 
 ## 7. Avatar clean vector
 
+### 7.0 Resep raster (yang membuatnya benar-benar vector, bukan pixel)
+
+Tiga aturan yang tidak boleh dilanggar, karena inilah yang dulu gagal:
+
+1. **Digambar pada ukuran akhir, bukan di-upscale.** Sprite dilukis pada permukaan
+   **4× tinggi tampil** (`AV_SUPER = 4`), lalu diperkecil **satu kali** dengan
+   `LANCZOS`. Tidak pernah ada `resize(..., NEAREST)` dan tidak pernah ada
+   pembesaran dari kanvas kecil. Di 54 px tampil, path dilukis di permukaan 216 px —
+   jadi outline 1 unit benar-benar stroke ±1 px, bukan tangga.
+2. **Satu satuan = 1/44 tinggi avatar**, jadi angka proporsi di §7.1 tidak
+   bergantung pada ukuran tampil.
+3. **Setiap material dua tone + outline**, dan tidak ada bagian yang hanya
+   `fillRect`/blok. Kulit, rambut, kemeja, celana, sepatu semuanya gradien dua stop
+   dengan stroke `shade(warna, 0,5)` selebar 1 unit.
+
 ### 7.1 Proporsi (1 unit = 1/44 tinggi avatar)
 
 | Bagian | Rentang Y | Lebar | Catatan |
 |---|---|---|---|
-| Kepala | 2,1 – 16,6 | 13,8 (elips) | rasio kepala:torso ≈ 1:1,6 |
-| Leher | 13,6 – 19,6 | 5,0 | terlihat ≥ 2 px di zoom 2 |
-| Torso | 18,4 – 31,8 | 16 × `build` | poligon tapered |
-| Lengan | 19,8 – 31,0 | 4,4 | rounded-rect + cuff + tangan |
-| Kaki | 29,4 – 40,8 | 5,4 | dua rounded-rect |
-| Sepatu | 39,8 – 43,2 | 6,6 | blok + sol terang, tidak menyatu |
-| Tinggi total | 44 | | × `tall` (0,94–1,06) |
+| Kepala | 1,6 – 18,4 | 15,6 (elips, rx 7,8 / ry 8,4) | chibi: kepala ≈ 38 % tinggi |
+| Telinga | 10,2 – 13,4 | 2,4 | digambar **sebelum** kepala (di belakang) |
+| Leher | 16,4 – 21,6 | 5,2 | tertutup dagu sebagian |
+| Torso | 20,2 – 33,8 | 15,2 × `build` | poligon tapered + shoulder cap |
+| Lengan | 21,8 – 29,8 | 4,6 | rounded-rect + tangan 3,6 |
+| Kaki | ±32,4 – 41,4 | 5,4 | dua rounded-rect |
+| Sepatu | 40,5 – 43,7 | 6,8 | blok + sol terang, tidak menyatu |
+| Tinggi total | 44 | | kaki `tall` menggeser pinggul ±1 unit |
 
-Di layar: **50 px @ zoom 2** (bukan 32 px chibi). Di view samping tinggi efektif =
-`50 px × skala lane` (46 / 48 / 50).
+Wajah (semua relatif ke pusat kepala `hcy = 10`):
 
-### 7.2 Gradien
+| Fitur | Posisi | Ukuran | Terbaca di 54 px |
+|---|---|---|---|
+| Alis | `hcy − 0,4` | 3,4 × 0,9 unit | ±1,1 px, **digambar di semua look** |
+| Mata | `hcy + 1,9`, x ±2,9 | sclera 2,7 × 3,0 + iris 1,7 + glint | ±3,3 px, jelas |
+| Hidung | `hcy + 2,9 … 4,6` | segitiga `shade(skin, 0,74)` | bayangan, bukan garis |
+| Mulut | `hcy + 3,9 … 6,9` | arc 12°–168°, stroke 1,1 unit | ±5 px, jelas |
 
-Dua stop per bagian, diturunkan dari warna `Look`:
+Di layar: **54 px @ zoom 2**. Di view samping tinggi efektif = `54 px × skala lane`
+= **48,6 / 51,3 / 54 px** (lane 0/1/2) — semuanya masih di rentang 48–56 px.
+
+### 7.2 Dua tone + outline per material
 
 ```ts
 const shade = (hex: string, k: number) => /* k<1 gelap, k>1 terang */
-// kulit:  shade(skin, 1.06) → shade(skin, 0.88)
-// rambut: shade(hair, 1.15) → shade(hair, 0.85)
-// kemeja: shade(shirt, 1.12) → shade(shirt, 0.82)
+// kulit:  shade(skin, 1.10) → shade(skin, 0.84)   + outline shade(skin, 0.50)
+// rambut: shade(hair, 1.95) → shade(hair, 0.95)   + outline shade(hair, 0.50)
+// kemeja: shade(shirt, 1.14) → shade(shirt, 0.84) + outline shade(shirt, 0.56)
+// celana: shade(pants, 1.10) → shade(pants, 0.84) + outline shade(pants, 0.46)
 ```
 
-Tidak ada drop shadow di avatar; kedalaman hanya dari gradien + satu outline tipis
-`shade(skin, 0.62)` pada kepala. **Jumlah operasi terukur: 34–41 path/isi + 2
-gradien per avatar**, tergantung look (WAHYU/RAKA paling banyak karena kacamata).
+Selain gradien, tiap material punya **satu bidang tone kedua yang keras** supaya
+beda tone terbaca di 54 px (gradien halus saja tidak cukup): panel samping kemeja
+`shade(shirt, 0.78)` alpha 150, pipi `shade(skin, 0.80)` alpha 105 yang di-clip ke
+mask kepala (tidak pernah meluber keluar siluet).
+
+Tidak ada drop shadow di avatar. **Jumlah operasi terukur: 53–63 path/isi + 28–32
+gradien per avatar** (WAHYU/RAKA/DIMAS paling banyak: kacamata + stubble +
+headphone), dihitung saat render oleh `render_mockups.py`.
 
 ### 7.3 Pemetaan `Look` → gambar
 
 | Field | Perlakuan |
 |---|---|
-| `skin` | gradien kepala/leher/tangan |
-| `hair` + `style` | cap elips + massa per gaya: `crop`, `short` (+sideburn), `side` (sweep), `long` (dua panel), `bun` (cincin), `curly` (4 bulge), `messy` (3 spike) |
-| `shirt` | torso + lengan; kerah V `shade(shirt, 0.66)` |
-| `pants` | kaki + sepatu `shade(pants, 0.38)` + sol `#E8E9EC` |
+| `skin` | gradien kepala/leher/tangan + pipi dua tone |
+| `hair` + `style` | cap elips + **fringe yang berbeda per gaya**: `crop`/`short` (garis hampir lurus), `side` (sapuan ke kanan), `long` (dua panel sampai bahu), `bun` (sanggul bulat di atas-belakang), `curly` (4 bulge), `messy` (3 spike) |
+| `shirt` | torso + lengan; kerah V `shade(shirt, 0.62)` |
+| `pants` | kaki + sepatu `shade(pants, 0.55)` + sol `#E7EAEE` |
 | `accent` | strip dada 1 path (identitas tim) |
-| `glasses` | 2 rounded-rect + bridge + lensa `rgba(210,232,245,0.24)` |
-| `headphones` | arc + 2 ear cup |
-| `peci` | rounded-rect `#1B1B22` di atas kepala |
-| `mustache` | rounded-rect tipis di bawah hidung |
-| `stubble` | arc rahang alpha 105 — bukan oval penuh |
-| `build` / `tall` | lebar torso / skala tinggi |
+| `glasses` | 2 rounded-rect + bridge + lensa `rgba(206,228,244,0.24)` |
+| `headphones` | band + 2 ear cup |
+| `peci` | rounded-rect `#20202A` di atas kepala |
+| `mustache` | rounded-rect tipis di atas mulut |
+| `stubble` | oval rahang alpha 68 — bukan oval penuh |
+| `build` / `tall` | lebar torso / panjang kaki |
 | `female` | mematikan stubble & mustache |
-| `sculptedHead` | diabaikan pada iterasi ini |
+
+Catatan penting: **jangan** menambahkan pita highlight ellips di atas tengkorak —
+di 54 px ia terbaca sebagai headband/helm, bukan rambut. Tone kedua rambut harus
+dari gradien massa rambut itu sendiri.
 
 ### 7.4 Nameplate (aturan baru — selalu di atas kepala)
 
@@ -320,8 +372,14 @@ gradien per avatar**, tergantung look (WAHYU/RAKA paling banyak karena kacamata)
 - Bila slot ideal sudah terpakai: naik **22 px** (tinggi + 3) per langkah, tetap di
   dalam bidang, dan **garis penghubung 1 px** digambar dari bawah plate ke kepala
   (border tema, alpha 55 %) supaya label tidak pernah terlihat "melayang".
-- **Gate keras**: 0 plate-plate overlap, 0 plate-vs-kepala-agen-lain. Gate ini
-  sudah berjalan di renderer mockup; implementasi harus memakai gate yang sama.
+- **Gate keras** (`side_gate()`, dijalankan untuk L1/L2/L3 sebelum render), tiga
+  aturan, semuanya dicetak sebagai angka:
+  1. **0** label yang menimpa label lain;
+  2. **0** label yang menimpa kotak kepala agen **lain**;
+  3. overlap bbox avatar vs avatar **≤ 20 %** dari yang lebih kecil (aturan yang
+     menangkap dua agen di lane + `x` yang sama).
+  Ditambah syarat jarak pusat agen **≥ 78 px**. Gate ini sudah berjalan di renderer
+  mockup; implementasi harus memakai gate yang sama.
 - Tinggi kepala di view samping: `floor_y − avatar_h × skala_lane`, bukan angka
   top-down.
 
@@ -329,12 +387,29 @@ gradien per avatar**, tergantung look (WAHYU/RAKA paling banyak karena kacamata)
 
 ```ts
 const key = `avatar:${hashLook(look)}:${pose}:${frame}:${dprBucket}`
-// gambar sekali ke offscreen 30×50 × dprBucket, lalu drawImage
+// gambar sekali ke offscreen 32×54 × dprBucket, lalu drawImage
 ```
 
 - Ancor kaki: `(cx, floorY_lane)`; `pickTargets` tetap memakai koordinat dunia.
 - Cache maksimum 312 entri; LRU 64.
-- Bangun 8 avatar @50 px ≈ 18 ms sekali; blit 8 sprite ≈ 0,06 ms/frame.
+- Bangun 8 avatar @54 px ≈ 20 ms sekali; blit 8 sprite ≈ 0,06 ms/frame.
+
+### 7.6 Bukti terukur (dari `render_mockups.py`, bukan klaim)
+
+`avatar_proof()` mencetak angka untuk satu agen di mockup yang benar-benar dirender,
+dan menulis `docs/design/mockups/avatar-zoom-check.png` (crop 4×):
+
+| Metrik | Nilai terukur | Ambang | Arti |
+|---|---|---|---|
+| Tinggi avatar di mockup | **54 px** (lane 2), 51 px (lane 1), 49 px (lane 0) | 48–56 px | ukuran tampil akhir |
+| Warna unik dalam siluet (sprite) | **655** | pixel-art ≤ 12, vector ≥ 40 | gradien + anti-aliasing |
+| Warna unik di crop mockup | **≈1000** | — | termasuk latar (gradien ikut bergeser) |
+| Piksel tepi siluet yang **blending** | **319 / 328 = 97 %** | pixel-art 0 % | tidak ada upscale nearest |
+| Piksel alpha parsial | **966** dari ±1.700 | > 0 | tepi sub-piksel nyata |
+| Operasi gambar | **53–63 path/isi + 28–32 gradien** | — | dihitung saat render |
+
+Cara memeriksa ulang: `python3 docs/design/mockups/render_mockups.py` — baris
+`avatar proof BAGAS: ...` dan `side gate L3: ...` tercetak di stdout.
 
 ## 8. Tipografi
 

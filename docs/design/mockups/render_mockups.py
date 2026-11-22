@@ -323,7 +323,7 @@ FLOORS = [
     ]),
 ]
 
-AVATAR_H = 50   # avatar height in px at scene scale (≈50 px @ zoom 2); the one constant
+AVATAR_H = 54   # avatar height in px at scene scale (≈54 px @ zoom 2); the one constant
 
 
 def floor_rows(fid: str) -> list[tuple[str, str, str]]:
@@ -393,180 +393,253 @@ def _av_grad(target, mask, c0, c1, horizontal, stats: dict[str, int]) -> None:
     paint_grad(target, mask, c0, c1, horizontal)
 
 
+AV_UNITS = 44.0        # one avatar is 44 design units tall (feet at 44)
+AV_SUPER = 4           # internal supersample: draw at 4x, reduce ONCE with LANCZOS
+AV_W_RATIO = 0.60      # sprite width / height
+
+
 def avatar(look: dict, height: float, status: str = "working",
            blocked_color: str = "#FFC93B") -> Image.Image:
-    """A clean-vector avatar tile, anti-aliased, feet at the bottom centre."""
-    hgt = height
-    wdt = hgt * 0.62
-    s = SS if hgt < 120 else 2
-    img = Image.new("RGBA", (int(wdt * s) + 8, int(hgt * s) + 8), (0, 0, 0, 0))
-    stats = AV_STATS.setdefault(look.get("name", "?"), {"primitives": 0, "gradients": 0, "calls": 0})
-    stats["calls"] += 1
-    d = _CountDraw(ImageDraw.Draw(img), stats)
-    U = hgt / 44.0 * s                    # one unit = 1/44 of the avatar height
-    ox, oy = 4, 4
-    cx = img.width / 2
+    """A clean-vector chibi, anti-aliased, feet flush with the bottom centre.
 
-    def X(v):  # local unit x, v in [-9, 9] around the body centre line
+    Drawn on a surface **4x the requested height** and reduced exactly once with
+    LANCZOS, so every edge keeps real sub-pixel coverage — the same result a
+    canvas gets from `ctx.arc` + `createLinearGradient` at device scale. Nothing
+    is ever upscaled from a small canvas: at 54 px on screen the paths are laid
+    out on a 216 px surface, so a 1-unit outline is a genuine 1 px stroke and
+    not a staircase. Every material carries two tones (gradient) plus a darker
+    outline stroke, and the face keeps eyes, brows and a mouth at 54 px.
+    """
+    hgt = float(height)
+    s = AV_SUPER
+    U = hgt * s / AV_UNITS                       # one design unit in device px
+    W2 = int(round(hgt * AV_W_RATIO * s)) + 2 * s
+    H2 = int(round(hgt * s))
+    img = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
+    stats = AV_STATS.setdefault(look.get("name", "?"),
+                                {"primitives": 0, "gradients": 0, "calls": 0})
+    stats["calls"] += 1
+    d = _CountDraw(ImageDraw.Draw(img), stats)      # opaque strokes straight on the sprite
+    cx = W2 / 2.0
+    skin, hair, shirt, pants = look["skin"], look["hair"], look["shirt"], look["pants"]
+    build, tall = look.get("build", 1.0), look.get("tall", 1.0)
+
+    def X(v):                                   # design x, 0 = body centre line
         return cx + v * U
 
-    def Y(v):
-        return oy + v * U
+    def Y(v):                                   # design y, 0 = top of the head box
+        return v * U
 
-    build = look.get("build", 1.0)
-    torso_w = 16 * build
-    skin, hair, shirt, pants = look["skin"], look["hair"], look["shirt"], look["pants"]
+    def part(prim, geo, base, ok=0.55, ow=1.0, horiz=False, kh=1.10, kl=0.84, r=None):
+        """One body part: silhouette -> two-tone gradient -> darker outline.
 
-    # ---- legs (pants) + shoes
-    leg_w = 5.4
+        Drawn on its own layer so the gradient is clipped by the exact path and
+        the outline can sit on top of it, which is what a canvas would do with
+        fill() + stroke() on the same path.
+        """
+        lay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        ld = _CountDraw(ImageDraw.Draw(lay), stats)
+        w = max(1, round(ow * U))
+        if prim == "e":
+            g = [round(v) for v in geo]
+            ld.ellipse(g, fill=255)
+        elif prim == "r":
+            g = [round(v) for v in geo]
+            ld.rounded_rectangle(g, radius=max(1, round(r if r is not None else U)), fill=255)
+        else:
+            g = [(round(x), round(y)) for x, y in geo]
+            ld.polygon(g, fill=255)
+        _av_grad(lay, lay.split()[3], shade(base, kh), shade(base, kl), horiz, stats)
+        if ok is not None:
+            col = shade(base, ok)
+            if prim == "e":
+                ld.ellipse(g, outline=col, width=w)
+            elif prim == "r":
+                ld.rounded_rectangle(g, radius=max(1, round(r if r is not None else U)),
+                                     outline=col, width=w)
+            else:
+                ld.line(g + [g[0]], fill=col, width=w, joint="curve")
+        comp(img, lay)
+
+    leg_w, leg_gap = 5.4, 3.4
+    hips = 33.4 - (tall - 1.0) * 10
+
+    # ---- shoes and legs (pants: two tones + outline)
     for side in (-1, 1):
-        lx = X(0) + side * 3.7 * U - leg_w * U / 2
-        rr(d, (lx, Y(29.4), lx + leg_w * U, Y(40.8)), 2.2 * U, fill=hex_rgb(shade(pants, 0.94)))
-        d.line([(lx + 1.0 * U, Y(31)), (lx + 1.0 * U, Y(39))], fill=shade(pants, 0.72),
-               width=max(1, round(0.5 * U)))
-        # shoe: its own block, a rounded toe and a sole that does not touch its pair
-        rr(d, (lx - 1.0 * U, Y(39.8), lx + (leg_w + 1.2) * U, Y(42.2)), 1.8 * U,
-           fill=hex_rgb(shade(pants, 0.38)))
-        rr(d, (lx - 0.3 * U, Y(41.9), lx + (leg_w + 0.5) * U, Y(43.1)), 1.1 * U,
-           fill="#E8E9EC")
+        lx = X(side * leg_gap) - leg_w * U / 2
+        part("r", (lx, Y(hips - 1.0), lx + leg_w * U, Y(41.4)), pants, ok=0.46, r=2.0 * U)
+        part("r", (lx - 1.2 * U, Y(40.5), lx + (leg_w + 1.4) * U, Y(43.4)),
+             shade(pants, 0.55), ok=0.28, r=1.8 * U)
+        part("r", (lx - 0.6 * U, Y(42.9), lx + (leg_w + 0.8) * U, Y(43.7)),
+             "#E7EAEE", ok=0.66, r=0.8 * U)
 
-    # ---- torso: shoulders wide, waist narrow (a tapered silhouette, not a box)
-    ty0, ty1 = 18.4, 31.8
-    torso = Image.new("L", img.size, 0)
-    td = _CountDraw(ImageDraw.Draw(torso), stats)
-    td.polygon([(X(-torso_w / 2), Y(ty0 + 2.4)), (X(-torso_w / 2 + 0.6), Y(ty0)),
-                (X(torso_w / 2 - 0.6), Y(ty0)), (X(torso_w / 2), Y(ty0 + 2.4)),
-                (X(torso_w / 2 - 1.2), Y(ty1)), (X(-torso_w / 2 + 1.2), Y(ty1))], fill=255)
-    td.ellipse([X(-torso_w / 2), Y(ty0 - 2.6), X(torso_w / 2), Y(ty0 + 5)], fill=255)
-    _av_grad(img, torso, shade(shirt, 1.12), shade(shirt, 0.82), False, stats)
+    # ---- torso: shoulders wide, waist narrow (tapered silhouette, not a box)
+    tw = 15.2 * build
+    ty0, ty1 = 20.2, 33.8
+    part("p", [(X(-tw / 2), Y(ty0 + 2.8)), (X(-tw / 2 + 0.7), Y(ty0)),
+               (X(tw / 2 - 0.7), Y(ty0)), (X(tw / 2), Y(ty0 + 2.8)),
+               (X(tw / 2 - 1.4), Y(ty1)), (X(-tw / 2 + 1.4), Y(ty1))],
+         shirt, ok=0.56, kh=1.14, kl=0.84)
+    part("e", (X(-tw / 2 - 0.5), Y(ty0 - 1.4), X(tw / 2 + 0.5), Y(ty0 + 4.8)),
+         shirt, ok=0.56, kh=1.16, kl=0.88)          # shoulder caps
+    # shaded side panel: the second tone as a real region, not just a gradient
+    shade_l = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    _CountDraw(ImageDraw.Draw(shade_l), stats).polygon(
+        [(round(X(tw / 2 - 4.6)), round(Y(ty0 + 1.0))), (round(X(tw / 2 - 1.2)), round(Y(ty0 + 2.6))),
+         (round(X(tw / 2 - 2.0)), round(Y(ty1))), (round(X(tw / 2 - 5.4)), round(Y(ty1)))],
+        fill=hex_rgb(shade(shirt, 0.78)) + (150,))
+    comp(img, shade_l)
+    # neckline V + team accent stripe
+    part("p", [(X(-2.7), Y(ty0 + 1.4)), (X(0), Y(ty0 + 4.6)), (X(2.7), Y(ty0 + 1.4))],
+         shade(shirt, 0.62), ok=None)
+    part("r", (X(-tw / 2 + 2.2), Y(ty0 + 5.4), X(tw / 2 - 2.2), Y(ty0 + 7.0)),
+         look["accent"], ok=0.72, r=0.7 * U)
 
-    # neckline: a shallow V in a darker shirt tone
-    d.polygon([(X(-2.6), Y(ty0 + 1.2)), (X(0), Y(ty0 + 4.2)), (X(2.6), Y(ty0 + 1.2))],
-              fill=shade(shirt, 0.66))
-
-    # accent stripe on the chest (team identity, same job as the shipped pixel accent)
-    acc = Image.new("L", img.size, 0)
-    _CountDraw(ImageDraw.Draw(acc), stats).rounded_rectangle(
-        [X(-torso_w / 2 + 2.0), Y(ty0 + 4.6), X(torso_w / 2 - 2.0), Y(ty0 + 6.4)],
-        radius=1 * U, fill=255)
-    img.paste(hex_rgb(look["accent"]), (0, 0), acc)
-
-    # ---- arms
+    # ---- arms: sleeve, cuff, hand
     for side in (-1, 1):
-        ax = X(side * (torso_w / 2 - 0.2))
-        rr(d, (ax - 2.2 * U, Y(ty0 + 1.4), ax + 2.2 * U, Y(ty0 + 9.2)), 2.1 * U,
-           fill=hex_rgb(shade(shirt, 0.84)),
-           outline=shade(shirt, 0.66), width=max(1, round(0.35 * U)))
-        # cuff + hand: the arm now ends in a hand instead of fading into the body
-        d.line([(ax - 2.0 * U, Y(ty0 + 8.8)), (ax + 2.0 * U, Y(ty0 + 8.8))],
-               fill=shade(shirt, 0.62), width=max(1, round(0.5 * U)))
-        d.ellipse([ax - 1.7 * U, Y(ty0 + 9.2), ax + 1.7 * U, Y(ty0 + 12.6)],
-                  fill=hex_rgb(shade(skin, 1.0)), outline=shade(skin, 0.72),
-                  width=max(1, round(0.3 * U)))
-        tx0, tx1 = sorted((ax - side * 1.9 * U, ax - side * 0.6 * U))
-        d.ellipse([tx0, Y(ty0 + 9.6), tx1, Y(ty0 + 11.4)], fill=hex_rgb(shade(skin, 1.02)))
+        ax = X(side * (tw / 2 - 0.2))
+        part("r", (ax - 2.3 * U, Y(ty0 + 1.6), ax + 2.3 * U, Y(ty0 + 9.6)),
+             shade(shirt, 0.92), ok=0.52, r=2.2 * U)
+        part("e", (ax - 1.8 * U, Y(ty0 + 9.4), ax + 1.8 * U, Y(ty0 + 13.0)),
+             skin, ok=0.55, kh=1.06, kl=0.88)       # hand
 
     # ---- neck + head
-    rr(d, (X(-2.5), Y(13.6), X(2.5), Y(19.6)), 2.0 * U, fill=hex_rgb(shade(skin, 0.93)))
-    head = Image.new("L", img.size, 0)
-    hd = _CountDraw(ImageDraw.Draw(head), stats)
-    hx, hy, hr = 0.0, 9.0, 6.9
-    hd.ellipse([X(hx - hr), Y(hy - hr * 1.06), X(hx + hr), Y(hy + hr * 1.1)], fill=255)
-    _av_grad(img, head, shade(skin, 1.06), shade(skin, 0.88), False, stats)
-    # a soft contour so the head separates from a dark floor
-    d.ellipse([X(hx - hr), Y(hy - hr * 1.06), X(hx + hr), Y(hy + hr * 1.1)],
-              outline=shade(skin, 0.62), width=max(1, round(0.35 * U)))
+    part("r", (X(-2.6), Y(16.4), X(2.6), Y(21.6)), skin, ok=0.52, kh=0.94, kl=0.80, r=1.8 * U)
+    hrx, hry, hcy = 7.8, 8.4, 10.0
+    for side in (-1, 1):                            # ears sit BEHIND the head
+        part("e", (X(side * hrx - 1.2), Y(hcy + 0.2), X(side * hrx + 1.2), Y(hcy + 3.4)),
+             skin, ok=0.50, kh=1.02, kl=0.84)
+    head_box = (X(-hrx), Y(hcy - hry), X(hrx), Y(hcy + hry))
+    part("e", head_box, skin, ok=0.50, kh=1.10, kl=0.84)
+    # cheek shadow: the second skin tone, clipped to the head so it never spills
+    head_mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(head_mask).ellipse([round(v) for v in head_box], fill=255)
+    cheek = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(cheek).ellipse(
+        [round(X(-1.0)), round(Y(hcy - 2.6)), round(X(hrx + 1.6)), round(Y(hcy + hry + 1.0))],
+        fill=hex_rgb(shade(skin, 0.80)) + (105,))
+    cheek.putalpha(ImageChops.multiply(cheek.split()[3], head_mask))
+    comp(img, cheek)
 
-    # ears
-    for side in (-1, 1):
-        d.ellipse([X(side * hr - 0.9), Y(hy - 0.4), X(side * hr + 0.9), Y(hy + 2.2)],
-                  fill=hex_rgb(shade(skin, 0.92)))
-
+    # ---- hair: base mass + highlight tone + outline
     style = look.get("style", "crop")
-    hair_c = hex_rgb(hair)
-    # hair: a cap that follows the skull, then the style's extra mass
-    cap = Image.new("L", img.size, 0)
-    cd = ImageDraw.Draw(cap)
-    cd.ellipse([X(hx - hr - 0.3), Y(hy - hr * 1.2), X(hx + hr + 0.3), Y(hy - 0.4)], fill=255)
-    img.paste(hair_c, (0, 0), cap)
+    cap_box = (X(-hrx - 0.4), Y(hcy - hry - 0.6), X(hrx + 0.4), Y(hcy - 2.2))
+    part("e", cap_box, hair, ok=0.5, kh=1.95, kl=0.95)
+    # fringe: the hairline itself differs per style, so the eight looks stay
+    # distinguishable at 50 px instead of reading as palette swaps
+    if style == "side":
+        fringe = [(X(-hrx - 0.4), Y(hcy - 3.0)), (X(-3.2), Y(hcy - 5.4)),
+                  (X(1.6), Y(hcy - 6.0)), (X(hrx + 0.4), Y(hcy - 4.4)),
+                  (X(hrx + 0.4), Y(hcy - 6.6)), (X(-hrx - 0.4), Y(hcy - 6.6))]
+    elif style == "messy":
+        fringe = [(X(-hrx - 0.4), Y(hcy - 3.4)), (X(-4.6), Y(hcy - 5.0)),
+                  (X(-2.2), Y(hcy - 6.8)), (X(0.6), Y(hcy - 4.8)),
+                  (X(3.2), Y(hcy - 6.8)), (X(hrx + 0.4), Y(hcy - 4.0)),
+                  (X(hrx + 0.4), Y(hcy - 6.6)), (X(-hrx - 0.4), Y(hcy - 6.6))]
+    elif style == "curly":
+        fringe = [(X(-hrx - 0.4), Y(hcy - 2.6)), (X(-hrx + 1.2), Y(hcy - 5.2)),
+                  (X(-2.6), Y(hcy - 3.6)), (X(0.4), Y(hcy - 5.6)),
+                  (X(3.0), Y(hcy - 3.8)), (X(hrx + 0.4), Y(hcy - 5.4)),
+                  (X(hrx + 0.4), Y(hcy - 6.6)), (X(-hrx - 0.4), Y(hcy - 6.6))]
+    elif style == "long":
+        fringe = [(X(-hrx - 0.4), Y(hcy - 1.4)), (X(-2.0), Y(hcy - 5.0)),
+                  (X(2.0), Y(hcy - 5.4)), (X(hrx + 0.4), Y(hcy - 1.8)),
+                  (X(hrx + 0.4), Y(hcy - 6.6)), (X(-hrx - 0.4), Y(hcy - 6.6))]
+    elif style == "bun":
+        fringe = [(X(-hrx - 0.4), Y(hcy - 3.6)), (X(-hrx + 1.4), Y(hcy - 5.4)),
+                  (X(0.0), Y(hcy - 4.0)), (X(hrx - 1.2), Y(hcy - 5.6)),
+                  (X(hrx + 0.4), Y(hcy - 3.4)), (X(hrx + 0.4), Y(hcy - 6.6)),
+                  (X(-hrx - 0.4), Y(hcy - 6.6))]
+    else:                                                   # crop / short
+        fringe = [(X(-hrx - 0.4), Y(hcy - 3.8)), (X(-3.0), Y(hcy - 4.8)),
+                  (X(0.4), Y(hcy - 4.2)), (X(3.4), Y(hcy - 5.0)),
+                  (X(hrx + 0.4), Y(hcy - 3.6)), (X(hrx + 0.4), Y(hcy - 6.6)),
+                  (X(-hrx - 0.4), Y(hcy - 6.6))]
+    part("p", fringe, hair, ok=0.5, kh=1.6, kl=0.95)
+    # a second hair tone as a soft sheen: the gradient on the mass itself, no
+    # floating highlight band (that read as a headband at 50 px)
     if style in ("short", "side", "long"):
         for side in (-1, 1):
-            d.rounded_rectangle([X(side * hr - 0.9), Y(hy - 2.6), X(side * hr + 0.9), Y(hy + 2.0)],
-                                radius=0.9 * U, fill=hair_c)
+            part("r", (X(side * hrx - 0.9), Y(hcy - 3.0), X(side * hrx + 1.1), Y(hcy + 2.6)),
+                 hair, ok=0.5, kh=1.3, kl=0.95, r=1.0 * U)
     if style == "side":
-        d.polygon([(X(-hr - 0.4), Y(hy - 2.2)), (X(-1.2), Y(hy - 4.4)),
-                   (X(2.4), Y(hy - 2.6)), (X(-1.0), Y(hy - 0.6))], fill=hair_c)
+        part("p", [(X(-hrx - 0.4), Y(hcy - 3.4)), (X(-2.0), Y(hcy - 6.2)),
+                   (X(2.8), Y(hcy - 4.4)), (X(-0.8), Y(hcy - 2.4))], hair, ok=0.5, kh=1.3, kl=0.95)
     if style == "long":
         for side in (-1, 1):
-            d.rounded_rectangle([X(side * (hr - 0.4) - 1.5), Y(hy - 1.0),
-                                 X(side * (hr - 0.4) + 1.5), Y(hy + 9.4)], radius=1.4 * U, fill=hair_c)
+            part("r", (X(side * (hrx - 1.0) - 1.6), Y(hcy - 2.0), X(side * (hrx - 1.0) + 1.6),
+                       Y(hcy + 11.0)), hair, ok=0.5, kh=1.3, kl=0.95, r=1.5 * U)
     if style == "bun":
-        d.ellipse([X(-3.1), Y(hy - hr * 1.55), X(3.1), Y(hy - hr * 1.55 + 6.2)], fill=hair_c)
+        part("e", (X(1.2), Y(hcy - hry - 0.4), X(7.6), Y(hcy - hry + 6.0)),
+             hair, ok=0.5, kh=1.7, kl=0.95)
     if style == "curly":
         for k in range(4):
-            d.ellipse([X(-hr + k * 3.6 - 1.4), Y(hy - hr * 1.25), X(-hr + k * 3.6 + 2.2),
-                       Y(hy - hr * 1.25 + 4.4)], fill=hair_c)
+            part("e", (X(-hrx + k * 4.0 - 1.6), Y(hcy - hry - 1.4), X(-hrx + k * 4.0 + 2.6),
+                       Y(hcy - hry + 3.4)), hair, ok=0.5, kh=1.4, kl=0.95)
     if style == "messy":
-        d.polygon([(X(-hr), Y(hy - 3.4)), (X(-3.0), Y(hy - 6.6)), (X(-0.4), Y(hy - 4.2)),
-                   (X(2.2), Y(hy - 7.0)), (X(hr), Y(hy - 3.0))], fill=hair_c)
+        part("p", [(X(-hrx), Y(hcy - 4.0)), (X(-3.4), Y(hcy - hry - 2.6)),
+                   (X(-0.6), Y(hcy - 5.0)), (X(2.4), Y(hcy - hry - 3.2)),
+                   (X(hrx), Y(hcy - 3.6))], hair, ok=0.5, kh=1.4, kl=0.95)
     if look.get("peci"):
-        d.rounded_rectangle([X(-hr - 0.6), Y(hy - hr * 1.2), X(hr + 0.6), Y(hy - 2.2)],
-                            radius=1.2 * U, fill=hex_rgb("#1B1B22"))
+        part("r", (X(-hrx - 0.8), Y(hcy - hry - 1.0), X(hrx + 0.8), Y(hcy - 2.4)),
+             "#20202A", ok=0.5, kh=1.35, kl=0.9, r=1.2 * U)
 
-    # face: eyes, brows, mouth
-    eye_y = hy + 1.6
-    ink = "#2A2320"
+    # ---- face: brows, eyes (sclera + iris + glint), nose, mouth
+    eye_y, eye_dx = hcy + 1.9, 2.9
+    ink = "#241C18"
     for side in (-1, 1):
-        d.ellipse([X(side * 2.9 - 0.8), Y(eye_y - 0.5), X(side * 2.9 + 0.8), Y(eye_y + 1.5)],
-                  fill=ink)
-        d.ellipse([X(side * 2.9 - 0.35), Y(eye_y - 0.15), X(side * 2.9 - 0.05), Y(eye_y + 0.2)],
-                  fill="#F6F8FA")
-        d.line([(X(side * 2.9 - 1.1), Y(eye_y - 1.6)), (X(side * 2.9 + 1.1), Y(eye_y - 1.75))],
-               fill=shade(hair, 0.95), width=max(1, round(0.55 * U)))
-    # nose bridge + mouth, drawn after the stubble so the face stays readable
-    d.polygon([(X(0.3), Y(hy + 1.8)), (X(1.4), Y(hy + 3.4)), (X(0.2), Y(hy + 3.5))],
-              fill=shade(skin, 0.80))
-    d.arc([X(-1.3), Y(hy + 3.5), X(1.3), Y(hy + 5.2)], 20, 160, fill=shade(skin, 0.55),
-          width=max(1, round(0.6 * U)))
+        # brow on every look: 0,9 unit stroke, visible at 50 px
+        d.line([(X(side * eye_dx - 1.7), Y(eye_y - 2.3)), (X(side * eye_dx + 1.7), Y(eye_y - 2.8))],
+               fill="#1A1310", width=max(1, round(0.9 * U)))
+        part("e", (X(side * eye_dx - 1.35), Y(eye_y - 1.5), X(side * eye_dx + 1.35), Y(eye_y + 1.5)),
+             "#F7F9FB", ok=0.55, kh=1.0, kl=0.9)
+        part("e", (X(side * eye_dx - 0.85), Y(eye_y - 1.25), X(side * eye_dx + 0.85), Y(eye_y + 1.25)),
+             ink, ok=None)
+        part("e", (X(side * eye_dx - 0.55), Y(eye_y - 0.95), X(side * eye_dx - 0.05), Y(eye_y - 0.35)),
+             "#FFFFFF", ok=None)
+    part("p", [(X(0.5), Y(hcy + 2.9)), (X(1.8), Y(hcy + 4.5)), (X(0.3), Y(hcy + 4.6))],
+         shade(skin, 0.74), ok=None)                                    # nose shadow
+    part("e", (X(-2.3), Y(hcy + 4.4), X(2.3), Y(hcy + 6.8)), shade(skin, 0.88), ok=None)
+    mouth = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(mouth).arc([round(X(-2.3)), round(Y(hcy + 3.9)), round(X(2.3)), round(Y(hcy + 6.9))],
+                              12, 168, fill=hex_rgb(shade(skin, 0.42)) + (245,),
+                              width=max(1, round(1.1 * U)))
+    comp(img, mouth)
     if look.get("mustache"):
-        d.rounded_rectangle([X(-2.2), Y(hy + 3.0), X(2.2), Y(hy + 4.0)], radius=0.5 * U, fill=hair_c)
+        part("r", (X(-2.5), Y(hcy + 2.9), X(2.5), Y(hcy + 4.1)), hair, ok=0.5, kh=1.3, kl=0.95,
+             r=0.5 * U)
     if look.get("stubble"):
         stub = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        _CountDraw(ImageDraw.Draw(stub), stats).ellipse([X(-4.6), Y(hy + 2.4), X(4.6), Y(hy + 6.4)],
-                                                        fill=hex_rgb(hair) + (70,))
+        _CountDraw(ImageDraw.Draw(stub), stats).ellipse(
+            [round(X(-4.9)), round(Y(hcy + 2.6)), round(X(4.9)), round(Y(hcy + 7.4))],
+            fill=hex_rgb(hair) + (68,))
         comp(img, stub)
     if look.get("glasses"):
         lens = Image.new("RGBA", img.size, (0, 0, 0, 0))
         ld = _CountDraw(ImageDraw.Draw(lens), stats)
         for side in (-1, 1):
-            ld.rounded_rectangle([X(side * 2.9 - 2.3), Y(eye_y - 1.7), X(side * 2.9 + 2.3),
-                                  Y(eye_y + 2.3)], radius=1.1 * U, fill=(210, 232, 245, 60))
-            ld.rounded_rectangle([X(side * 2.9 - 2.3), Y(eye_y - 1.7), X(side * 2.9 + 2.3),
-                                  Y(eye_y + 2.3)], radius=1.1 * U,
-                                 outline="#161C24", width=max(1, round(0.85 * U)))
-        ld.line([(X(-1.1), Y(eye_y + 0.3)), (X(1.1), Y(eye_y + 0.3))],
-                fill="#161C24", width=max(1, round(0.8 * U)))
-        img.alpha_composite(lens)
+            box = [round(X(side * eye_dx - 2.5)), round(Y(eye_y - 2.1)),
+                   round(X(side * eye_dx + 2.5)), round(Y(eye_y + 2.5))]
+            ld.rounded_rectangle(box, radius=max(1, round(1.1 * U)), fill=(206, 228, 244, 62))
+            ld.rounded_rectangle(box, radius=max(1, round(1.1 * U)), outline="#141A22",
+                                 width=max(1, round(0.8 * U)))
+        ld.line([(round(X(-0.5)), round(Y(eye_y - 0.1))), (round(X(0.5)), round(Y(eye_y - 0.1)))],
+                fill="#141A22", width=max(1, round(0.7 * U)))
+        comp(img, lens)
     if look.get("headphones"):
-        hp = hex_rgb(look["headphones"])
-        d.arc([X(-hr - 0.8), Y(hy - hr * 1.45), X(hr + 0.8), Y(hy + 2.6)], 190, 350,
-              fill=hp, width=max(1, round(1.5 * U)))
+        hp = look["headphones"]
+        part("e", (X(-hrx - 0.6), Y(hcy - hry - 1.6), X(hrx + 0.6), Y(hcy + 3.0)),
+             hp, ok=0.5, kh=1.25, kl=0.9)                              # band
         for side in (-1, 1):
-            rr(d, (X(side * (hr + 0.1) - 2.2), Y(hy - 1.0), X(side * (hr + 0.1) + 2.2), Y(hy + 4.0)),
-               1.9 * U, fill=hp)
-            rr(d, (X(side * (hr + 0.1) - 1.1), Y(hy + 0.4), X(side * (hr + 0.1) + 1.1), Y(hy + 2.6)),
-               1.0 * U, fill=shade(look["headphones"], 0.7))
-
-    # status: a small chip at the shoulder (shape cue, not colour alone) —
-    # blocked is a diamond, the same rotated square the roster dot uses
+            part("r", (X(side * (hrx + 0.2) - 2.2), Y(hcy - 1.2), X(side * (hrx + 0.2) + 2.2),
+                       Y(hcy + 4.4)), hp, ok=0.45, kh=1.2, kl=0.85, r=1.9 * U)
     if status == "blocked":
-        chx, chy = torso_w / 2 - 1.0, ty0 + 0.8
-        d.polygon([(X(chx), Y(chy - 2.6)), (X(chx + 2.6), Y(chy)),
-                   (X(chx), Y(chy + 2.6)), (X(chx - 2.6), Y(chy))],
-                  fill=blocked_color, outline="#1A1206")
+        chx, chy = tw / 2 - 0.4, ty0 + 1.4
+        d.polygon([(X(chx), Y(chy - 2.8)), (X(chx + 2.8), Y(chy)),
+                   (X(chx), Y(chy + 2.8)), (X(chx - 2.8), Y(chy))],
+                  fill=hex_rgb(blocked_color), outline="#1A1206")
 
-    out = img.resize((max(1, img.width // s), max(1, img.height // s)), Image.LANCZOS)
-    return out
+    return img.resize((max(1, W2 // s), max(1, H2 // s)), Image.LANCZOS)
 
 
 def pixel_chibi(look: dict, scale: int = 6) -> Image.Image:
@@ -1390,12 +1463,12 @@ def draw_callout(img, d, text, xy, to) -> None:
 # last) — nearer reads lower and larger, so depth reads without breaking the
 # side-view illusion.
 LANE_PITCH_UNITS = 3.0        # one depth lane per 3 world units of z
-LANE_DY = 7                   # px a lane's floor line sits below the lane above
-LANE_SCALE = (0.92, 0.96, 1.00)   # back → front sprite scale (nearest = 1.00)
+LANE_DY = 20                  # px a lane's floor line sits below the lane above
+LANE_SCALE = (0.90, 0.95, 1.00)   # back → front sprite scale (nearest = 1.00)
 SIDE_MARGIN = 20              # px margin each side of the 1000 px scene canvas
 SIDE_PAD_UNITS = 1.5          # camera padding each side of the occupied span
 SIDE_CITY_H = 310             # city skyline band behind the curtain wall
-SIDE_CEIL_H = 26              # ceiling band (3 recessed light strips)
+SIDE_CEIL_H = 26              # ceiling band (one continuous light cove)
 SIDE_SLAB_H = 22              # floor slab band
 SIDE_WALL_TOP = SIDE_CITY_H + SIDE_CEIL_H             # 336: interior wall starts
 SIDE_FINISH_TOP = 596         # wall → floor-finish transition
@@ -1449,11 +1522,46 @@ def side_lanes(fid: str) -> dict[str, int]:
     return lane
 
 
+SIDE_MIN_SEP = 78     # px between two agent centres: label width (~52) + air
+
+
+def side_slots(agents: list[dict], width_px: int, margin: int) -> None:
+    """Give every agent its own horizontal slot (in place, on ``cx``).
+
+    A section view cannot stack two agents on one screen x, but rooms.ts puts
+    the front and back rows of the dev island at the SAME x (only z differs),
+    so the raw projection lands DIMAS on BAGAS, YOGA on RAKA and SARI on LARAS
+    — three pairs, four visible positions. This resolver keeps the left-to-right
+    order that comes from rooms.ts and pushes each colliding pair apart to
+    SIDE_MIN_SEP (one label width plus breathing room), so every agent owns a
+    distinct horizontal slot and two labels can never meet.
+    """
+    if len(agents) < 2:
+        return
+    order = sorted(agents, key=lambda a: (a["cx"], a["lane"]))
+    lo, hi = margin + AV_HALF_W, width_px - margin - AV_HALF_W
+    avail = hi - lo
+    sep = min(SIDE_MIN_SEP, avail / (len(order) - 1))
+    xs = [max(lo, min(a["cx"], hi)) for a in order]
+    out = [xs[0]]
+    for x in xs[1:]:                       # greedy: never closer than `sep`
+        out.append(max(x, out[-1] + sep))
+    if out[-1] > hi:                       # pull the band back inside the canvas
+        shift = out[-1] - hi
+        out = [v - shift for v in out]
+        if out[0] < lo:
+            grow = lo - out[0]
+            out = [v + grow for v in out]
+    for a, x in zip(order, out):
+        a["cx"] = x
+
+
 def side_layout(fid: str = "L3") -> dict:
     """Per-agent 1x section geometry: lane, scale, screen x, floor line, head
     top (floor_y - AVATAR_H * lane_scale — the side-view head box anchor)."""
     cam = side_camera(fid)
     lanes = side_lanes(fid)
+    cw = CANVAS[2] - CANVAS[0]
     agents = []
     for did, wx, wz, rot, status in DESKS_BY_FLOOR[fid]:
         lane = lanes[did]
@@ -1462,6 +1570,7 @@ def side_layout(fid: str = "L3") -> dict:
         agents.append({"id": did, "name": LOOKS[did]["name"], "status": status,
                        "lane": lane, "scale": k, "cx": cam["x_of"](wx),
                        "floor_y": fy, "avatar_h": AVATAR_H * k, "head_top": fy - AVATAR_H * k})
+    side_slots(agents, cw, SIDE_MARGIN)     # one horizontal slot per agent
     agents.sort(key=lambda a: (a["lane"], a["cx"]))    # paint far lane first, then x
     return {"fid": fid, "ppu": cam["ppu"], "span": (cam["lo"], cam["hi"]), "agents": agents}
 
@@ -1515,6 +1624,77 @@ def side_plate_boxes(d: dict, layout: dict) -> list[dict]:
     return boxes
 
 
+AV_BOX_HW = AVATAR_H * AV_W_RATIO / 2      # half the drawn sprite width (px)
+
+
+def _box_overlap(a: dict, b: dict) -> float:
+    """Intersection area as a fraction of the SMALLER box (0..1)."""
+    w = min(a["x1"], b["x1"]) - max(a["x0"], b["x0"])
+    h = min(a["y1"], b["y1"]) - max(a["y0"], b["y0"])
+    if w <= 0 or h <= 0:
+        return 0.0
+    area = lambda r: max(0.0, r["x1"] - r["x0"]) * max(0.0, r["y1"] - r["y0"])
+    small = min(area(a), area(b))
+    return (w * h) / small if small else 0.0
+
+
+def side_gate(fid: str = "L3", limit: float = 0.20, verbose: bool = True) -> dict:
+    """The section's hard gate, measured and printed as numbers.
+
+    Three rules, all on the 8 agents of the floor:
+      1. no label rect may overlap another label rect;
+      2. no label rect may overlap ANOTHER agent's head box;
+      3. no two avatar bounding boxes may overlap more than `limit` (20 %) of
+         the smaller one — the rule that catches two agents sharing a lane and
+         an x, which is exactly how DIMAS/BAGAS used to merge.
+    Any violation raises SystemExit with the offending agents named.
+    """
+    layout = side_layout(fid)
+    boxes = side_plate_boxes(DAY, layout)
+    agents = layout["agents"]
+    heads = {a["id"]: {"x0": a["cx"] - AV_HALF_W, "x1": a["cx"] + AV_HALF_W,
+                       "y0": a["head_top"], "y1": a["head_top"] + HEAD_BOX_H} for a in agents}
+    bodies = {a["id"]: {"x0": a["cx"] - AV_BOX_HW, "x1": a["cx"] + AV_BOX_HW,
+                        "y0": a["head_top"], "y1": a["floor_y"]} for a in agents}
+
+    lab_lab = [(a, b) for i, a in enumerate(boxes) for b in boxes[i + 1:]
+               if _box_overlap(a, b) > 0]
+    lab_head = [(a, hid) for a in boxes for hid in heads
+                if hid != a["id"] and _box_overlap(a, heads[hid]) > 0]
+    worst, worst_pair = 0.0, None
+    pairs = 0
+    for i, a in enumerate(agents):
+        for b in agents[i + 1:]:
+            pairs += 1
+            ov = _box_overlap(bodies[a["id"]], bodies[b["id"]])
+            if ov > worst:
+                worst, worst_pair = ov, (a["name"], b["name"])
+    gaps = sorted(abs(agents[i]["cx"] - agents[j]["cx"])
+                  for i in range(len(agents)) for j in range(i + 1, len(agents)))
+    min_gap = gaps[0] if gaps else 0.0
+    if verbose:
+        print(f"side gate {fid}: {len(agents)} agen · {len(boxes)} label · "
+              f"label↔label overlap {len(lab_lab)} · label↔kepala-agen-lain {len(lab_head)} · "
+              f"{pairs} pasang avatar, overlap bbox terbesar "
+              f"{worst * 100:.1f}% (batas {limit * 100:.0f}%) · "
+              f"jarak pusat minimum {min_gap:.1f} px")
+        print("  slot x: " + " · ".join(f"{a['name']} {a['cx']:.0f}" for a in
+                                        sorted(agents, key=lambda t: t["cx"])))
+    if lab_lab or lab_head:
+        bad = {b["name"] for b in lab_lab[0]} if lab_lab else set()
+        raise SystemExit(f"side gate FAILED on {fid}: {len(lab_lab)} label overlap, "
+                         f"{len(lab_head)} label-head cover ({', '.join(sorted(bad))})")
+    if worst > limit:
+        raise SystemExit(f"side gate FAILED on {fid}: avatar bbox overlap "
+                         f"{worst * 100:.0f}% > {limit * 100:.0f}% "
+                         f"({worst_pair[0]}/{worst_pair[1]})")
+    if len(agents) > 1 and min_gap < SIDE_MIN_SEP - 0.5:
+        raise SystemExit(f"side gate FAILED on {fid}: two agents only {min_gap:.1f} px apart "
+                         f"(minimum {SIDE_MIN_SEP})")
+    return {"labels": len(boxes), "label_overlap": len(lab_lab), "label_head": len(lab_head),
+            "max_avatar_overlap": worst, "min_gap": min_gap}
+
+
 def draw_side_plates(img: Image.Image, d: dict, layout: dict) -> None:
     """Nameplates over the section scene — the same near-opaque pill recipe as
     draw_plates(), with a 1 px leader line when a plate had to be stepped up."""
@@ -1560,36 +1740,46 @@ def draw_side_scene(img: Image.Image, d: dict, fid: str = "L3", s: int = 1) -> d
     # 1 · the city skyline band behind the curtain wall (top of the canvas)
     draw_city(img, (0, 0, CANVAS[2] - CANVAS[0], SIDE_CITY_H), d, seed=5, s=s)
 
-    # 2 · the curtain wall in front of the city: draw_glass_panel panes,
-    #     mullions every ~96 px (2 px wide, theme wall colour), 1 px top highlight.
-    #     The panes take the glass recipe with fill_a 0.20 — the interior 0.42
-    #     fill is meant over a floor and would drown the skyline behind glass.
-    gx0, gx1, panes = 16, (CANVAS[2] - CANVAS[0]) - 16, 10
-    pitch = (gx1 - gx0) / panes
-    for k in range(panes):
-        draw_glass_panel(img, d, ((gx0 + k * pitch) * s, 0, (gx0 + (k + 1) * pitch) * s,
-                                  SIDE_CITY_H * s), s, radius=2 * s, fill_a=0.20)
-    mull = hex_rgb(d["wall"]) + (235,)
-    for k in range(1, panes):
-        mx = (gx0 + k * pitch) * s
-        dr.rectangle([mx - 1 * s, 0, mx + 1 * s, SIDE_CITY_H * s], fill=mull)
-    for ex in (gx0, gx1):        # side jambs
-        dr.rectangle([ex * s - 2 * s, 0, ex * s + 2 * s, SIDE_CITY_H * s], fill=mull)
+    # 2 · the curtain wall in front of the city: ONE continuous glass sheet
+    #     (the old code drew 10 separate panes, each with its own drop shadow
+    #     and edge highlight — that is what read as a tiled image), then a real
+    #     curtain-wall rhythm on top: 4 wide bays, thin mullions and one
+    #     horizontal transom, all low-contrast so the skyline stays readable.
+    gx0, gx1 = 16, (CANVAS[2] - CANVAS[0]) - 16
+    draw_glass_panel(img, d, (gx0 * s, 0, gx1 * s, SIDE_CITY_H * s), s,
+                     radius=0, shadow=False, fill_a=0.20)
+    bay = (gx1 - gx0) / 4
+    mull = hex_rgb(shade(d["wall"], 0.86)) + (215,)
+    mull_hi = (255, 255, 255, 70)
+    for k in range(1, 4):
+        mx = (gx0 + k * bay) * s
+        dr.rectangle([mx - 1.5 * s, 0, mx + 1.5 * s, SIDE_CITY_H * s], fill=mull)
+        dr.rectangle([mx - 1.5 * s, 0, mx - 0.5 * s, SIDE_CITY_H * s], fill=mull_hi)
+    ty_ = int(SIDE_CITY_H * 0.62) * s                       # one transom, 62 % down
+    dr.rectangle([gx0 * s, ty_ - 1 * s, gx1 * s, ty_ + 1 * s],
+                 fill=hex_rgb(shade(d["wall"], 0.9)) + (170,))
+    for ex in (gx0, gx1):                                   # side jambs
+        dr.rectangle([ex * s - 2.5 * s, 0, ex * s + 2.5 * s, SIDE_CITY_H * s], fill=mull)
     dr.rectangle([0, 0, cw, 1 * s], fill=(255, 255, 255, 120))   # 1 px top-edge highlight
 
-    # 3 · ceiling band: 3 recessed light strips + a soft pool of light below
+    # 3 · ceiling band: a soffit with ONE continuous light cove. The three
+    #     floating lamp pills are gone — at this band height they read as
+    #     stray cream bars under the window, not as fixtures.
     ct, cb = SIDE_CITY_H * s, SIDE_WALL_TOP * s
-    dr.rectangle([0, ct, cw, cb], fill=hex_rgb(d["wall"]))
-    lamp = "#FFFFFF" if light else "#F2E7C4"
-    for lcx in (170, 500, 830):
-        x = lcx * s
-        rr(dr, (x - 90 * s, ct + 5 * s, x + 90 * s, ct + 13 * s), 3 * s,
-           fill=hex_rgb(shade(d["wall"], 0.72)))
-        rr(dr, (x - 86 * s, ct + 6 * s, x + 86 * s, ct + 12 * s), 3 * s,
-           fill=hex_rgb(lamp) + (200,))
+    soffit = Image.new("L", img.size, 0)
+    ImageDraw.Draw(soffit).rectangle([0, ct, cw, cb], fill=255)
+    paint_grad(img, soffit, shade(d["wall"], 1.02), shade(d["wall"], 0.86))
+    dr.rectangle([0, ct, cw, ct + 1 * s], fill=hex_rgb(shade(d["wall"], 0.62)))  # window head
+    lamp = "#FFFFFF" if light else "#F6EBCB"
+    glow = Image.new("RGBA", img.size, (0, 0, 0, 0))      # a soft cove, not a bar
+    ImageDraw.Draw(glow).rectangle([0, ct + 4 * s, cw, ct + 11 * s],
+                                   fill=hex_rgb(lamp) + (140,))
+    comp(img, glow.filter(ImageFilter.GaussianBlur(4 * s)))
+    dr.rectangle([0, ct + 6 * s, cw, ct + 7 * s], fill=hex_rgb(lamp) + (85,))
     pool = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ImageDraw.Draw(pool).rectangle([0, cb, cw, cb + 46 * s], fill=hex_rgb(lamp) + (16,))
-    comp(img, pool.filter(ImageFilter.GaussianBlur(10 * s)))
+    ImageDraw.Draw(pool).rectangle([0, ct + 8 * s, cw, cb + 40 * s], fill=hex_rgb(lamp) + (14,))
+    comp(img, pool.filter(ImageFilter.GaussianBlur(9 * s)))
+    dr.rectangle([0, cb - 1 * s, cw, cb], fill=hex_rgb(shade(d["wall"], 0.7)))   # soffit edge
 
     # 4 · interior: back wall, floor finish, etched lane lines, 22 px slab
     st, ft = SIDE_SLAB_TOP * s, SIDE_FINISH_TOP * s
@@ -1613,7 +1803,9 @@ def draw_side_scene(img: Image.Image, d: dict, fid: str = "L3", s: int = 1) -> d
         # glass partition between the dev island and the devops corner:
         # vertical, floor to ceiling minus 20 px, on the same glass recipe
         px_ = cam["x_of"](3.4) * s
-        draw_glass_panel(img, d, (px_ - 8 * s, (SIDE_WALL_TOP + 20) * s,
+        # full height: soffit down to the floor finish. A 20 px gap under the
+        # ceiling made it read as a floating bar, not a partition.
+        draw_glass_panel(img, d, (px_ - 8 * s, SIDE_WALL_TOP * s,
                                   px_ + 8 * s, SIDE_FLOOR_BASE * s), s, radius=3 * s)
 
         # server rack with status LEDs at the devops end (back lane)
@@ -1885,6 +2077,83 @@ def render_mobile(d: dict, path: Path, floor: str = "L3") -> None:
     print("wrote", path, img.size)
 
 
+def avatar_proof(page: Image.Image, layout: dict, agent_id: str, out: Path) -> dict:
+    """Measured proof that the scene avatars are anti-aliased vector, not pixel art.
+
+    For one agent of the rendered section it prints (a) the avatar height in px
+    on the mockup, (b) the number of unique colours inside the avatar (pixel-art
+    lands at <= 12, an anti-aliased vector figure at >= 40), and (c) the share of
+    silhouette-edge pixels that are blended intermediate values — a
+    nearest-neighbour upscale produces exactly 0 %. It also writes a 4x zoom of
+    that avatar to `out` so the front desk can see the same pixels.
+    """
+    a = next(x for x in layout["agents"] if x["id"] == agent_id)
+    hw = AV_BOX_HW
+    box = (int(round(a["cx"] - hw)), int(round(CANVAS[1] + a["head_top"])),
+           int(round(a["cx"] + hw)), int(round(CANVAS[1] + a["floor_y"])))
+    crop = page.crop(box).convert("RGB")
+    spr = avatar(LOOKS[agent_id], a["avatar_h"], a["status"], DAY["status"]["blocked"])
+    px = spr.load()
+    W, H = spr.size
+    cols: set = set()
+    partial = edge = blend = 0
+    for y in range(H):
+        for x in range(W):
+            al = px[x, y][3]
+            if al > 8:
+                cols.add(px[x, y][:3])
+            if 0 < al < 255:
+                partial += 1
+            if al > 8:
+                ring = [px[xx, yy][3] for xx, yy in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1))
+                        if 0 <= xx < W and 0 <= yy < H]
+                if any(v <= 8 for v in ring):
+                    edge += 1
+                    if al < 250:
+                        blend += 1
+    blend_pct = 100.0 * blend / max(1, edge)
+    # the same silhouette, measured on the mockup's own pixels (not the sprite)
+    page_cols = {c[1][:3] for c in crop.getcolors(1 << 20)}
+    print(f"avatar proof {LOOKS[agent_id]['name']}: tinggi {spr.height} px di mockup · "
+          f"warna unik {len(cols)} (sprite) / {len(page_cols)} (crop mockup) · "
+          f"tepi siluet blending {blend}/{edge} = {blend_pct:.0f}% · "
+          f"piksel alpha parsial {partial}")
+
+    # ---- the picture: one 4x crop, then all eight L3 looks at the same zoom
+    z = 4
+    big = crop.resize((crop.width * z, crop.height * z), Image.LANCZOS)
+    looks = [d[0] for d in DESKS]
+    tw = 92
+    fig_w = max(560, 32 + big.width + 24 + len(looks) * tw + 16)
+    fig_h = 96 + big.height + 40
+    fig = Image.new("RGB", (fig_w, fig_h), hex_rgb(SKY["page"]))
+    fd = ImageDraw.Draw(fig, "RGBA")
+    fd.text((24, 18), "AVATAR ZOOM CHECK · vector, bukan pixel-art",
+            font=font(15, bold=True), fill=SKY["ink"])
+    fd.text((24, 42), f"{LOOKS[agent_id]['name']} di {layout['fid']} tampak samping, "
+                      f"crop {big.width}x{big.height} px dari l3-side-day.png (zoom 4x, LANCZOS)",
+            font=font(10), fill=SKY["muted"])
+    fig.paste(big, (24, 74))
+    fd.rounded_rectangle([24, 74, 24 + big.width, 74 + big.height], radius=6,
+                         outline=SKY["border"] + "66", width=1)
+    x0 = 24 + big.width + 24
+    fd.text((x0, 74 - 18), "delapan look L3, 4x", font=font(10, bold=True), fill=SKY["muted"])
+    for i, did in enumerate(looks):
+        sp = avatar(LOOKS[did], 54)
+        sp4 = sp.resize((sp.width * z, sp.height * z), Image.LANCZOS)
+        fig.paste(sp4, (x0 + i * tw + (tw - sp4.width) // 2, 74 + big.height - sp4.height), sp4)
+        fd.text((x0 + i * tw + 6, 74 + big.height + 6), LOOKS[did]["name"],
+                font=font(8.5, bold=True, mono=True), fill=SKY["muted"])
+    fd.text((24, fig_h - 26),
+            f"tinggi {spr.height} px · warna unik {len(cols)} · tepi blending {blend_pct:.0f}% "
+            f"(pixel-art: <=12 warna, 0% blending)",
+            font=font(10, bold=True), fill=SKY["accent"])
+    fig.save(out)
+    print("wrote", out, fig.size)
+    return {"height": spr.height, "colors": len(cols), "blend_pct": blend_pct,
+            "page_colors": len(page_cols)}
+
+
 def render_compare(path: Path) -> None:
     """One region of L3, three scene-tech levels: hybrid, all-vector, glass city.
 
@@ -1931,7 +2200,7 @@ def render_avatar_strip(path: Path) -> None:
             font=font(10), fill=SKY["muted"])
     dr.text((32, 86), "SEBELUM · 12×16 px, 4 tone, nearest-neighbour", font=font(10, bold=True),
             fill=SKY["muted"])
-    dr.text((32, 352), "SESUDAH · path + gradien 2-stop, anti-aliased, 50 px @ zoom 2", font=font(10, bold=True),
+    dr.text((32, 352), "SESUDAH · path + gradien 2-stop + outline, anti-aliased, 54 px @ zoom 2", font=font(10, bold=True),
             fill=SKY["accent"])
 
     for i, did in enumerate([d[0] for d in DESKS]):   # the 8 L3 looks
@@ -1988,10 +2257,10 @@ def main(argv: list[str] | None = None) -> None:
     for fid in ("L1", "L2", "L3"):
         plate_boxes(DAY, fid)
         print(f"plate gate {fid}: 0 overlap, 0 head-cover")
-    # the same hard gate for the side elevation (section geometry)
+    # the same hard gate for the side elevation (section geometry): label vs
+    # label, label vs another agent's head, avatar bbox vs avatar bbox
     for fid in ("L1", "L2", "L3"):
-        side_plate_boxes(DAY, side_layout(fid))
-        print(f"plate gate {fid} side: 0 overlap, 0 head-cover")
+        side_gate(fid)
     side_report("L3")
 
     if args.side:
@@ -2028,7 +2297,8 @@ def main(argv: list[str] | None = None) -> None:
     render(NEON, HERE / "neon-metro.png", notes=False)               # L3 · Neon (alternatif)
     render_mobile(DAY, HERE / "daylight-mobile.png")                 # L3 · Terang
     render_mobile(SKY, HERE / "sky-lobby-mobile.png")                # L3 · Gelap
-    render_side(DAY, HERE / "l3-side-day.png")                       # L3 · tampak samping
+    side_day = render_side(DAY, HERE / "l3-side-day.png")            # L3 · tampak samping
+    avatar_proof(side_day, side_layout("L3"), "coder2", HERE / "avatar-zoom-check.png")
     render_side(SKY, HERE / "l3-side-night.png")
     render_side_mobile(DAY, HERE / "l3-side-mobile-day.png")
     render_side_mobile(SKY, HERE / "l3-side-mobile-night.png")
