@@ -1,15 +1,22 @@
-# Agent Office — kantor virtual 3D (React + Go)
+# Agent Office — kantor virtual 2D pixel-art (React + Go)
 
-Kantor virtual tempat 11 profil Hermes punya meja sendiri. Frontend React/three.js,
-API Go read-only yang membaca `state.db` Hermes. Menggantikan versi lama
-(satu file `index.html` p5.js + `server.py` stdlib Python).
+Kantor virtual tempat 13 profil Hermes punya meja sendiri, digambar sebagai
+diorama pixel-art top-down di satu `<canvas>` 2D: sprite, font, dan palet
+seluruhnya prosedural (tanpa file aset, tanpa WebGL). API Go read-only membaca
+`state.db` Hermes; kontrak `/api/config` & `/api/status` tidak berubah.
 
 ```
 backend/   API Go (net/http, modernc.org/sqlite, tanpa cgo)
-frontend/  React 18 + Vite + TypeScript + @react-three/fiber
+frontend/  React 18 + Vite + TypeScript + canvas 2D (tanpa three.js)
+  src/scene2d/  renderer, sprite, label, pixel font, animasi, viewport
 deploy/    systemd unit, blok Caddy, build script, pembuat fixture
-verify/    skrip screenshot Playwright + hasil PNG
+verify/    check murni (roster/layout/anim/visual) + probe browser + e2e
+docs/      rencana (plans/), spec UI/UX (design/), atribusi, riset
 ```
+
+Asal-usul gaya (dan lisensinya) dicatat di
+[`docs/attribution-2d.md`](docs/attribution-2d.md): tidak ada kode, sprite, atau
+aset pihak ketiga yang disalin.
 
 > **Agen otomatis / AI coding tools:** baca [`AGENTS.md`](AGENTS.md) sebelum bekerja —
 > di situ ada aturan wajib (privasi metadata-only, kontrak API, larangan menulis ke `state.db`),
@@ -322,7 +329,7 @@ Semua lewat environment variable; tidak ada path user yang di-hardcode.
 | `OFFICE_ROSTER_JSON` | — | roster inline JSON; menang atas `OFFICE_ROSTER` |
 | `OFFICE_TITLE` | `Agent Office` | judul kantor (dipakai frontend dari `/api/config`) |
 | `OFFICE_TZ` | `Asia/Jakarta` | zona waktu untuk batas hari & bucket per jam (dan jam di UI). Nilai `tz` di file roster menang atas ini; zona tak dikenal = gagal start (`exit 2`) |
-| `PROFILES` | 11 profil bawaan | daftar profil dipisah koma (mengganti default). **Diabaikan sepenuhnya di mode `remote`** — roster datang dari upstream `/api/config` |
+| `PROFILES` | 13 profil bawaan | daftar profil dipisah koma (mengganti default). **Diabaikan sepenuhnya di mode `remote`** — roster datang dari upstream `/api/config` |
 | `GATEWAY_FILE` | `$HERMES_HOME/gateway_state.json` | status gateway |
 | `WEB_DIR` | — | folder `dist` frontend; kalau diisi, API juga menyajikan SPA (dipakai image Docker) |
 | `LOG_REQUESTS` | `0` | log tiap request ke stderr |
@@ -360,7 +367,7 @@ tanpa mengubah kode.
 `pendopo` masih diterima di file roster sebagai alias `lobby`.
 
 Roster diturunkan dari profil yang ditemukan. Profil yang ada di roster bawaan
-(`DefaultAgents`, 11 profil) memakai nama/peran/tim aslinya — Ndoro Kakung, Bima, dst.
+(`DefaultAgents`, 13 profil) memakai nama/peran/tim aslinya — Ndoro Kakung, Bima, dst.
 Profil lain dapat `name = id`, peran `Agen`, dan tim ditebak dari nama
 (`default`/`lobby` → `lobby`, `edu*` → `edu`, sisanya `dev`). Override berlapis,
 prioritas dari atas: `OFFICE_ROSTER_JSON` → file `OFFICE_ROSTER` → roster
@@ -422,23 +429,33 @@ dari versi ini karena itu tidak perlu di-upgrade lebih dulu.
 
 ```bash
 cd backend  && go vet ./... && go test ./...          # 110 test, semua lulus
-cd frontend && npx tsc --noEmit && npm run build      # dist/ (1,04 MB, 289 kB gzip)
-python3 verify/shoot.py                               # screenshot + cek layout
+cd frontend && npx tsc --noEmit && npm run build      # dist/ (JS 216 kB, 71 kB gzip)
 ```
 
-Pemeriksaan roster & tata letak (tanpa browser):
+Pemeriksaan murni, tanpa browser (esbuild + node):
 
 ```bash
-frontend/node_modules/.bin/esbuild verify/layout_check.ts --bundle \
-  --format=esm --platform=node --outfile=/tmp/layout_check.mjs && node /tmp/layout_check.mjs
-frontend/node_modules/.bin/esbuild verify/roster_check.ts --bundle \
-  --format=esm --platform=node --outfile=/tmp/roster_check.mjs && node /tmp/roster_check.mjs
+for c in roster_check layout_check anim_check visual_check; do
+  frontend/node_modules/.bin/esbuild verify/$c.ts --bundle --format=esm \
+    --platform=node --outfile=/tmp/$c.mjs && node /tmp/$c.mjs
+done
 ```
 
-`layout_check` membuktikan grid 4.5 × 4.0, sirkulasi ≥ 1.6, dan nav graph bebas
-furnitur. `roster_check` membuktikan `/api/config` menggerakkan kantor: meja
-lama tidak bergeser, agen baru dapat meja di lattice dengan sirkulasi ≥ 1.6,
-penempatannya deterministik, dan `look` stabil per id.
+- `layout_check` — grid 4.5 × 4.0, sirkulasi ≥ 1.6, nav graph bebas furnitur.
+- `roster_check` — `/api/config` menggerakkan kantor: meja lama tidak bergeser,
+  agen baru dapat meja di lattice, penempatan deterministik, `look` stabil per id.
+- `anim_check` — pemetaan pose dari `/api/status`, transform world↔pixel, clamp
+  zoom, dan chip blocked tidak membocorkan `reason` mentah.
+- `visual_check` — gate T1.9: 13 meja terlihat pada 1280×800 dan 390×844, tidak
+  ada nameplate/chip yang bertumpuk atau menutupi plakat zona, tidak ada plat
+  keluar kanvas, lebar nama ≤ lebar slot meja, dan `offline` beda dari `idle`
+  tanpa mengandalkan warna.
+
+Pemeriksaan yang butuh layout engine (`verify/office2d_probe.js`) dijalankan di
+browser: buka build preview, tempel isi file itu di Console (atau
+`Runtime.evaluate` lewat CDP). Skrip melaporkan `ok: true/false` untuk: kanvas
+benar-benar tergambar, tidak ada panel menutupi kanvas, `.roster-body` benar-benar
+scroll (13 baris, `scrollTop` naik), dan lantai muat di kanvas pada zoom sekarang.
 
 Uji end-to-end terhadap binary sungguhan (roster override, tz tak dikenal,
 URL ber-kredensial, DB gagal dibuka, aset hilang, federasi ke instance lama):
@@ -448,97 +465,45 @@ bash verify/e2e_review.sh      # 51 pemeriksaan, butuh binary di /workspace/.got
 ```
 
 Hasil terakhir: `go vet` bersih, `go test` ok di api/derive/store, `tsc --noEmit`
-tanpa error, `vite build` sukses, dan `verify/shoot.py` melaporkan
-`dpad_inside_viewport: true`, `dpad_bar_overlap_px2: 0`,
-`no_horizontal_overflow: true`, `feed_sheet_covers_controls: 0`,
-`taskboard_fullscreen: true`, tanpa error konsol.
+tanpa error, `vite build` sukses, `roster/layout/anim/visual` semuanya OK, dan
+`verify/office2d_probe.js` melaporkan `ok: true` (kanvas tergambar, tidak ada
+panel menutupi kanvas, roster scroll, lantai muat).
 
-`verify/shoot.py` butuh API di :8131 dan `vite preview` di :4173. Hasil PNG:
+Screenshot (1280×800 dan 390×844) memakai `?still=1` agar frame deterministik;
+`?spot=tampak` (default) memperlihatkan seluruh lantai, `?face=<id>` zoom ke satu
+meja, `?spot=lobby|dev|edu|luar` ke satu zona.
 
-- `verify/desktop-1280-overview.png` — Pendopo dengan HUD
-- `verify/desktop-1280-overview-clean.png` — ruangan tanpa panel
-- `verify/desktop-1280-face-closeup.png` — potret Ndoro Kakung (`?face=ndoro-kakung`)
-- `verify/desktop-1280-face-crop.png` — crop 900×900 area kepala
-- `verify/portrait-ndoro-kakung.png` / `-crop.png` — potret yang sama, versi file potret
-- `verify/portrait-bima.png` / `-crop.png` — potret agen pria (rambut pendek)
-- `verify/mobile-390-default.png` — HUD satu baris, feed tertutup
-- `verify/mobile-390-feed.png` — bottom sheet Aktivitas
-- `verify/mobile-390-taskboard.png` — taskboard satu kolom penuh
-- `verify/mobile-390-roster.png` — drawer daftar agen
+## Catatan desain (kantor 2D)
 
-`verify/shoot.py` juga mengukur tata letak dan mencetak JSON: D-pad & bar di
-dalam viewport, tanpa overflow horizontal, taskboard setinggi layar, dan
-D-pad disembunyikan saat sheet terbuka (tidak ada yang menutupi kontrol).
-`verify/portrait.py <id|nama>` mengambil satu potret, `verify/mobile.py`
-mengulang tiga tangkapan panel HP.
-
-Pemeriksaan pose (dipakai untuk merapikan avatar di skala dashboard):
-
-- `verify/pose_check.py` — membaca scene yang hidup dan mencetak, per agen:
-  tinggi pinggul vs dudukan kursi, kerataan paha, sudut lutut kiri/kanan,
-  tinggi sol sepatu, dan posisi kedua pergelangan vs kotak keyboard. Exit
-  non-zero kalau ada yang melenceng (melayang, kaki menembus lantai, lutut
-  asimetris).
-- `verify/final_shots.py` — `final-overview.png` (spot "Tampak", semua agen
-  ditahan di meja lewat `?still=1`) dan `final-closeup.png` (satu agen duduk
-  dari samping, memperlihatkan lutut, telapak, dan tangan di keyboard).
-- `verify/face_sym.py <id>` — potret lurus dengan kamera dipaku di normal
-  wajah (`?cam=&aim=`) lalu skor beda cermin, untuk memisahkan asimetri
-  geometri mata dari asimetri pencahayaan.
-
-## Catatan desain (beda dari versi p5)
-
-- **Avatar = GLB manusia rigged (Quaternius Ultimate Modular, CC0 1.0)**, bukan
-  primitif lagi. Lima model di `frontend/public/models/` (men-suit, men-casual,
-  men-hoodie, women-casual, women-formal), satu per agen lewat
-  `MODEL_FOR_AGENT`; tiap agen dapat klon sendiri (`SkeletonUtils.clone`) jadi
-  skeleton dan material tidak pernah dipakai bersama. Model diskalakan ke 1,7 m,
-  diputar 180° (paket menghadap +Z, kantor menghadap −Z), dan variasi per agen
-  datang dari override warna material per peran (Skin/Hair/Shirt/Pants/Shoes).
-- **Pose duduk tanpa klip Sit**: paket hanya punya Idle/Walk/Run/Interact. Duduk
-  tidak dibentuk dari sudut tulang tebakan, tapi dipecahkan terhadap furnitur:
-  `instantiate()` mengukur panjang paha, betis, lengan atas/bawah dan tinggi
-  mata kaki tiap model, lalu `pose()` mengarahkan tiap tulang ke titik yang
-  diturunkan dari kursi (dudukan 0,4725 m), lantai, dan keyboard
-  (`aim()` + IK dua tulang untuk siku). Hasilnya: pinggul mendarat di dudukan,
-  paha mendatar, lutut 90°, telapak di lantai, dan kedua pergelangan tepat di
-  atas tuts — simetris karena target kiri/kanan dicerminkan, bukan karena
-  kebetulan rotasi tulang. `verify/pose_check.py` mencetak angka itu per agen
-  (hip, sudut lutut, tinggi sol, posisi wrist) dan gagal kalau melenceng.
-  Tulang kaki paket ini menempel ke `Body`, bukan ke shin, jadi tumit
-  ditempatkan ulang tiap frame agar kaki ikut lutut dan tidak menembus lantai.
-  Berdiri/berjalan memakai klip `Walk` yang waktunya disinkronkan ke jarak
-  tempuh, diam di POI memakai `Idle_Neutral`.
-- **Proporsi & kontras**: kepala dikecilkan lewat skala tulang `Head` (0,94),
-  pakaian dicampur 8–14% putih plus sedikit emissive per peran, kursi dibuat
-  lebih gelap dari outfit mana pun, dan apron depan meja ditipiskan jadi bibir
-  5,8 cm supaya pangkuan tidak menembus meja. Lid laptop juga direndahkan agar
-  dada tetap terlihat dari kamera "Tampak".
-- **Wajah**: Quaternius hanya memberi mata berupa dua quad hitam dan tidak punya
-  mulut, jadi `scene/face.ts` menambahkan bola mata (sklera + iris + pupil +
-  kilau), kelopak yang berkedip, lubang hidung, dan bibir. Posisinya diukur dari
-  mesh mata dan permukaan kepala model itu sendiri (raycast bbox + sampel
-  vertex), sehingga menempel benar di kedua paket. Hijab/ kacamata/ headphone
-  dibangun di ruang model dan dipasang ke tulang `Head` lewat matriks tetap.
-
-- **Tanpa shadow map**: kontak bayangan pakai tekstur radial. Ini menjaga fps
-  di HP kelas bawah dan menghindari moiré yang dulu muncul di atap/tepi.
-- **Label = sprite canvas**, bukan `troika`/webfont: tetap tajam dan tetap
-  tampil tanpa jaringan (font sistem).
-- **Tidak ada atap** supaya kamera "Tampak" bisa melihat ke dalam ruangan
-  seperti dollhouse; versi lama memakai atap joglo penuh.
-- **Laptop, bukan monitor 27"**, di sisi meja (diputar 43°) supaya wajah agen
-  tetap terlihat dari sudut pandang pengunjung. Nameplate diperkecil (0,3 unit)
-  agar tidak menutupi orangnya.
-- **Deep link potret**: `?face=ndoro-kakung` (atau `?face=dev`) menerbangkan kamera ke
-  potret 3/4 dengan lensa 30° pada jarak 1,4 m — dipakai `verify/shoot.py`
-  sebagai bukti wajah. `#coder` tetap membuka meja agen seperti versi lama.
-- **Mobile**: feed jadi bottom sheet 58–62dvh yang bisa ditutup, taskboard
-  full-screen satu kolom, kartu agen jadi chip yang hilang sendiri setelah 5 s,
-  HUD satu baris yang bisa di-collapse, tombol ≥ 44 px, `100dvh` + safe-area,
-  D-pad di kiri bawah dan bar panel di bawah — tidak ada yang menutupi D-pad.
-- **Kedalaman tampilan** dibatasi `dpr` 1.8 (desktop) / 1.5 (mobile) dan
-  polling 4 detik dengan backoff 6/12/24/30 detik (sama seperti versi lama).
+- **Satu `<canvas>` 2D, semuanya prosedural.** Sprite (chibi 12×16, meja, kursi,
+  furnitur per id `OBSTACLES`, kucing, amplop), font 5×7, dan palet digambar
+  dengan `fillRect` di `frontend/src/scene2d/`; tidak ada file aset, tidak ada
+  webfont, tidak ada WebGL. Sumber gaya & lisensi: `docs/attribution-2d.md`.
+- **Dua ruang koordinat.** Dunia digambar pada px zoom-1 (TILE 16) lalu di-blit
+  dengan faktor integer (`blitScale(zoom, dpr)`) supaya tetap nearest-neighbour
+  di DPR pecahan. Label diukur dalam **CSS px** (`scene2d/labels.ts`) agar
+  lebarnya tidak ikut membesar bersama zoom — pitch meja hanya 26 px, jadi plat
+  berukuran px dunia akan saling menimpa (bug "OM BT" pada gate T1.9).
+- **View default = zoom-fit seluruh lantai** (`fitZoom`): 100 % pada 1280×800
+  (kanvas 1000×688, lantai 896×640) dan 50 % pada 390×844 (lantai 448×320,
+  pan horizontal). `?spot=lobby|dev|edu` tetap ada untuk masuk ke satu zona.
+- **Status tidak pernah hanya warna**: `offline` = kursi kosong navy + plat
+  berlubang + "Z Z Z" + chip `offline`; `idle` = chibi duduk, dot cincin, chip
+  `idle`; `blocked` = chip kuning + gelembung "!"; `working` = monitor hidup +
+  chip nama alat.
+- **Privasi**: chip task hanya menampilkan id (dipotong), chip blocked memakai
+  teks generik ("butuh izin"), tidak ada isi pesan/judul yang digambar.
+- **Outage ≠ kantor kosong**: meja & kursi digambar dari `rosterAgents()`, bukan
+  dari payload status, jadi API mati tetap menampilkan 13 meja offline.
+- **Layout panel**: HUD 56 px di atas, sidebar agen 280 px di kanan (hanya saat
+  terbuka), toolbar 56 px di bawah — kanvas tidak pernah tertutup panel. Di HP
+  sidebar & feed menjadi bottom sheet, D-pad kiri-bawah, zoom kanan-bawah.
+- **Roster scroll**: `.roster-body` memakai `flex:1 1 auto; min-height:0;
+  overflow-y:auto` (regresi cc2add3), dibuktikan `verify/office2d_probe.js`.
+- **Tanpa dependensi baru**: `three`, `@react-three/fiber`, `@react-three/drei`,
+  `@types/three` sudah dihapus dari `package.json`; JS total turun dari
+  ±331 kB gzip ke ±71 kB gzip. GLB Quaternius di `public/models/` masih ada
+  sebagai arsip (keputusan Q1) tetapi tidak dipakai maupun di-fetch.
 
 ## Sisa pekerjaan deploy
 
