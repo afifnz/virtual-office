@@ -35,19 +35,17 @@ export default defineConfig({
     modulePreload: { polyfill: false },
     rollupOptions: {
       output: {
-        // The room is the only thing that needs three.js. Keep the renderer and
-        // React in their own long-lived chunks so a UI change does not force a
-        // re-download of the 3D engine (and vice versa), and so the browser can
-        // fetch them in parallel with the app code.
+        // Only React is shared, long-lived code: keep it in its own chunk so a
+        // UI change does not force a re-download of the framework. The 2D scene
+        // is lazy-loaded from the entry (components/Scene.tsx), so it stays in
+        // its own small chunk automatically.
         manualChunks(id: string) {
           // Vite's preload helper is shared by the entry and the scene chunk;
-          // left alone Rollup files it under `three`, which drags the whole 3D
-          // engine back into the first paint. Park it with React instead — the
-          // entry loads that chunk anyway.
+          // left alone Rollup files it under whichever chunk imports it first,
+          // which drags the scene back into the first paint. Park it with React
+          // instead — the entry loads that chunk anyway. Do not remove.
           if (id.includes('vite/preload-helper')) return 'react'
           if (!id.includes('node_modules')) return
-          if (/node_modules\/(three|three-[^/]+)\//.test(id)) return 'three'
-          if (id.includes('node_modules/@react-three/')) return 'three'
           if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react'
         },
       },
