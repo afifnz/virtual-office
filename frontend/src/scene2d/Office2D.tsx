@@ -13,7 +13,7 @@ import { agentsFor } from '../lib/roster'
 import type { MoveIntent, RigCommand } from '../lib/view'
 import { SPOT_VIEW } from '../lib/view'
 import { createStaticLayer, pickTargets, renderFrame } from './render'
-import { TILE, clampCenter, clampZoom, nearestAt, screenToWorld, type Viewport } from './viewport'
+import { TILE, clampCenter, clampZoom, fitZoom, nearestAt, screenToWorld, type Viewport } from './viewport'
 
 export interface OfficeProps {
   status: StatusPayload | null
@@ -32,6 +32,11 @@ function initialVp(command: RigCommand): Viewport {
   return { x: spot.x, z: spot.z, zoom: spot.zoom }
 }
 
+/** The zoom control speaks in the design's terms: 50% / 100% / 200%. */
+function zoomPercent(zoom: number): string {
+  return `${zoom * 50}%`
+}
+
 /** The canvas fills its wrapper; wrapper size is what pan-clamp uses. */
 export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }: OfficeProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -39,6 +44,8 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
 
   const vpRef = useRef<Viewport>(initialVp(command))
   const [zoomLabel, setZoomLabel] = useState(vpRef.current.zoom)
+  /** a "tampak" command arrived before the canvas had a size — fit after resize */
+  const fitPending = useRef(SPOT_VIEW[command.spot]?.fit === true)
   const viewRef = useRef({ w: 0, h: 0, dpr: 1 })
   const tRef = useRef(0)
   const readyRef = useRef(false)
@@ -77,10 +84,19 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
   // spot / focus commands from the HUD, roster and deep links
   useEffect(() => {
     if (command.focus) {
+      fitPending.current = false
       vpRef.current = { x: command.focus.x, z: command.focus.z, zoom: command.tight ? 4 : 3 }
     } else {
       const sv = SPOT_VIEW[command.spot] ?? SPOT_VIEW.lobby!
       vpRef.current = { x: sv.x, z: sv.z, zoom: sv.zoom }
+      fitPending.current = sv.fit === true
+      if (fitPending.current) {
+        const { w, h } = viewRef.current
+        if (w > 0 && h > 0) {
+          vpRef.current = { x: 0, z: 0, zoom: fitZoom(w, h) }
+          fitPending.current = false
+        }
+      }
     }
     setZoomLabel(vpRef.current.zoom)
   }, [command])
@@ -115,6 +131,12 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
     canvas.width = Math.max(1, Math.round(w * dpr))
     canvas.height = Math.max(1, Math.round(h * dpr))
     viewRef.current = { w, h, dpr }
+    // first size (or a pending "tampak"): fit the whole floor, never crop it
+    if (fitPending.current) {
+      vpRef.current = { x: 0, z: 0, zoom: fitZoom(w, h) }
+      fitPending.current = false
+      setZoomLabel(vpRef.current.zoom)
+    }
   }, [])
 
   // the render loop, mounted once; reads the latest data from refs
@@ -328,7 +350,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
         <button type="button" onClick={() => zoomBy(-1)} aria-label="Perkecil">
           −
         </button>
-        <span aria-hidden="true">{zoomLabel}×</span>
+        <span aria-hidden="true">{zoomPercent(zoomLabel)}</span>
         <button type="button" onClick={() => zoomBy(1)} aria-label="Perbesar">
           +
         </button>
