@@ -32,9 +32,13 @@ function initialVp(command: RigCommand): Viewport {
   return { x: spot.x, z: spot.z, zoom: spot.zoom }
 }
 
-/** The zoom control speaks in the design's terms: 50% / 100% / 200%. */
+/**
+ * The zoom control speaks in honest percentages: zoom 1 draws 1 world px per
+ * CSS px, so it is 100 % (a 448×320 floor), zoom 2 is 200 %. Calling zoom 1
+ * "50 %" made the phone default look like a fractional zoom when it was not.
+ */
 function zoomPercent(zoom: number): string {
-  return `${zoom * 50}%`
+  return `${zoom * 100}%`
 }
 
 /** The canvas fills its wrapper; wrapper size is what pan-clamp uses. */
