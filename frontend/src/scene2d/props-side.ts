@@ -10,7 +10,7 @@
 import { drawText } from './pixelfont'
 import { THEME_STATUS, THEME_TOKENS, type ThemeName } from './palette'
 import { shade } from './avatar'
-import { SIDE_BOARDS, SIDE_BOARD_TOP, SIDE_GLASS_BOTTOM, SIDE_GLASS_TOP, SIDE_LIFT, SIDE_RAIL_H, SIDE_RAIL_TOP } from './side'
+import { SIDE_BOARDS, SIDE_BOARD_TOP, SIDE_GLASS_BOTTOM, SIDE_GLASS_TOP, SIDE_LIFT, SIDE_RAIL_H, SIDE_RAIL_TOP, type SideBoard } from './side'
 
 type Ctx = CanvasRenderingContext2D
 
@@ -392,8 +392,19 @@ export function drawServerRack(ctx: Ctx, theme: ThemeName, cx: number, floorY: n
 // ------------------------------------------------------------------ boards
 
 /** Six boards hanging on one rail in front of the glass (y 132–280). */
-export function drawBoards(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3, tzName = 'WIB'): void {
+export function drawBoards(
+  ctx: Ctx,
+  theme: ThemeName,
+  floor: 1 | 2 | 3,
+  tzName = 'WIB',
+  compact = false,
+  boards: readonly SideBoard[] = SIDE_BOARDS,
+): void {
   const t = THEME_TOKENS[theme]
+  if (compact) {
+    drawCompactBoards(ctx, theme, floor, tzName, boards)
+    return
+  }
   // rail + brackets
   ctx.fillStyle = theme === 'day' ? '#B9C5D3' : '#3A4557'
   ctx.fillRect(0, SIDE_RAIL_TOP, 1000, 3)
@@ -526,12 +537,79 @@ export function drawBoards(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3, tzName 
   label(ctx, `L${floor}`, ccx - 5, SIDE_BOARD_TOP + 110, 7, t.muted, 500, 0)
 }
 
+/**
+ * The phone wall: three boards instead of six, laid out inside the design
+ * window the viewport shows and at roughly double the desktop label size (a
+ * 13 px label lands on 6.5 CSS px at half scale). The pinboard, burndown and
+ * architecture diagram are gone — at this scale their text is 3 px tall and the
+ * diagram hangs off the right edge of the screen.
+ */
+function drawCompactBoards(
+  ctx: Ctx,
+  theme: ThemeName,
+  floor: 1 | 2 | 3,
+  tzName: string,
+  boards: readonly SideBoard[],
+): void {
+  const t = THEME_TOKENS[theme]
+  const first = boards[0]!
+  const last = boards[boards.length - 1]!
+  const railL = first.x - 8
+  const railR = last.x + last.w + 8
+
+  ctx.fillStyle = theme === 'day' ? '#B9C5D3' : '#3A4557'
+  ctx.fillRect(railL, SIDE_RAIL_TOP, railR - railL, 3)
+  ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.2)' : 'rgba(255,255,255,0.14)'
+  for (let x = railL + 14; x < railR - 6; x += 148) ctx.fillRect(x, SIDE_RAIL_TOP + 3, 3, SIDE_RAIL_H - 3)
+
+  for (const b of boards) card(ctx, theme, b.x, SIDE_BOARD_TOP, b.w, b.h)
+
+  // 1. zone plaque — still the only pixel-font surface besides the lift numbers
+  const p = first
+  const team = floor === 1 ? 'LOBBY' : floor === 2 ? 'TIM EDU' : 'TIM DEV'
+  drawText(ctx, `L${floor}`, p.x + 14, SIDE_BOARD_TOP + 20, 5, t.accent)
+  label(ctx, team, p.x + 14, SIDE_BOARD_TOP + 66, 14, t.ink, 700, 0.06)
+  label(ctx, 'ZONA', p.x + 14, SIDE_BOARD_TOP + 88, 11, t.muted, 600, 0.12)
+  ctx.fillStyle = t.accent
+  ctx.fillRect(p.x + 14, SIDE_BOARD_TOP + 108, 52, 4)
+
+  // 2. status board — shell only; the count and the legend are live
+  const s = boards[1]!
+  label(ctx, 'PAPAN STATUS', s.x + 14, SIDE_BOARD_TOP + 10, 12, t.muted, 600, 0.12)
+  label(ctx, 'online', s.x + 14, SIDE_BOARD_TOP + 68, 12, t.muted, 500, 0)
+
+  // 3. clock face (hands are live)
+  const cl = last
+  const ccx = cl.x + cl.w / 2
+  const ccy = SIDE_BOARD_TOP + 56
+  ctx.fillStyle = t.surfaceSolid
+  ctx.strokeStyle = theme === 'day' ? 'rgba(15,36,64,0.28)' : 'rgba(255,255,255,0.26)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(ccx, ccy, 30, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = t.muted
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2
+    ctx.fillRect(ccx + Math.cos(a) * 25 - 1, ccy + Math.sin(a) * 25 - 1, 2, 2)
+  }
+  label(ctx, tzName, ccx - Math.min(26, tzName.length * 3.4), SIDE_BOARD_TOP + 104, 11, t.muted, 600, 0.06)
+  label(ctx, `L${floor}`, ccx - 8, SIDE_BOARD_TOP + 122, 11, t.muted, 500, 0)
+}
+
 /** Live half of the status board: dots + counts (never cached). */
 export function drawStatusBoard(
   ctx: Ctx,
   theme: ThemeName,
   agents: ReadonlyArray<{ id: string; name: string; status: string }>,
+  compact = false,
+  boards: readonly SideBoard[] = SIDE_BOARDS,
 ): void {
+  if (compact) {
+    drawCompactStatusBoard(ctx, theme, agents, boards[1]!)
+    return
+  }
   const t = THEME_TOKENS[theme]
   const s = SIDE_BOARDS[1]!
   // "online" = present in /api/status (anything but offline). It is not the
@@ -582,32 +660,84 @@ export function drawStatusBoard(
   })
 }
 
-/** Live clock hands, WIB hour/minute from the server `now`. */
-export function drawClockHands(ctx: Ctx, theme: ThemeName, hour: number, minute: number): void {
+/**
+ * The phone status board: the number and the legend, nothing else. The per-agent
+ * dot row is dropped — 8 dots across 356 design px are 20 CSS px apart and 2 px
+ * wide, which is noise, not information. Everything here is drawn at ~2× the
+ * desktop size so it survives the half-scale phone camera.
+ */
+function drawCompactStatusBoard(
+  ctx: Ctx,
+  theme: ThemeName,
+  agents: ReadonlyArray<{ id: string; name: string; status: string }>,
+  s: SideBoard,
+): void {
   const t = THEME_TOKENS[theme]
-  const cl = SIDE_BOARDS[5]!
+  const online = agents.filter((a) => a.status !== 'offline').length
+
+  ctx.save()
+  ctx.font = `700 38px ${FONT}`
+  ctx.fillStyle = t.ink
+  ctx.textBaseline = 'top'
+  ctx.fillText(`${online}/${agents.length}`, s.x + 14, SIDE_BOARD_TOP + 24)
+  ctx.restore()
+
+  const counts = new Map<string, number>()
+  for (const a of agents) counts.set(a.status, (counts.get(a.status) ?? 0) + 1)
+  const legend: Array<[string, string]> = [
+    ['working', 'bekerja'],
+    ['reviewing', 'review'],
+    ['idle', 'idle'],
+    ['blocked', 'terblokir'],
+  ]
+  legend.forEach(([key, text], i) => {
+    const colW = (s.w - 28) / 2
+    const lx = s.x + 14 + (i % 2) * colW
+    const ly = SIDE_BOARD_TOP + 94 + Math.floor(i / 2) * 24
+    ctx.fillStyle = THEME_STATUS[theme][key as keyof typeof THEME_STATUS.day]
+    ctx.beginPath()
+    ctx.arc(lx + 4, ly + 6, 4, 0, Math.PI * 2)
+    ctx.fill()
+    label(ctx, `${counts.get(key) ?? 0} ${text}`, lx + 14, ly, 13, t.muted, 500, 0)
+  })
+}
+
+/** Live clock hands, WIB hour/minute from the server `now`. */
+export function drawClockHands(
+  ctx: Ctx,
+  theme: ThemeName,
+  hour: number,
+  minute: number,
+  compact = false,
+  boards: readonly SideBoard[] = SIDE_BOARDS,
+): void {
+  const t = THEME_TOKENS[theme]
+  const cl = compact ? boards[boards.length - 1]! : SIDE_BOARDS[5]!
   const cx = cl.x + cl.w / 2
-  const cy = SIDE_BOARD_TOP + 58
+  const cy = SIDE_BOARD_TOP + (compact ? 56 : 58)
   const ha = ((hour % 12) + minute / 60) * (Math.PI / 6) - Math.PI / 2
   const ma = minute * (Math.PI / 30) - Math.PI / 2
+  const handH = compact ? 13 : 9
+  const handM = compact ? 21 : 14
   ctx.save()
   ctx.strokeStyle = t.ink
   ctx.lineWidth = 2
   ctx.beginPath()
   ctx.moveTo(cx, cy)
-  ctx.lineTo(cx + Math.cos(ha) * 9, cy + Math.sin(ha) * 9)
+  ctx.lineTo(cx + Math.cos(ha) * handH, cy + Math.sin(ha) * handH)
   ctx.stroke()
   ctx.lineWidth = 1.4
   ctx.beginPath()
   ctx.moveTo(cx, cy)
-  ctx.lineTo(cx + Math.cos(ma) * 14, cy + Math.sin(ma) * 14)
+  ctx.lineTo(cx + Math.cos(ma) * handM, cy + Math.sin(ma) * handM)
   ctx.stroke()
   ctx.fillStyle = t.ink
   ctx.beginPath()
-  ctx.arc(cx, cy, 2, 0, Math.PI * 2)
+  ctx.arc(cx, cy, compact ? 3 : 2, 0, Math.PI * 2)
   ctx.fill()
   ctx.restore()
-  label(ctx, `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, cx - 15, SIDE_BOARD_TOP + 84, 8, t.ink, 700, 0)
+  const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+  label(ctx, time, cx - (compact ? 19 : 15), SIDE_BOARD_TOP + (compact ? 88 : 84), compact ? 13 : 8, t.ink, 700, 0)
 }
 
 // -------------------------------------------------------------------- lift

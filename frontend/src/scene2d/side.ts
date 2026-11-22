@@ -58,6 +58,14 @@ export const SIDE_STAGGER = 100
 /** px per unit at the reference camera: 548/150 = 3.653 */
 export const SIDE_ROOM_UNITS = SIDE_ROOM_H / SIDE_PPU
 
+/**
+ * Below this CSS width the stage is compacted: the phone cannot show the whole
+ * 1000 px sheet (it draws at half scale, 500 CSS px wide), so a board that sits
+ * outside the 390 px window is clipped at the screen edge and its 6–9 px labels
+ * land on 3–4 CSS px. `verify/visual_check.ts` replays the window arithmetic.
+ */
+export const COMPACT_MAX_W = 640
+
 export type SideRow = 'front' | 'back'
 
 export interface SideViewport {
@@ -79,17 +87,42 @@ export interface SideTransform {
   ppu: number
 }
 
-/** Fit the 688 px stage vertically; zoom 2 is the design camera. */
-export function sideScale(canvasH: number, zoom: number): number {
+/**
+ * Canvas px kept clear at the bottom of a phone canvas for the D-pad.
+ *
+ * The band is only reserved when the phone layout is active (the caller passes
+ * it from `useIsMobile()`): a desktop window narrowed by the 280 px roster rail
+ * is also < 760 px wide, and must keep its 150 px/unit camera.
+ */
+export const PHONE_CTRL_BAND = 120
+
+/**
+ * Fit the 688 px stage vertically; zoom 2 is the design camera.
+ *
+ * With `band` the scale is also capped to what fits above the reserved bottom
+ * band. At 390×692 the fit (0.5) is already smaller, so the overview is
+ * unchanged; at zoom 2 the cap is what keeps the pad off the front-row desks.
+ */
+export function sideScale(canvasH: number, zoom: number, band = 0): number {
   const fit = Math.min(1, canvasH / SIDE_H)
-  return fit * (zoom / 2)
+  const s = fit * (zoom / 2)
+  return band > 0 ? Math.min(s, Math.max(0, (canvasH - band) / SIDE_H)) : s
 }
 
-export function sideTransform(canvasW: number, canvasH: number, vp: SideViewport): SideTransform {
-  const s = sideScale(canvasH, vp.zoom)
+export function sideTransform(
+  canvasW: number,
+  canvasH: number,
+  vp: SideViewport,
+  band = 0,
+): SideTransform {
+  const s = sideScale(canvasH, vp.zoom, band)
+  const stageH = SIDE_H * s
+  // centred, but never past the control band: on a short phone the stage is
+  // pushed up (cropping the roof) rather than sliding under the pad
+  const top = band > 0 ? Math.min((canvasH - stageH) / 2, canvasH - band - stageH) : (canvasH - stageH) / 2
   return {
     s,
-    top: (canvasH - SIDE_H * s) / 2,
+    top,
     left: canvasW / 2 - vp.camX * s,
     ppu: SIDE_PPU * s,
   }
@@ -104,8 +137,8 @@ export function screenToDesign(t: SideTransform, x: number, y: number): { x: num
 }
 
 /** Clamp the horizontal pan so the stage never drifts off screen. */
-export function clampSideCam(camX: number, canvasW: number, canvasH: number, zoom: number): number {
-  const s = sideScale(canvasH, zoom)
+export function clampSideCam(camX: number, canvasW: number, canvasH: number, zoom: number, band = 0): number {
+  const s = sideScale(canvasH, zoom, band)
   const stage = SIDE_W * s
   if (stage <= canvasW) return SIDE_W / 2
   const half = (stage - canvasW) / (2 * s)
@@ -243,6 +276,68 @@ export const SIDE_BOARDS: Array<{ id: string; x: number; w: number; h: number }>
   { id: 'architecture', x: 696, w: 204, h: SIDE_BOARD_H },
   { id: 'clock', x: 900, w: 96, h: SIDE_BOARD_H },
 ]
+
+export interface SideBoard {
+  id: string
+  x: number
+  w: number
+  h: number
+}
+
+/**
+ * The phone wall, laid out inside the design window the viewport really shows
+ * (780 px wide at 390, 720 at 360, 1000 at ≥500): the plaque hugs the left
+ * edge, the clock the right one, the status board takes what is between them.
+ * Fixed 390 px coordinates clipped the plaque on a 360 px phone.
+ */
+export function phoneBoards(win: DesignWindow): SideBoard[] {
+  const plaque: SideBoard = { id: 'plaque', x: win.x0 + 10, w: 120, h: SIDE_BOARD_H }
+  const clock: SideBoard = { id: 'clock', x: win.x1 - 10 - 116, w: 116, h: SIDE_BOARD_H }
+  const left = plaque.x + plaque.w + 12
+  const right = clock.x - 12
+  return [
+    plaque,
+    { id: 'status', x: left, w: Math.max(180, right - left), h: SIDE_BOARD_H },
+    clock,
+  ]
+}
+
+/** One switch for the painter, the plate layout and the gates. */
+export function boardsFor(compact: boolean, win?: DesignWindow): SideBoard[] {
+  if (!compact) return SIDE_BOARDS
+  return phoneBoards(win ?? { x0: 110, y0: 0, x1: 890, y1: SIDE_H })
+}
+
+export interface DesignWindow {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+/**
+ * The part of the design sheet the viewport shows when the camera sits at
+ * `camX`. On a phone the sheet is drawn at half scale, so a 390 px screen shows
+ * only 780 design px (110…890): boards, nameplates and anything else that must
+ * not be clipped has to live inside this window.
+ */
+export function visibleDesignRect(
+  viewW: number,
+  viewH: number,
+  zoom: number,
+  camX = SIDE_W / 2,
+  band = 0,
+): DesignWindow {
+  const t = sideTransform(viewW, viewH, { camX, zoom, floor: 1 }, band)
+  if (!(t.s > 0)) return { x0: 0, y0: 0, x1: SIDE_W, y1: SIDE_H }
+  const clamp = (v: number, hi: number) => Math.min(hi, Math.max(0, v))
+  return {
+    x0: clamp((0 - t.left) / t.s, SIDE_W),
+    x1: clamp((viewW - t.left) / t.s, SIDE_W),
+    y0: clamp((0 - t.top) / t.s, SIDE_H),
+    y1: clamp((viewH - t.top) / t.s, SIDE_H),
+  }
+}
 
 /** The lift core in the east wall, shared by the painter and the probe. */
 export const SIDE_LIFT = { x: 900, w: 86, top: 280, bottom: SIDE_ROOM_BOTTOM }

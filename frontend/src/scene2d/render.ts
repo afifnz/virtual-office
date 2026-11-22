@@ -48,17 +48,23 @@ import {
   type PlacedPlate,
 } from './labels'
 import {
+  COMPACT_MAX_W,
+  SIDE_BOARD_TOP,
   SIDE_BOARDS,
   SIDE_FLOOR_BACK,
   SIDE_FLOOR_FRONT,
   SIDE_GLASS_TOP,
   SIDE_H,
   SIDE_W,
+  boardsFor,
+  sideScale,
   sideTransform,
   sideSeats,
+  visibleDesignRect,
   worldXToDesign,
   type SideSeat,
   type SideViewport,
+  type SideBoard,
 } from './side'
 
 const FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
@@ -104,7 +110,13 @@ export function clearStaticCache(): void {
   staticCache.clear()
 }
 
-export function createStaticLayer(floor: FloorId, theme: ThemeName, tzName = 'WIB'): HTMLCanvasElement {
+export function createStaticLayer(
+  floor: FloorId,
+  theme: ThemeName,
+  tzName = 'WIB',
+  compact = false,
+  boards: readonly SideBoard[] = SIDE_BOARDS,
+): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(SIDE_W * CACHE_SCALE)
   canvas.height = Math.round(SIDE_H * CACHE_SCALE)
@@ -132,7 +144,7 @@ export function createStaticLayer(floor: FloorId, theme: ThemeName, tzName = 'WI
   drawFloorPlane(ctx, theme)
 
   // boards hang in front of the glass on one rail
-  drawBoards(ctx, theme, floor, tzName)
+  drawBoards(ctx, theme, floor, tzName, compact, boards)
   // the lift core is part of the east wall
   drawLiftShaft(ctx, theme, floor)
 
@@ -145,11 +157,19 @@ export function createStaticLayer(floor: FloorId, theme: ThemeName, tzName = 'WI
   return canvas
 }
 
-export function staticLayerFor(floor: FloorId, theme: ThemeName, tzName = 'WIB'): HTMLCanvasElement {
-  const key = `${floor}:${theme}:${tzName}`
+export function staticLayerFor(
+  floor: FloorId,
+  theme: ThemeName,
+  tzName = 'WIB',
+  compact = false,
+  boards: readonly SideBoard[] = SIDE_BOARDS,
+): HTMLCanvasElement {
+  // the phone wall depends on the viewport width, so the key carries its
+  // geometry — one cached sheet per phone width, six boards for desktop
+  const key = `${floor}:${theme}:${tzName}:${compact ? boards.map((b) => `${b.id}@${Math.round(b.x)}+${Math.round(b.w)}`).join(',') : 'wide'}`
   let canvas = staticCache.get(key)
   if (!canvas) {
-    canvas = createStaticLayer(floor, theme, tzName)
+    canvas = createStaticLayer(floor, theme, tzName, compact, boards)
     if (staticCache.size >= CACHE_MAX) {
       const first = staticCache.keys().next().value
       if (first) staticCache.delete(first)
@@ -282,6 +302,17 @@ export interface RenderInput {
   /** WIB hour/minute for the wall clock (from the server `now`) */
   hour: number
   minute: number
+  /**
+   * Phone wall: three boards, no decorative panels. Defaults to
+   * `viewW < COMPACT_MAX_W` so a narrow canvas can never paint the wide set.
+   */
+  compact?: boolean
+  /**
+   * Canvas px reserved at the bottom for the D-pad (0 on desktop). Comes from
+   * the layout, not from the canvas width: a desktop window narrowed by the
+   * roster rail keeps its 150 px/unit camera.
+   */
+  band?: number
 }
 
 function avatarPose(pose: Pose): AvatarPose {
@@ -342,18 +373,23 @@ function screenOf(pose: Pose): 'terminal' | 'doc' | 'diff' | 'off' {
 
 /** Paint one full frame into a canvas whose backing store is already sized. */
 export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void {
-  const t = sideTransform(r.viewW, r.viewH, r.vp)
+  const band = r.band ?? 0
+  const t = sideTransform(r.viewW, r.viewH, r.vp, band)
   const theme = r.theme
   const pal = THEME_TOKENS[theme]
   const status = THEME_STATUS[theme]
   const dpr = r.dpr
+  const compact = r.compact ?? r.viewW < COMPACT_MAX_W
+  // the phone wall lives inside the design window this viewport really shows
+  const wallWindow = compact ? visibleDesignRect(r.viewW, r.viewH, 1, SIDE_W / 2, band) : undefined
+  const boards = boardsFor(compact, wallWindow)
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.fillStyle = pal.page
   ctx.fillRect(0, 0, r.viewW, r.viewH)
 
   // the cached stage, scaled by the camera
-  const stage = staticLayerFor(r.vp.floor, theme, tzLabel())
+  const stage = staticLayerFor(r.vp.floor, theme, tzLabel(), compact, boards)
   ctx.drawImage(stage, t.left, t.top, SIDE_W * t.s, SIDE_H * t.s)
 
   const resolved = placeAgents(r.metas, r.byId, r.now, r.comms, r.t)
@@ -368,8 +404,10 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     ctx,
     theme,
     onFloor.map((p) => ({ id: p.meta.id, name: p.meta.name, status: p.agent?.status ?? 'offline' })),
+    compact,
+    boards,
   )
-  drawClockHands(ctx, theme, r.hour, r.minute)
+  drawClockHands(ctx, theme, r.hour, r.minute, compact, boards)
 
   // ---- lift car: open while someone dwells, otherwise closed at this floor
   const liftY = 540 - (r.vp.floor - 1) * 100
@@ -413,8 +451,21 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   }
   const labelAgents = labelAgentsFor(seats, statuses)
   const bounds = { w: SIDE_W, h: SIDE_H }
-  const reserved = SIDE_BOARDS.map((b) => ({ x: b.x, y: 132, w: b.w, h: b.h }))
-  const { plates } = layoutSideLabels(labelAgents, bounds, reserved)
+  const reserved = boards.map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
+  // On the phone the sheet is wider than the screen: clamp plates to the part
+  // of the stage the viewport really shows, with a 4 CSS px safety margin, or a
+  // plate near the edge is cut by the screen ("BAGA…"). The window follows the
+  // camera, so panning never cuts a visible agent's plate; a plate whose head
+  // has left the window keeps the stage bounds and is cropped with its desk.
+  const labelWindow =
+    compact && r.vp.zoom <= 1
+      ? {
+          ...visibleDesignRect(r.viewW, r.viewH, 1, r.vp.camX, band),
+          margin: Math.ceil(4 / sideScale(r.viewH, 1, band)),
+          visibleHeadsOnly: true,
+        }
+      : undefined
+  const { plates } = layoutSideLabels(labelAgents, bounds, reserved, labelWindow)
   for (const plate of plates) {
     const agent = labelAgents.find((a) => a.id === plate.id)
     if (!agent) continue

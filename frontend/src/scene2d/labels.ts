@@ -55,6 +55,26 @@ export interface PlacedPlate extends Rect {
 }
 
 /**
+ * The rect plates must stay inside. Desktop passes nothing (the whole stage is
+ * on screen); a phone passes the design window the viewport really shows, so a
+ * plate near the sheet edge is pulled in instead of being cut by the screen.
+ */
+export interface LabelWindow {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  /** design px kept clear of every window edge */
+  margin?: number
+  /**
+   * Apply the window only to agents whose head centre is inside it. A plate
+   * whose agent has left the viewport must not be pinned to the edge (it would
+   * read as a label for an invisible desk) — it is cropped with its desk.
+   */
+  visibleHeadsOnly?: boolean
+}
+
+/**
  * Conservative advance widths (em) for the UI sans. Uppercase names are the
  * common case, so they are measured a touch wide on purpose.
  */
@@ -104,11 +124,14 @@ export function overlapShare(a: Rect, b: Rect): number {
 /**
  * Place every plate above its head, stepping up when the ideal slot is taken.
  * `reserved` holds the boards/rail area (plates may not sit on a board).
+ * `window` narrows the usable area — on a phone the stage is wider than the
+ * screen, and a plate clamped to the stage edge would be cut in half.
  */
 export function layoutSideLabels(
   agents: readonly SideLabelAgent[],
   bounds: { w: number; h: number },
   reserved: readonly Rect[] = [],
+  window?: LabelWindow,
 ): { plates: PlacedPlate[]; violations: string[] } {
   const occupied: Rect[] = [...reserved]
   const heads = agents.map((a) => ({
@@ -121,7 +144,24 @@ export function layoutSideLabels(
   const plates: PlacedPlate[] = []
   const violations: string[] = []
 
+  const x0 = window ? window.x0 : 0
+  const x1 = window ? window.x1 : bounds.w
+  const y0 = window ? window.y0 : 0
+  const y1 = window ? window.y1 : bounds.h
+  const m = window?.margin ?? 1
+
   for (const a of agents) {
+    // a plate is only pulled inside the window while its own head is on screen:
+    // the head centre is the anchor, so an agent half over the edge still gets a
+    // full plate, while one that has left the viewport is cropped with its desk
+    const headCy = a.headTop + a.headH / 2
+    const onScreen =
+      !window?.visibleHeadsOnly || (a.cx >= x0 && a.cx <= x1 && headCy >= y0 && headCy <= y1)
+    const minX = (onScreen ? x0 : 0) + m
+    const maxX = (onScreen ? x1 : bounds.w) - m
+    const minY = (onScreen ? y0 : 0) + m
+    const maxY = (onScreen ? y1 : bounds.h) - m
+
     const text = shortName(a.name)
     const w = plateWidth(text, Boolean(a.dot))
     const idealX = Math.round(a.cx - w / 2)
@@ -136,7 +176,7 @@ export function layoutSideLabels(
       y = Math.round(idealBottom - PLATE_H - step * PLATE_STEP)
       for (const dx of [0, -14, 14, -28, 28, -42, 42]) {
         x = Math.round(idealX + dx)
-        if (x < 1 || x + w > bounds.w - 1 || y < 1) continue
+        if (x < minX || x + w > maxX || y < minY || y + PLATE_H > maxY) continue
         const box: Rect = { x, y, w, h: PLATE_H }
         if (occupied.some((r) => rectsOverlap(box, r))) continue
         if (heads.some((hd) => hd.id !== a.id && rectsOverlap(box, hd))) continue
@@ -146,8 +186,8 @@ export function layoutSideLabels(
       }
     }
     if (!placed) {
-      x = Math.max(1, Math.min(idealX, bounds.w - w - 1))
-      y = Math.max(1, Math.round(idealBottom - PLATE_H))
+      x = Math.max(minX, Math.min(idealX, maxX - w))
+      y = Math.max(minY, Math.min(Math.round(idealBottom - PLATE_H), maxY - PLATE_H))
       violations.push(`${a.id}: no free plate slot above the head`)
     }
     const plate: PlacedPlate = { id: a.id, x, y, w, h: PLATE_H, connector }
@@ -176,6 +216,7 @@ export function sideGate(
   seats: readonly SideSeat[],
   plates: readonly PlacedPlate[],
   bounds: { w: number; h: number },
+  window?: LabelWindow,
 ): SideGateReport {
   const violations: string[] = []
   let plateOverlaps = 0
@@ -234,8 +275,24 @@ export function sideGate(
     minGap = Math.min(minGap, s.headTop - (p.y + p.h))
   }
 
+  const wx0 = (window ? window.x0 : 0) + (window?.margin ?? 1)
+  const wx1 = (window ? window.x1 : bounds.w) - (window?.margin ?? 1)
+  const wy0 = (window ? window.y0 : 0) + (window?.margin ?? 1)
+  const wy1 = (window ? window.y1 : bounds.h) - (window?.margin ?? 1)
+  const stageX0 = 1
+  const stageX1 = bounds.w - 1
   for (const p of plates) {
-    if (p.x < 1 || p.y < 1 || p.x + p.w > bounds.w - 1 || p.y + p.h > bounds.h - 1) {
+    const seat = seats.find((q) => q.meta.id === p.id)
+    const onScreen =
+      !window?.visibleHeadsOnly ||
+      !seat ||
+      (seat.cx >= (window?.x0 ?? 0) &&
+        seat.cx <= (window?.x1 ?? bounds.w) &&
+        seat.headTop + seat.headH / 2 >= (window?.y0 ?? 0) &&
+        seat.headTop + seat.headH / 2 <= (window?.y1 ?? bounds.h))
+    const lo = onScreen ? wx0 : stageX0
+    const hi = onScreen ? wx1 : stageX1
+    if (p.x < lo || p.y < wy0 || p.x + p.w > hi || p.y + p.h > wy1) {
       violations.push(`${p.id} plate leaves the canvas`)
     }
   }

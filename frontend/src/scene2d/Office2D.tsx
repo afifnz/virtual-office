@@ -19,6 +19,7 @@ import type { ThemeName } from './palette'
 import { pickTargets, placeAgents, renderFrame } from './render'
 import { labelAgentsFor, layoutSideLabels, sideGate } from './labels'
 import {
+  PHONE_CTRL_BAND,
   SIDE_AVATAR_H,
   SIDE_H,
   SIDE_ROOM_H,
@@ -32,6 +33,7 @@ import {
   type SideViewport,
 } from './side'
 import { clampZoom, fitZoom } from './viewport'
+import { useIsMobile } from '../hooks/useViewport'
 
 export interface OfficeProps {
   status: StatusPayload | null
@@ -72,6 +74,13 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
   const nearRef = useRef<string | null>(null)
   const themeRef = useRef<ThemeName>(theme)
   themeRef.current = theme
+  // The phone layout floats the pad over the canvas, so the painter keeps a
+  // bottom band clear for it. Derived from the layout breakpoint, never from the
+  // canvas width: a desktop window narrowed by the roster rail is < 760 px too
+  // and must keep its 150 px/unit camera.
+  const phone = useIsMobile()
+  const bandRef = useRef(phone ? PHONE_CTRL_BAND : 0)
+  bandRef.current = phone ? PHONE_CTRL_BAND : 0
   const perfRef = useRef<{ samples: number[]; frames: number; last: number }>({ samples: [], frames: 0, last: 0 })
 
   const still = useMemo(() => {
@@ -131,7 +140,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
 
   const zoomBy = useCallback((delta: number) => {
     const zoom = clampZoom(vpRef.current.zoom + delta)
-    vpRef.current = { ...vpRef.current, zoom, camX: clampSideCam(vpRef.current.camX, viewRef.current.w, viewRef.current.h, zoom) }
+    vpRef.current = { ...vpRef.current, zoom, camX: clampSideCam(vpRef.current.camX, viewRef.current.w, viewRef.current.h, zoom, bandRef.current) }
     setZoomLabel(zoom)
   }, [])
 
@@ -154,7 +163,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
       fitPending.current = false
       setZoomLabel(zoom)
     }
-    vpRef.current = { ...vpRef.current, camX: clampSideCam(vpRef.current.camX, w, h, vpRef.current.zoom) }
+    vpRef.current = { ...vpRef.current, camX: clampSideCam(vpRef.current.camX, w, h, vpRef.current.zoom, bandRef.current) }
   }, [])
 
   // the render loop, mounted once; reads the latest data from refs
@@ -178,7 +187,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
       if (kx !== 0) {
         vpRef.current = {
           ...vpRef.current,
-          camX: clampSideCam(vpRef.current.camX - kx * PAN_SPEED * dt, viewRef.current.w, viewRef.current.h, vpRef.current.zoom),
+          camX: clampSideCam(vpRef.current.camX - kx * PAN_SPEED * dt, viewRef.current.w, viewRef.current.h, vpRef.current.zoom, bandRef.current),
         }
         onMove()
       }
@@ -209,6 +218,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
           vp: vpRef.current,
           viewW: w,
           viewH: h,
+          band: bandRef.current,
           dpr,
           still: still || reducedMotion,
           t: tRef.current,
@@ -225,7 +235,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         // proximity: nearest agent to the viewport centre, on this floor
         const placed = placeAgents(f.metas, f.byId, f.now, f.comms, tRef.current)
         const targets = pickTargets(placed).filter((p) => p.floor === vpRef.current.floor)
-        const tr = sideTransform(w, h, vpRef.current)
+        const tr = sideTransform(w, h, vpRef.current, bandRef.current)
         const centre = screenToDesign(tr, w / 2, h / 2)
         let near: string | null = null
         let best = Infinity
@@ -333,7 +343,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
           vpRef.current = {
             ...vpRef.current,
             zoom,
-            camX: clampSideCam(vpRef.current.camX, viewRef.current.w, viewRef.current.h, zoom),
+            camX: clampSideCam(vpRef.current.camX, viewRef.current.w, viewRef.current.h, zoom, bandRef.current),
           }
           setZoomLabel(zoom)
           onMove()
@@ -347,10 +357,10 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
       d.moved += Math.abs(dx) + Math.abs(dy)
       if (d.moved > 4) {
         const { w, h } = viewRef.current
-        const tr = sideTransform(w, h, vpRef.current)
+        const tr = sideTransform(w, h, vpRef.current, bandRef.current)
         vpRef.current = {
           ...vpRef.current,
-          camX: clampSideCam(vpRef.current.camX - dx / tr.s, w, h, vpRef.current.zoom),
+          camX: clampSideCam(vpRef.current.camX - dx / tr.s, w, h, vpRef.current.zoom, bandRef.current),
         }
         onMove()
       }
@@ -366,7 +376,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         const rect = canvas.getBoundingClientRect()
         const { w, h } = viewRef.current
         if (w > 0 && h > 0) {
-          const tr = sideTransform(w, h, vpRef.current)
+          const tr = sideTransform(w, h, vpRef.current, bandRef.current)
           const pt = screenToDesign(tr, e.clientX - rect.left, e.clientY - rect.top)
           const placed = placeAgents(frame.current.metas, frame.current.byId, frame.current.now, frame.current.comms, tRef.current)
           const targets = pickTargets(placed).filter((p) => p.floor === vpRef.current.floor)
