@@ -238,8 +238,19 @@ in-world lewat cache plate offscreen, bukan `fillText` per frame.
 `three` = 72,3% gzip JS. Tanpa three, JS tinggal 282.803 B raw / 91.526 B gzip; chunk scene 2D
 baru diperkirakan 50–80 kB raw (≈18–25 kB gzip) → **target total JS ≈ 250–280 kB raw /
 ≈95–115 kB gzip (turun ±70%)**. `dist/` total saat ini 8,9 MB termasuk ±8 MB GLB yang tersalin
-dari `public/models/` (lihat Q1 — tidak di-fetch aplikasi 2D). Angka SESUDAH wajib diukur ulang
-dengan perintah yang sama di T2.3 dan ditempel di PR, bukan estimasi ini.
+dari `public/models/` (lihat Q1 — tidak di-fetch aplikasi 2D).
+
+### Ukuran bundle — SESUDAH (diukur nyata, `npm ci && npm run build`, T2.3)
+| Chunk | Raw | Gzip |
+|---|---:|---:|
+| `index-*.js` (entry) | 44.637 B | 15.145 B |
+| `Office2D-*.js` (scene 2D, lazy) | 28.761 B | 10.548 B |
+| `react-*.js` | 142.785 B | 45.784 B |
+| **Total JS** | **216.183 B (≈216 kB)** | **71.477 B (≈71 kB)** |
+| `index-*.css` | 21.977 B | 4.834 B |
+
+Turun **78,4 %** gzip (330.955 B → 71.477 B). `grep WebGLRenderer dist/assets/*.js` kosong;
+`node_modules` tidak lagi berisi `three`/`@react-three`/`@types/three`.
 
 ---
 
@@ -286,9 +297,9 @@ dengan perintah yang sama di T2.3 dan ditempel di PR, bukan estimasi ini.
 ### Dihapus (T2.5 — skrip verify khusus 3D; semuanya bergantung `__officeScene`/WebGL/swiftshader)
 `verify/compact_shots.py`, `face_shot.py`, `face_sym.py`, `final_shots.py`, `layout_probe.py`,
 `layout_shots.py`, `mobile.py`, `mouth_check.py`, `ndoro_shots.py`, `neck_mobile.py`,
-`neck_probe.py`, `neck_shot.py`, `overview_glb.py`, `perf_glb.py`, `portrait.py`,
-`portrait_glb.py`, `pose_check.py`, `refresh.py`, `shoot.py` (+ direktori artefak `verify/neck/`
-bila hanya berisi ukuran 3D — periksa isinya dulu; PNG sudah di-gitignore).
+`neck_probe.py`, `neck_sheet.py`, `neck_shot.py`, `overview_glb.py`, `perf_glb.py`, `portrait.py`,
+`portrait_glb.py`, `pose_check.py`, `refresh.py`, `shoot.py` (20 file) + `verify/neck/`
+(`before-measure.json`, `after-measure.json` — keduanya angka 3D; PNG sudah di-gitignore).
 
 ### Tidak disentuh (dibekukan)
 `backend/**`, `deploy/**`, `frontend/src/lib/{rooms,agents,layout,roster,nav,routes,presence,types,api,format}.ts`,
@@ -513,12 +524,12 @@ Aman paralel: {T1.1, T1.2, T1.4, T2.5} di awal; {T1.9/T2.1, T2.3, T2.4} setelah 
 - [x] T1.6 `render.ts` layer statis+dinamis
 - [x] T1.7 `Office2D.tsx` + Scene lazy baru
 - [x] T1.8 wiring App + hapus `src/scene/` + label/textures — build tanpa chunk three
-- [ ] T1.9 shot desktop/mobile/offline + verdict vision + bukti scrollTop
-- [ ] T2.1 tema pixel panel desktop (overflow roster selamat)
-- [ ] T2.2 mobile sheet/accordion + toolbar + zoom terjangkau
-- [ ] T2.3 deps three dihapus + vite config bersih + tabel bundle SESUDAH
-- [ ] T2.4 skrip verify 3D usang dihapus + README/AGENTS diperbarui
-- [ ] T2.5 `docs/attribution-2d.md`
+- [x] T1.9 (kode) 6 cacat visual diperbaiki + `verify/visual_check.ts` (VISUAL OK) + `verify/office2d_probe.js`; **shot + verdict vision menunggu front desk**
+- [x] T2.1 tema pixel panel desktop + sidebar kanan/toolbar bawah (overflow roster selamat)
+- [x] T2.2 mobile sheet/accordion + toolbar + zoom terjangkau
+- [x] T2.3 deps three dihapus + vite config bersih — JS 216.183 B raw / 71.477 B gzip (−78 % gzip)
+- [x] T2.4 20 skrip verify 3D dihapus + README ditulis ulang; **AGENTS.md belum** (file write-protected di sandbox)
+- [x] T2.5 `docs/attribution-2d.md` (AGPL-3.0 & MIT dicatat, tidak ada aset disalin)
 - [ ] T2.6 gate akhir: backend vet+test · tsc+build · e2e 51 cek · roster/layout/anim OK ·
       shot+vision · scrollTop · bundle sebelum/sesudah · `git diff backend/` kosong
 - [ ] Q1 (GLB) & Q2 (skrip lama) dijawab bos di review PR

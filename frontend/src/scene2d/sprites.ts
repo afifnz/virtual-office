@@ -258,9 +258,20 @@ export function drawDesk(
   drawMonitor(ctx, mx, my, mw, mh, mode)
 }
 
-/** A chair drawn into s×s: back rest behind, seat below. */
-export function drawChair(ctx: CanvasRenderingContext2D, s: number): void {
+/**
+ * A chair drawn into s×s: back rest behind, seat below. `occupied = false`
+ * draws the empty seat of an offline agent — a hollow navy frame instead of the
+ * warm terracotta, so "nobody is here" reads without relying on colour alone.
+ */
+export function drawChair(ctx: CanvasRenderingContext2D, s: number, occupied = true): void {
   const back = Math.max(3, Math.round(s * 0.45))
+  if (!occupied) {
+    px(ctx, 0, 0, s, back, PALETTE.navy700)
+    px(ctx, 1, 1, s - 2, Math.max(1, back - 1), PALETTE.navy900)
+    px(ctx, 0, back, s, 2, PALETTE.navy600)
+    px(ctx, 0, s - 1, s, 1, PALETTE.navy700)
+    return
+  }
   px(ctx, 0, 0, s, back, PALETTE.terra600)
   px(ctx, 0, back, s, Math.max(2, Math.round(s * 0.3)), PALETTE.terra500)
   px(ctx, 0, s - 1, s, 1, PALETTE.terra300)

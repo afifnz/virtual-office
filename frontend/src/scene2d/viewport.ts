@@ -46,6 +46,20 @@ export function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(zoom)))
 }
 
+/** Share of the view the floor may fill, so the walls never touch the edge. */
+export const FIT_MARGIN = 0.94
+
+/**
+ * The largest integer zoom at which the whole 28 × 20 floor still fits the
+ * view. This is the default view ("tampak"): a desk cluster that leaves the
+ * screen is a bug, not a zoom level.
+ */
+export function fitZoom(viewW: number, viewH: number): number {
+  if (viewW <= 0 || viewH <= 0) return MIN_ZOOM
+  const z = Math.min(viewW / (WORLD_W * FIT_MARGIN), viewH / (WORLD_H * FIT_MARGIN))
+  return clampZoom(Math.floor(z))
+}
+
 /** world → zoom-1 pixel space. Origin = the north-west corner of the floor. */
 export function worldToPixel(x: number, z: number): PixelPoint {
   return { x: (x + FLOOR_W / 2) * TILE, y: (z + FLOOR_D / 2) * TILE }

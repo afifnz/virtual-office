@@ -29,16 +29,19 @@ export interface SpotView {
   x: number
   z: number
   zoom: number
+  /** ignore the numbers and fit the whole floor into the canvas instead */
+  fit?: boolean
 }
 
 /**
  * Where each named spot points the 2D camera. Centres are the team rooms from
- * `lib/layout.ts` TEAM_CENTRE; `tampak`/`luar` fit the whole floor (zoom 1).
+ * `lib/layout.ts` TEAM_CENTRE; `tampak`/`luar` ask the canvas to zoom-fit the
+ * whole floor, so no desk cluster can ever start off-screen.
  */
 export const SPOT_VIEW: Record<string, SpotView> = {
   lobby: { x: 0, z: 6, zoom: 2 },
   dev: { x: -7.6, z: -4.4, zoom: 2 },
   edu: { x: 7.0, z: -4.4, zoom: 2 },
-  tampak: { x: 0, z: 0, zoom: 1 },
-  luar: { x: 0, z: 0, zoom: 1 },
+  tampak: { x: 0, z: 0, zoom: 1, fit: true },
+  luar: { x: 0, z: 0, zoom: 1, fit: true },
 }

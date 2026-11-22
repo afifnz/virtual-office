@@ -22,7 +22,9 @@ export default function App() {
   // ?spot=<id> opens the camera at a named spot (used by verify/ scripts)
   const [command, setCommand] = useState<RigCommand>(() => {
     const spot = new URLSearchParams(window.location.search).get('spot')
-    return { spot: spot && spot in SPOTS ? spot : 'lobby', nonce: 0 }
+    // default: the whole floor ("tampak"), so every one of the 13 desks is on
+    // screen from the first frame — a cropped cluster is a bug, not a zoom
+    return { spot: spot && spot in SPOTS ? spot : 'tampak', nonce: 0 }
   })
   const [rosterOpen, setRosterOpen] = useState(!mobile)
   const [feedOpen, setFeedOpen] = useState(!mobile)
@@ -112,7 +114,11 @@ export default function App() {
   const onMove = useCallback(() => setPickedId((p) => p), [])
 
   return (
-    <div className={`app ${mobile ? 'is-mobile' : ''}`}>
+    <div
+      className={`app ${mobile ? 'is-mobile' : ''} ${rosterOpen && !mobile ? 'has-roster' : ''} ${
+        feedOpen && !mobile ? 'has-feed' : ''
+      }`}
+    >
       <div className="canvas-wrap">
         <Scene
           status={data}
