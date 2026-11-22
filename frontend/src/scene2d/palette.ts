@@ -28,6 +28,11 @@ export const PALETTE = {
   steel700: '#39434F', // steel shadow, chair graphite
   // ceiling light — warm white strips and pools
   lamp: '#F2E7C4',
+  // foliage — the only living green in the room: plants and planters. Two
+  // tones so a leaf mass reads as a silhouette instead of a flat blob.
+  foliage: '#5E7F63',
+  foliageDark: '#41583F',
+  foliageLight: '#7EA184',
   // the one warm accent — active states, lift call, blocked-adjacent warmth
   amber: '#E8A33D',
   amberDeep: '#9A6A1E', // accent border/shadow tone

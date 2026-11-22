@@ -311,95 +311,186 @@ export function drawFurniture(ctx: CanvasRenderingContext2D, id: string, w: numb
     case 'meja-rapat':
     case 'rapat':
     case 'meja-nook':
-    case 'standup':
-      // glass meeting / standup table: translucent-blue pane in solid tones
-      px(ctx, 0, 0, w, h, PALETTE.glass700)
-      px(ctx, 1, 1, w - 2, h - 2, PALETTE.glass500)
-      px(ctx, 1, 1, w - 2, 1, PALETTE.glass300)
-      px(ctx, 1, 1, 1, h - 2, PALETTE.glass300)
-      // steel legs at the corners
-      px(ctx, 1, h - 2, 2, 1, PALETTE.steel500)
-      px(ctx, w - 3, h - 2, 2, 1, PALETTE.steel500)
+    case 'standup': {
+      // glass meeting / standup table: steel rim, glass pane, legs, and what is
+      // actually on it (a laptop, papers, a cup) so it never reads as a slab
+      px(ctx, 0, 0, w, h, PALETTE.steel500)
+      px(ctx, 1, 1, w - 2, h - 2, PALETTE.glass700)
+      px(ctx, 2, 2, w - 4, h - 4, PALETTE.glass500)
+      px(ctx, 2, 2, w - 4, 1, PALETTE.glass300)
+      px(ctx, 2, 2, 1, h - 4, PALETTE.glass300)
+      // steel legs peeking out at the south corners
+      px(ctx, 2, h - 3, 2, 2, PALETTE.steel500)
+      px(ctx, w - 4, h - 3, 2, 2, PALETTE.steel500)
+      if (w >= 20 && h >= 12) {
+        // a laptop with its lid open towards the north side
+        const lw = Math.min(12, Math.round(w * 0.3))
+        const lh = Math.min(8, Math.max(4, Math.round(h * 0.34)))
+        const lx = Math.round((w - lw) / 2) - 3
+        const ly = Math.round((h - lh) / 2) - 1
+        px(ctx, lx, ly, lw, lh, PALETTE.concrete900)
+        px(ctx, lx + 1, ly + 1, lw - 2, lh - 3, PALETTE.glass700)
+        px(ctx, lx + 2, ly + 2, Math.max(1, lw - 6), 1, PALETTE.glass300)
+        px(ctx, lx, ly + lh - 1, lw, 1, PALETTE.steel700)
+        // papers + a cup on the east half
+        px(ctx, w - 12, h - 9, 6, 4, PALETTE.concrete100)
+        px(ctx, w - 12, h - 9, 6, 1, PALETTE.concrete200)
+        px(ctx, w - 7, 4, 3, 2, PALETTE.concrete100)
+        px(ctx, w - 7, 4, 3, 1, PALETTE.glass300)
+      }
       return
+    }
     case 'meja-kopi':
     case 'sofa-table':
-      // low steel coffee table
-      px(ctx, 0, Math.round(h / 2), w, Math.max(1, Math.round(h / 2)), PALETTE.steel500)
-      px(ctx, 1, 0, w - 2, Math.round(h / 2), PALETTE.steel300)
+      // low table: steel rim, pale top, a cup and a magazine
+      px(ctx, 0, 0, w, h, PALETTE.steel700)
+      px(ctx, 0, 0, w, Math.max(1, h - 1), PALETTE.steel500)
+      px(ctx, 1, 1, w - 2, Math.max(1, h - 3), PALETTE.concrete200)
+      px(ctx, 1, 1, w - 2, 1, PALETTE.concrete100)
+      if (w >= 10 && h >= 8) {
+        px(ctx, 2, 3, 3, 2, PALETTE.glass500)
+        px(ctx, 2, 3, 3, 1, PALETTE.glass300)
+        px(ctx, w - 8, 3, 5, 3, PALETTE.concrete100)
+      }
       return
-    case 'kopi':
-      // pantry / coffee counter: white concrete body, steel top, coffee machine
+    case 'kopi': {
+      // pantry counter: dark backsplash on the wall side, pale worktop with a
+      // front edge, a sink with a tap, an espresso machine and a row of cups —
+      // the guest side is the east face
       px(ctx, 0, 0, w, h, PALETTE.concrete100)
+      px(ctx, 0, 0, 2, h, PALETTE.concrete500) // backsplash against the wall
       px(ctx, 0, 0, w, 2, PALETTE.steel300)
       px(ctx, 0, h - 2, w, 2, PALETTE.steel500)
+      px(ctx, w - 2, 2, 2, h - 4, PALETTE.steel300) // worktop front edge
+      px(ctx, w - 1, 2, 1, h - 4, PALETTE.steel500)
+      // sink: a steel recess with a pale basin and a tap
+      const sw = Math.max(3, w - 5)
+      px(ctx, 2, 4, sw, 9, PALETTE.steel300)
+      px(ctx, 3, 5, Math.max(1, sw - 2), 7, PALETTE.concrete200)
+      px(ctx, 3, 5, 1, 1, PALETTE.steel500)
+      px(ctx, 2, 2, 1, 2, PALETTE.steel500)
       // espresso machine: dark body, steel group head, amber ready light
-      const mw = Math.max(4, Math.min(10, Math.round(w * 0.4)))
-      const mx = Math.max(1, Math.round((w - mw) / 2))
-      px(ctx, mx, 2, mw, Math.max(3, Math.round(h * 0.5)), PALETTE.concrete700)
-      px(ctx, mx + 1, 3, mw - 2, 1, PALETTE.steel300)
-      px(ctx, mx + Math.round(mw / 2) - 1, 5, 2, 2, PALETTE.steel500)
-      px(ctx, mx + mw - 2, 3, 1, 1, PALETTE.amber)
+      const mh = Math.max(7, Math.min(13, Math.round(h * 0.27)))
+      px(ctx, 2, 16, w - 3, mh, PALETTE.concrete900)
+      px(ctx, 3, 17, Math.max(1, w - 5), 2, PALETTE.steel300)
+      px(ctx, 3, 16 + mh - 4, 3, 2, PALETTE.steel500)
+      px(ctx, Math.max(3, w - 4), 17, 1, 1, PALETTE.amber)
+      px(ctx, 4, 16 + mh - 2, 2, 1, PALETTE.concrete200) // cup under the spout
+      // cups in a row on the south half
+      for (let i = 0; i < 3; i++) {
+        const cy = 16 + mh + 3 + i * 3
+        if (cy + 2 > h - 2) break
+        px(ctx, 2, cy, 3, 2, PALETTE.concrete200)
+        px(ctx, 2, cy, 3, 1, PALETTE.concrete100)
+      }
       return
-    case 'sofa':
-      // grey fabric lounge sofa with cushions
-      px(ctx, 0, 0, w, h, PALETTE.steel500)
-      px(ctx, 0, 0, w, 2, PALETTE.steel300)
-      px(ctx, 0, h - 3, w, 3, PALETTE.steel700)
-      // cushion seams
-      px(ctx, Math.round(w / 2), 2, 1, h - 5, PALETTE.steel700)
-      if (w >= 12) px(ctx, Math.round(w / 4), 2, 1, h - 5, PALETTE.steel700)
+    }
+    case 'sofa': {
+      // grey fabric lounge sofa: backrest on the side against the room edge,
+      // arms at both ends, cushion seams — the silhouette the review missed.
+      // A vertical sofa (h > w) leans on the east wall, a horizontal one on the
+      // north wall; that is how the lobby's only sofa is placed.
+      const vertical = h > w
+      const back = Math.max(3, Math.round((vertical ? w : h) * 0.28))
+      const arm = Math.max(3, Math.round((vertical ? h : w) * 0.13))
+      px(ctx, 0, 0, w, h, PALETTE.steel700)
+      px(ctx, 1, 1, w - 2, h - 2, PALETTE.steel500)
+      if (vertical) {
+        px(ctx, w - back, 0, back, h, PALETTE.steel700)
+        px(ctx, w - back, 0, 1, h, PALETTE.steel300)
+        px(ctx, 0, 0, w, arm, PALETTE.steel700)
+        px(ctx, 0, h - arm, w, arm, PALETTE.steel700)
+        const inner = h - 2 * arm
+        const seats = Math.max(2, Math.round(inner / 16))
+        for (let i = 1; i < seats; i++) px(ctx, 0, arm + Math.round((inner * i) / seats), w - back, 1, PALETTE.steel700)
+        px(ctx, 1, arm + 1, 1, inner - 1, PALETTE.steel300)
+      } else {
+        px(ctx, 0, 0, w, back, PALETTE.steel700)
+        px(ctx, 0, back - 1, w, 1, PALETTE.steel300)
+        px(ctx, 0, 0, arm, h, PALETTE.steel700)
+        px(ctx, w - arm, 0, arm, h, PALETTE.steel700)
+        const inner = w - 2 * arm
+        const seats = Math.max(2, Math.round(inner / 16))
+        for (let i = 1; i < seats; i++) px(ctx, arm + Math.round((inner * i) / seats), back, 1, h - back, PALETTE.steel700)
+        px(ctx, arm + 1, back, inner - 1, 1, PALETTE.steel300)
+      }
       return
+    }
     case 'papan-dev':
     case 'papan-edu':
     case 'papan': {
-      // whiteboard / sprint board: white surface, steel frame, marker columns
-      px(ctx, 0, 0, w, h, PALETTE.steel700)
-      const bx = w >= 4 ? 1 : 0
-      const by = h >= 4 ? 1 : 0
-      px(ctx, bx, by, w - 2 * bx, h - 2 * by, PALETTE.concrete100)
-      if (w >= 8 && h >= 6) {
-        const cols = ['#6FB1E8', '#7FC08C', '#E8A33D']
+      // whiteboard / sprint board mounted on the wall: the board is drawn a
+      // little taller than its (thin) footprint so it reads as a panel on the
+      // wall band instead of a 3 px stripe on the floor
+      const bh = Math.max(h, 5)
+      const y0 = h - bh
+      px(ctx, 0, y0, w, bh, PALETTE.steel700)
+      px(ctx, 1, y0 + 1, w - 2, bh - 2, PALETTE.concrete100)
+      if (w >= 8) {
+        const cols = [PALETTE.glass500, STATUS.ok, PALETTE.amber]
         for (let c = 0; c < 3; c++) {
-          const cx = bx + 1 + c * Math.max(2, Math.floor((w - 2 * bx - 2) / 3))
+          const cx = 2 + c * Math.max(2, Math.floor((w - 4) / 3))
           for (let r = 0; r < 2; r++) {
-            const ry = by + 1 + r * 2
-            if (ry < h - by - 1 && cx < w - bx - 2) px(ctx, cx, ry, Math.min(2, w - bx - 1 - cx), 1, cols[c]!)
+            const ry = y0 + 1 + r * 2
+            if (ry < y0 + bh - 1 && cx < w - 2) px(ctx, cx, ry, Math.min(2, w - 2 - cx), 1, cols[c]!)
           }
         }
       }
       return
     }
     case 'printer':
-      // office printer: white body, paper tray, output slot, status LED
-      px(ctx, 0, 0, w, h, PALETTE.concrete100)
-      px(ctx, 0, 0, w, 1, PALETTE.concrete200)
-      px(ctx, 1, Math.max(1, Math.round(h * 0.3)), w - 2, 1, PALETTE.concrete700)
-      px(ctx, 2, Math.max(2, Math.round(h * 0.5)), w - 4, Math.max(1, Math.round(h * 0.2)), PALETTE.concrete200)
-      px(ctx, w - 3, 1, 1, 1, STATUS.ok)
+      // office printer on a steel stand: paper tray, output slot, a printed
+      // sheet and a ready LED, so the corner reads as a print station
+      px(ctx, 0, 0, w, h, PALETTE.concrete200) // stand shadow
+      px(ctx, 1, 1, w - 2, h - 3, PALETTE.concrete100) // body
+      px(ctx, 1, 1, w - 2, 1, PALETTE.concrete200)
+      px(ctx, 1, h - 2, 2, 2, PALETTE.steel500) // legs
+      px(ctx, w - 3, h - 2, 2, 2, PALETTE.steel500)
+      px(ctx, 2, 2, Math.max(2, w - 4), 2, PALETTE.concrete200) // paper tray
+      px(ctx, 2, 2, Math.max(2, w - 4), 1, PALETTE.concrete100)
+      px(ctx, 2, 5, Math.max(2, w - 4), 1, PALETTE.concrete700) // output slot
+      px(ctx, 3, 6, Math.max(1, w - 6), 2, PALETTE.concrete200) // printed sheet
+      px(ctx, w - 3, 3, 1, 1, STATUS.ok)
       return
     case 'buku':
-      // bookshelf: light case with book spines in muted tones
-      px(ctx, 0, 0, w, h, PALETTE.concrete200)
-      px(ctx, 0, 0, w, 1, PALETTE.concrete100)
-      px(ctx, 0, h - 1, w, 1, PALETTE.steel500)
-      for (let r = 0; r < 3; r++) {
+      // bookshelf: light case, two shelf rows, book spines in muted tones
+      px(ctx, 0, 0, w, h, PALETTE.steel700)
+      px(ctx, 1, 1, w - 2, h - 2, PALETTE.concrete200)
+      px(ctx, 1, 1, w - 2, 1, PALETTE.concrete100)
+      for (let r = 0; r < 2; r++) {
         const y = 1 + r * 3
         if (y + 2 > h - 1) break
-        px(ctx, 1, y, w - 2, 2, PALETTE.concrete700)
-        const spine = ['#6FB1E8', '#A98CE0', '#E8A33D', '#7FC08C'][r % 4]!
-        for (let b = 0; b < 3; b++) {
-          const bx = 2 + b * Math.max(2, Math.floor((w - 4) / 3))
-          if (bx < w - 3) px(ctx, bx, y, Math.min(1, w - 3 - bx) + 1, 2, spine)
+        px(ctx, 2, y, w - 4, 2, PALETTE.concrete700)
+        const spine = [PALETTE.glass500, STATUS.reviewing, PALETTE.amber, STATUS.ok][r % 4]!
+        const n = Math.max(3, Math.floor((w - 6) / 4))
+        for (let b = 0; b < n; b++) {
+          const bx = 3 + b * Math.floor((w - 6) / n)
+          if (bx + 1 < w - 2) px(ctx, bx, y, 1, 2, b % 3 === 0 ? spine : PALETTE.concrete500)
         }
       }
       return
-    case 'resepsionis':
-      // reception counter: white concrete monolith with a steel top
+    case 'resepsionis': {
+      // reception counter: pale monolith, front panel on the guest (east) side,
+      // a monitor facing the receptionist, a keyboard, papers and a cup
       px(ctx, 0, 0, w, h, PALETTE.concrete100)
-      px(ctx, 0, 0, w, 2, PALETTE.steel300)
-      px(ctx, 0, h - 2, w, 1, PALETTE.steel500)
+      px(ctx, 0, 0, 1, h, PALETTE.concrete200)
+      px(ctx, w - 3, 0, 3, h, PALETTE.concrete200)
+      px(ctx, w - 1, 0, 1, h, PALETTE.steel500)
+      px(ctx, 0, 0, w, 1, PALETTE.steel300)
       px(ctx, 0, h - 1, w, 1, PALETTE.steel700)
+      // the monitor, screen towards the receptionist (west face)
+      const mw = Math.max(6, Math.min(9, w - 3))
+      const mh = 6
+      px(ctx, 2, 3, mw, mh, PALETTE.concrete900)
+      drawMonitor(ctx, 2, 3, mw, mh, 'terminal')
+      px(ctx, 2, 3 + mh, mw, 1, PALETTE.steel700)
+      // keyboard, a stack of papers, a cup
+      px(ctx, 2, 12, Math.max(4, w - 6), 2, PALETTE.concrete200)
+      px(ctx, 2, 30, 5, 4, PALETTE.concrete200)
+      px(ctx, 2, 30, 5, 1, PALETTE.concrete100)
+      px(ctx, w - 5, 20, 2, 2, PALETTE.glass500)
       return
+    }
     default:
       // generic cabinet: steel box with a lighter top edge
       px(ctx, 0, 0, w, h, PALETTE.steel500)

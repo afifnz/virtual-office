@@ -40,6 +40,7 @@ import {
 } from './labels'
 import { EXTRAS, FLOOR_MOTIF, PALETTE, SCREEN, STATUS, TEAM } from './palette'
 import { drawText } from './pixelfont'
+import { drawProp, propLayer, propsOf } from './props'
 import { getSprite, type Sprite } from './sprites'
 import {
   CHIBI_W,
@@ -219,26 +220,52 @@ function drawWalls(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   }
 }
 
+/**
+ * The furniture pass: props that lie on the floor (rugs) first, then the
+ * collision obstacles (desks aside — those are painted dynamically), then the
+ * props that stand on top (chairs, plants, the lift call panel).
+ */
 function drawFurnitureLayer(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   const f = FLOORS[floor]
+  const box = (x1: number, z1: number, x2: number, z2: number) => ({
+    x: Math.round((x1 + f.w / 2) * TILE),
+    y: Math.round((z1 + f.d / 2) * TILE),
+    w: Math.max(1, Math.round((x2 - x1) * TILE)),
+    h: Math.max(1, Math.round((z2 - z1) * TILE)),
+  })
+  const props = propsOf(floor)
+  for (const p of props) {
+    if (propLayer(p) !== 'under') continue
+    const b = box(p.x, p.z, p.x + p.w, p.z + p.h)
+    ctx.save()
+    ctx.translate(b.x, b.y)
+    drawProp(ctx, p, b.w, b.h)
+    ctx.restore()
+  }
   for (const o of obstaclesOf(floor)) {
     if (o.id.startsWith('desk-')) continue // desks are drawn dynamically
     if (o.id.startsWith('lift-')) continue // the lift shaft gets its own painter
-    const x = (o.x1 + f.w / 2) * TILE
-    const y = (o.z1 + f.d / 2) * TILE
-    const w = Math.max(1, Math.round((o.x2 - o.x1) * TILE))
-    const h = Math.max(1, Math.round((o.z2 - o.z1) * TILE))
+    const b = box(o.x1, o.z1, o.x2, o.z2)
     ctx.save()
-    ctx.translate(Math.round(x), Math.round(y))
-    drawFurniture(ctx, o.id, w, h)
+    ctx.translate(b.x, b.y)
+    drawFurniture(ctx, o.id, b.w, b.h)
+    ctx.restore()
+  }
+  for (const p of props) {
+    if (propLayer(p) !== 'over') continue
+    const b = box(p.x, p.z, p.x + p.w, p.z + p.h)
+    ctx.save()
+    ctx.translate(b.x, b.y)
+    drawProp(ctx, p, b.w, b.h)
     ctx.restore()
   }
 }
 
 /**
- * The lift: a steel shaft with two door panels on its west face, a floor
- * indicator plate above the doors, and — while an agent dwells — the panels
- * slide apart (the dynamic overlay in drawLiftDoorsOpen).
+ * The lift: a steel shaft with two door panels on its west face and the floor
+ * number on the shaft header — the number belongs to the shaft, not to the
+ * door. While an agent dwells, the panels slide apart (the dynamic overlay in
+ * drawLiftDoorsOpen).
  */
 function drawLift(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   const f = FLOORS[floor]
@@ -324,8 +351,10 @@ export function createStaticLayer(floor: FloorId): HTMLCanvasElement {
   drawFloor(ctx, floor)
   drawCeilingLights(ctx, floor)
   drawWalls(ctx, floor)
-  drawFurnitureLayer(ctx, floor)
+  // the lift sits on the slab before the furniture, so a prop mounted on the
+  // shaft face (the call panel) is painted on top of it
   drawLift(ctx, floor)
+  drawFurnitureLayer(ctx, floor)
   return canvas
 }
 
