@@ -252,11 +252,21 @@ else ok('hit-test picks the nearest agent within 0.9 units')
 
 const big = { x: 999, z: -999, zoom: 2 }
 const clamped = clampCenter(big, 800, 600)
-const visW = 800 / 2
-const visH = 600 / 2
-if (clamped.x > 14 - visW / 2 || clamped.x < -(14 - visW / 2)) fail(`clampCenter x out of range: ${clamped.x}`)
-if (clamped.z > 10 - visH / 2 || clamped.z < -(10 - visH / 2)) fail(`clampCenter z out of range: ${clamped.z}`)
-else ok('pan is clamped so the floor never leaves the view at minimum zoom')
+const visW = 800 / 2 / TILE // visible world extent
+const visH = 600 / 2 / TILE
+const halfW = 14
+const halfD = 10
+if (clamped.zoom !== 2) fail(`clampCenter changed zoom: ${clamped.zoom}`)
+if (clamped.x > halfW - visW / 2 + 0.001 || clamped.x < -(halfW - visW / 2) - 0.001) {
+  fail(`clampCenter x out of range: ${clamped.x.toFixed(2)} (want ±${(halfW - visW / 2).toFixed(2)})`)
+}
+if (clamped.z > halfD - visH / 2 + 0.001 || clamped.z < -(halfD - visH / 2) - 0.001) {
+  fail(`clampCenter z out of range: ${clamped.z.toFixed(2)} (want ±${(halfD - visH / 2).toFixed(2)})`)
+}
+// when the whole floor fits, the centre is pinned to the origin
+const fit = clampCenter({ x: 5, z: 5, zoom: 1 }, 2000, 2000)
+if (fit.x !== 0 || fit.z !== 0) fail(`clampCenter should pin centre to origin when the floor fits: ${fit.x},${fit.z}`)
+else ok('pan is clamped so the floor never leaves the view; centre pinned when it fits')
 
 // --------------------------------------------------------------- final verdict
 
