@@ -16,21 +16,24 @@ Kesimpulan riset, singkat:
 
 1. **Glassmorphism yang bekerja bukan "semua transparan".** Resep yang terbukti di produk nyata adalah empat lapis: isian translusen, blur latar, garis tepi tipis, dan satu highlight dalam 1 px — ditambah noise halus untuk memecah gradien (Microsoft menamainya resep Acrylic: *background, blur, exclusion blend, color/tint overlay, noise*). Kegagalan yang paling sering terjadi juga terdokumentasi: kontras teks jatuh saat latar di belakang kaca berubah, dan tumpukan kaca berlapis membuat mata lelah.
 2. **Di canvas 2D, blur itu mungkin tetapi mahal dan tidak portabel.** `ctx.filter = 'blur(Npx)'` baru ada di Safari 18 (2024); di iOS lama ia **diam-diam diabaikan**. Blur di kanvas juga hanya mem-blur isi kanvas, bukan DOM di belakangnya. Panel DOM dengan `backdrop-filter` **bisa** mem-blur kanvas di belakangnya, tetapi biayanya dibayar ulang setiap frame selama kanvas bergerak. Karena itu arsitektur yang dipilih: kaca di **chrome DOM** (roster/tab/HUD), dan di dalam kanvas kaca digambar sebagai **blok alpha bertingkat + highlight + noise** (tanpa konvolusi per frame), dengan blur hanya pada **band jendela yang di-cache**.
-3. **Pemandangan kota tidak bisa "di belakang dinding" pada proyeksi top-down.** Dinding pada denah sekarang adalah strip 0,22 unit (≈7 px di zoom 2). Kota harus hidup di **band elevasi** di atas garis dinding utara (tambahan visual, bukan koordinat) dan di latar kanvas di luar denah. Ini temuan teknis yang mengubah komposisi, bukan sekadar selera.
-4. **Avatar tidak lagi pixel-art.** Sesuai koreksi bos, avatar menjadi **clean vector** (path + gradien, anti-aliased). Biayanya bukan di render per frame — avatar tetap di-*cache* sebagai sprite — melainkan di **migrasi 13 `look`**, penggantian font label 5×7, dan pembaruan gate visual. Estimasi: 3–4 hari kerja untuk avatar saja, dan itu sudah termasuk gate.
-5. **Rekomendasi: arah _Sky Lobby_** (dusk metropolis, kaca gelap frosted, aksen amber) dengan **scene all-vector** dan kaca dibatasi pada empat permukaan (HUD, tab lantai, roster, band jendela). Skor matriks 4,30 dari 5 — tertinggi, dengan risiko performa terendah dan kontras teks terbaik di antara tiga arah yang bisa dipertahankan.
+3. **Pemandangan kota menuntut view samping, bukan denah.** Pada denah top-down, dinding utara hanyalah strip 0,22 unit (≈7 px di zoom 2) sehingga kota tidak mungkin "di belakang dinding". Keputusan bos: scene digambar sebagai **elevasi/potongan gedung dilihat dari depan** — lantai jadi band horizontal, curtain wall kaca jadi bidang vertikal, kota besar di belakangnya. Konsekuensi datanya dianalisis di §12: `x` tetap horizontal, `z` menjadi **lane kedalaman** (2.5D), bukan lagi posisi vertikal layar.
+4. **Avatar tidak lagi pixel-art.** Avatar menjadi **clean vector** (path + gradien, anti-aliased), di-cache sebagai sprite. Biayanya di **migrasi 13 `look`**, penggantian font label 5×7, dan pembaruan gate visual — 3–4 hari, sudah termasuk gate.
+5. **Dua tema, berganti otomatis mengikuti waktu lokal.** Bos memutuskan kantor tampil **Terang** (Daylight Atrium: kaca putih susu, permukaan cerah, aksen biru, skyline siang) pada 06:00–18:00 waktu `Asia/Jakarta` dari `/api/config`, dan **Gelap** (Sky Lobby: kaca frosted gelap, skyline malam) di luar itu. Bukan pilihan salah-satu: dua-duanya first-class, dengan override manual + `?theme=` untuk screenshot. Aturannya hidup di satu modul murni yang diuji headless (§11).
+6. **Rekomendasi akhir:** dua tema di atas + scene **view samping all-vector** + kaca dibatasi empat permukaan di chrome (HUD, tab, roster, panel kaca di dalam scene), blur hanya di chrome dan band kota yang di-cache. Neon Metro turun menjadi alternatif, bukan tema utama.
 
-Angka kunci (semua terukur, bukan karangan):
+Angka kunci (label **terukur** vs **estimasi** disebut eksplisit):
 
-| Ukuran | Nilai | Sumber |
-|---|---|---|
-| Biaya blur panel 280×640 @ DPR 2, radius 12 px (CPU referensi) | 31,1 ms/frame | `docs/rnd/bench/glass_blur_bench.json` |
-| Biaya panel yang sama bila blur di-cache | 0,10 ms/frame | idem |
-| Kontras teks utama Sky Lobby di atas kaca | 14,5:1 (min 10,2:1 untuk teks sekunder) | `docs/design/mockups/tokens.json` |
-| Kontras terburuk seluruh arah | 4,17:1 (status "working" Daylight, ambang 3:1) | idem |
-| Chunk scene saat ini | 46.417 B (15.320 B gzip) | `frontend/dist/assets/Office2D-*.js` |
-| Operasi gambar per avatar vector | 33 path/isi | hitung statis `render_mockups.py` |
-| Bangun cache 8 avatar @50 px (CPU, supersample 3×) | 18,2 ms sekali | bench lokal |
+| Ukuran | Nilai | Status | Cara ukur |
+|---|---|---|---|
+| Biaya blur panel 280×640 @ DPR 2, radius 12 px | 31,1 ms/frame | **terukur** (CPU, Pillow) | `docs/rnd/bench/glass_blur_bench.py` → `glass_blur_bench.json` |
+| Biaya panel yang sama bila blur di-cache | 0,10 ms/frame | **terukur** (CPU) | idem |
+| Kontras teks utama, tema Terang / Gelap | 13,9:1 / 14,5:1 | **terukur** | `tokens.py` (WCAG 2.x relatif luminans) |
+| Pasangan kontras terburuk seluruh tema | 5,00:1 (status `offline` di Neon) · 5,04:1 (`blocked` di tema Terang) | **terukur** | idem, 78 pasangan |
+| Chunk scene saat ini | 46.417 B (15.320 B gzip) | **terukur** | `frontend/dist/assets/Office2D-*.js` |
+| Operasi gambar per avatar vector | 34–41 path/isi + 2 gradien (tergantung look) | **terukur** | dihitung saat render, `render_mockups.py` |
+| Bangun cache 8 avatar @50 px | 18,2 ms sekali | **terukur** (CPU, supersample 3×) | bench lokal |
+| Kamera view samping: px per unit / per agen | 88,7 px/unit · 120 px/agen | **terukur** | `side_report()` di `render_mockups.py` |
+| fps 60 desktop / 30 HP dengan band kota | — | **estimasi** (belum diukur di perangkat) | target Fase 0, harus diukur sebelum lanjut |
 
 ---
 
@@ -56,7 +59,7 @@ Tujuan dokumen ini:
 
 ## 3. Metode & sumber
 
-Riset dilakukan dengan membuka sumber primer (dokumentasi platform, spesifikasi, pedoman aksesibilitas) dan sumber sekunder yang menyebut dirinya sebagai analisis. Setiap klaim di §4 dan §5 diberi nomor rujukan ke §11.
+Riset dilakukan dengan membuka sumber primer (dokumentasi platform, spesifikasi, pedoman aksesibilitas) dan sumber sekunder yang menyebut dirinya sebagai analisis. Setiap klaim di §4 dan §5 diberi nomor rujukan ke §13.
 
 Yang **diukur** di mesin ini (AMD EPYC 9754, 2 vCPU, Pillow 12.3, Python 3.13):
 
@@ -210,7 +213,7 @@ Karena avatar sekarang **clean vector**, pertanyaannya bukan lagi "pixel vs kaca
 
 Bukti visual: tiga crop identik dari L3 pada ketiga tingkat. Pada (a) terlihat jelas garis 16 px yang "bergerigi" berdampingan dengan bahu avatar yang halus — persis kekhawatiran di brief.
 
-![Gambar 4 — Tiga tingkat non-pixel pada crop L3 yang sama: (a) avatar vector di atas scene pixel, (b) seluruh scene vector, (c) scene vector + kaca & kota penuh.](docs/design/mockups/scene-tech-compare.png,15.5)
+![Gambar 1 — Perbandingan scene-tech pada crop L3 yang sama (denah top-down): (a) avatar vector di atas scene pixel, (b) seluruh scene vector, (c) scene vector + kaca & kota penuh. Ketiganya sudah memakai avatar clean-vector; keputusan view samping ada di §12.](docs/design/mockups/scene-tech-compare.png,15.5)
 
 ### 5.4 Pemandangan kota: lapisan, tile, zoom, biaya
 
@@ -223,9 +226,9 @@ Rancangan yang diusulkan:
 | Ikut zoom/pan? | **Tidak.** Band jendela tetap di tempatnya | kalau ikut zoom, jendela jadi 2–4× lebih besar dan bersaing dengan meja |
 | Parallax saat pan | maksimum 6 px per 100 px pan, hanya lapisan tengah & dekat | cukup untuk kesan gerak, tidak memicu mabuk gerak |
 | Biaya render | 3 `drawImage` + 1 veil per frame ≈ **0,02–0,05 ms** (estimasi, GPU) | band di-cache, bukan digambar ulang |
-| Waktu hari | `dusk` default, `day`/`night` sebagai token | dusk = kontras kaca terbaik (§4.4) |
+| Waktu hari | **dua tema**: `day` 06:00–18:00 WIB, `night` di luar itu (§11) | aturan jam, bukan pilihan manual; subuh/senja dipotong (alasan di §11) |
 
-Pre-render sekali per (lantai × waktu-hari) → 3 lantai × 3 waktu = **9 kanvas offscreen** ukuran 768×96 @DPR 2 ≈ 0,6 MB total. Murah.
+Pre-render sekali per (lantai × tema) → 3 lantai × 2 tema = **6 kanvas offscreen** ukuran 768×576 @DPR 2 ≈ 3,5 MB per layer (≈ 21 MB total). Neon, kalau diaktifkan, menambah 3 lagi. Cache di-cap LRU 6 dan di-invalidasi saat tema berganti, resize/DPR berubah, atau bentuk roster berubah — lihat §11.
 
 ### 5.5 Kinerja: target, anggaran, dan pengaman
 
@@ -276,7 +279,7 @@ Ini sub-bab yang diminta eksplisit oleh bos. Ringkasnya: avatar **tidak lagi** 1
 | `female` | mematikan stubble/mustache | sama |
 | `sculptedHead` | **dibuang** untuk sekarang (kepala vector generik) | kalau bos mau, jadi pekerjaan terpisah |
 
-Jumlah operasi gambar per avatar: **33** (dihitung statis dari modul mockup: 12 ellipse, 3 polygon, 6 line, 2 arc, 8 rounded-rect, 2 gradient fill). Ini bukan beban per frame karena di-cache — lihat 5.6.3.
+Jumlah operasi gambar per avatar: **34–41 path/isi + 2 gradien**, tergantung look (WAHYU dan RAKA paling banyak karena kacamata + stubble). Angka ini dihitung **saat render** oleh `render_mockups.py` (bukan dihitung tangan), dan bukan beban per frame karena sprite di-cache — lihat 5.6.3.
 
 Yang harus ditulis/diubah:
 
@@ -304,7 +307,7 @@ Estimasi bundle: chunk scene sekarang **46.417 B (15.320 B gzip)**. Modul avatar
 
 #### 5.6.4 Bukti visual sebelum/sesudah
 
-![Gambar 5 — Avatar sebelum/sesudah: 12×16 pixel (atas) dan clean vector 150 px (bawah) untuk delapan look L3 yang sama.](docs/design/mockups/avatar-before-after.png,15.5)
+![Gambar 2 — Avatar sebelum/sesudah: 12×16 pixel (atas) dan clean vector 150 px (bawah) untuk delapan look L3 yang sama. Baris bawah inilah yang dipakai di semua mockup scene.](docs/design/mockups/avatar-before-after.png,15.5)
 
 Delapan look L3 yang sama, atas = rekonstruksi 12×16 pixel sekarang, bawah = avatar vector 150 px. Perbedaan yang terbaca: siluet (bahu, leher, sepatu), rambut (bun/long/messy/side), aksesori (kacamata berbingkai + lensa, headphone dengan ear cup), dan ekspresi (alis datar, mulut melengkung halus).
 
@@ -312,13 +315,68 @@ Mockup tiga arah memakai avatar vector ini di 8 meja L3 — bisa dinilai bos tan
 
 ---
 
-## 6. Tiga arah desain
+## 6. Dua tema + satu alternatif
 
-Semua arah memakai: grid 8 pt, tiga tingkat tipografi, satu aksen, status = warna + teks, nameplate hampir opaque (alpha 0,90–0,92), avatar clean vector, dan band jendela kota 96 px di atas dinding utara. Yang berbeda: waktu hari, tint kaca, aksen, dan seberapa "berani" kotanya.
+Kantor memakai **dua tema first-class** yang berganti otomatis mengikuti jam lokal (§11): **Terang** (Daylight Atrium) untuk 06:00–18:00 dan **Gelap** (Sky Lobby) di luar itu. Neon Metro tetap ada sebagai alternatif **di level renderer/mockup** (`--theme neon`), bukan nilai kontrak `?theme=` (yang hanya menerima `day`, `night`, `auto`).
 
-### 6.1 Sky Lobby — dusk metropolis, kaca gelap frosted, aksen amber
+Semua tema memakai: grid 8 pt, tiga tingkat tipografi, satu aksen, **status = warna + bentuk + teks**, nameplate hampir opaque (alpha 0,90–0,92) yang selalu di atas kepala agen, avatar clean vector, **view samping** dengan curtain wall kaca dan skyline kota di belakang, serta panel kaca dengan resep yang sama (isian translusen, tepi 1 px lebih terang dari permukaan, satu highlight diagonal tipis, bayangan lembut, noise halus). Yang berbeda: waktu hari, tint kaca, aksen, dan palet status.
 
-**Konsep.** Kantor di lantai atas saat matahari turun: langit masih menyimpan gradien (ungu → jingga), kota sudah menyalakan jendela. Kaca gelap frosted menahan silau, amber menandai hal yang hidup. Ini arah yang paling dekat dengan identitas sekarang (dark, amber, concrete) sehingga risiko desainnya paling kecil.
+### 6.1 Tema Terang — Daylight Atrium (siang, 06:00–18:00 WIB)
+
+**Konsep.** Atrium dengan curtain wall: cahaya siang, kaca susu, kota biru di luar. Ini tema yang tampil paling lama setiap hari, jadi ia harus paling nyaman untuk monitoring seharian — dan paling sulit, karena kaca putih di atas lantai terang butuh pemisahan ekstra (tepi, bayangan tipis, outline furnitur).
+
+**Palet (token lengkap):**
+
+| Token | Hex | Pemakaian |
+|---|---|---|
+| `surface` | `#FFFFFF` @ 0,66 | isian kaca |
+| `surface-solid` | `#F7FAFD` | fallback reduced-transparency |
+| `page` | `#EEF3F8` | latar halaman |
+| `floor` | `#E3EAF2` | slab lantai |
+| `wall` | `#DDE6F0` | dinding, HUD, toolbar |
+| `desk` / `desk-top` | `#FFFFFF` / `#F2F6FA` | meja (butuh outline) |
+| `ink` | `#16202E` | teks utama |
+| `ink-dim` | `#41506A` | teks sekunder |
+| `muted` | `#556377` | metadata |
+| `accent` | `#1D4ED8` | tab aktif, aksi |
+| `accent-ink` | `#FFFFFF` | teks di atas aksen |
+| `border` | `#0F2440` @ 0,20 | garis tepi kaca |
+| `highlight` | `#FFFFFF` @ 0,85 | inner highlight 1 px |
+| langit | `#3E8FD6 → #7CBCEC → #C4E1F6 → #F0F9FF` | siang cerah |
+| bangunan | `#A9C6DD / #8FB0CC / #7699B8 / #5E82A3` | 4 lapisan, kaca memantul |
+| jendela | `#EAF7FF`, `#BFE2F7` | refleksi, bukan lampu |
+
+**Kontras terukur — dan tiga perbaikan yang wajib.** Tema terang adalah tempat status paling sering gagal, karena warna status dipakai dua peran: **dot/garis** (ambang 3:1) dan **kata status di roster** (ambang 4,5:1). Versi pertama gagal di peran teks: `working` 4,17:1, `blocked` 4,25:1, `ok` 4,25:1 — semuanya di bawah 4,5:1. Token digelapkan sampai lolos, bukan sekadar dicatat:
+
+| Status | Sebelum | Sesudah | Teks di kaca (≥4,5:1) | Chip (≥4,5:1) |
+|---|---|---|---|---|
+| `working` | `#A16207` (4,17) | `#8A5406` | **5,31:1** | 6,27:1 |
+| `blocked` | `#B45309` (4,25) | `#B33A12` | **5,04:1** | 5,95:1 |
+| `ok` | `#15803D` (4,25) | `#116B33` | **5,60:1** | 6,61:1 |
+| `offline` | `#5F6A7D` (4,63) | `#556073` | **5,38:1** | 6,35:1 |
+| `idle` | `#1D4ED8` | tetap | 5,68:1 | 6,70:1 |
+| `reviewing` | `#6D28D9` | tetap | 6,02:1 | 7,10:1 |
+| `danger` | `#B91C1C` | tetap | 5,48:1 | 6,47:1 |
+
+`working` dan `blocked` tadinya juga terlalu mirip secara hue (amber vs amber-oranye). `blocked` digeser ke oranye-merah (`#B33A12`, hue 15° vs 35°) **dan** dibedakan bentuknya: `working` = bulatan penuh, `blocked` = belah ketupat. Jadi status tidak pernah bergantung pada warna saja (WCAG 1.4.1).
+
+Kontras teks: ink 13,9:1 · ink-dim 6,9:1 · muted 5,18:1 · aksen 5,68:1. Seluruh 26 pasangan tema Terang lolos; terburuk 5,04:1.
+
+**Tipografi.** system-ui/Inter; body 13 px; label 11 px 600 → 500 agar tidak "berteriak" di latar terang; angka tabular untuk waktu/task id.
+
+**Perlakuan kaca.** Kaca putih 0,66, blur 20 px (chrome saja), border 0,20 (lebih tegas dari tema gelap), highlight 0,85, bayangan lebih dalam (alpha 0,10, blur 26 px), noise 4 % untuk memecah bidang putih besar. Furnitur putih wajib outline 1 px.
+
+**Latar kota.** Siang: langit biru bergradien, matahari tinggi dengan halo, gedung kaca dengan muka terang di sisi matahari, jendela sebagai refleksi (alpha 40–95), horizon tegas, haze tipis 8 %.
+
+**Bayangan.** Siang memakai bayangan **tajam** (blur 3 px, alpha 55/255) — bayangan lembut di cahaya terang terbaca sebagai kabut, bukan kedalaman.
+
+![Gambar 3 — Tema Terang, L3 Tim Dev, view samping, 1280×800. Curtain wall kaca dengan skyline siang, meja dalam profil, delapan agen vector, nameplate selalu di atas kepala.](docs/design/mockups/l3-side-day.png,15.5)
+
+**Contoh layar.** `docs/design/mockups/l3-side-day.png` · mobile `docs/design/mockups/l3-side-mobile-day.png`.
+
+### 6.2 Tema Gelap — Sky Lobby (malam, 18:00–06:00 WIB)
+
+**Konsep.** Kantor di lantai atas saat malam: langit gelap, kota menyalakan jendela, kaca frosted gelap menahan silau, amber menandai hal yang hidup. Ini tema yang paling dekat dengan identitas sekarang (dark, amber) sehingga risiko desainnya paling kecil.
 
 **Palet (token lengkap):**
 
@@ -327,7 +385,7 @@ Semua arah memakai: grid 8 pt, tiga tingkat tipografi, satu aksen, status = warn
 | `surface` | `#141B2E` @ 0,62 | isian kaca |
 | `surface-solid` | `#141B2E` | fallback reduced-transparency |
 | `page` | `#080C16` | latar halaman |
-| `floor` | `#1A2230` | slab L3 |
+| `floor` | `#1A2230` | slab lantai |
 | `wall` | `#121A29` | dinding, HUD, toolbar |
 | `desk` / `desk-top` | `#243044` / `#39485F` | meja |
 | `ink` | `#F2F5FA` | teks utama |
@@ -337,61 +395,33 @@ Semua arah memakai: grid 8 pt, tiga tingkat tipografi, satu aksen, status = warn
 | `accent-ink` | `#1A1206` | teks di atas aksen |
 | `border` | `#FFFFFF` @ 0,16 | garis tepi kaca |
 | `highlight` | `#FFFFFF` @ 0,30 | inner highlight 1 px |
-| kota | `#0C1222 → #2B3350 → #8A5560 → #E0A06A` | langit dusk |
+| langit | `#0C1222 → #2B3350 → #8A5560 → #E0A06A` | langit malam |
 | bangunan | `#0E1626 / #16203A / #1D2A47 / #26344F` | 4 lapisan |
 | jendela | `#F3C57B`, `#9FD8E8` | hangat + dingin |
 
-**Kontras terukur (terburuk dari dua latar ekstrem):** ink 14,47:1 · ink-dim 10,16:1 · muted 5,98:1 · aksen 8,57:1 · status terendah 5,06:1 (danger) · chip text terendah 6,13:1. Semua lolos AA.
+**Kontras terukur:** ink 14,47:1 · ink-dim 10,16:1 · muted 5,98:1 · aksen 8,57:1 · status teks terendah 5,06:1 (`danger`) · chip terendah 6,13:1. Seluruh 26 pasangan lolos.
 
-**Tipografi.** system-ui/Inter; label 11 px 600 uppercase +0,08em; body 12,5 px; judul 15 px 700; angka tabular untuk waktu/task id.
+**Tipografi.** Sama dengan tema Terang; body 12,5 px karena latar gelap menahan lebih banyak teks.
 
-**Perlakuan kaca.** Radius 12–14 px, blur 16–18 px (hanya di chrome), tepi 1 px alpha 0,16, highlight atas alpha 0,30, noise 4 %. Tidak ada kaca di dalam kanvas selain band jendela.
+**Perlakuan kaca.** Kaca gelap 0,62, blur 16–18 px (chrome), border 0,16, highlight 0,30, noise 4 %. Bayangan lebih lembut (blur 7 px, alpha 70/255) karena di malam hari cahaya tersebar.
 
-**Latar kota.** Dusk, 4 lapisan di mockup (produksi 3), jendela alpha 80–165, veil 22 % agar tidak bersaing dengan dot status.
+**Latar kota.** Malam: siluet gedung, jendela menyala (alpha 80–165), kabut 22 % agar tidak bersaing dengan dot status. Curtain wall tetap transparan (isian 0,20 di mockup) supaya skyline tidak padam.
 
-**Sprite.** Scene all-vector, avatar vector, label anti-aliased. Ikon status tetap dot + teks.
+![Gambar 4 — Tema Gelap, L3 Tim Dev, view samping, 1280×800. Skyline malam dengan jendela menyala; kaca frosted gelap; agen dan meja identik dengan tema Terang.](docs/design/mockups/l3-side-night.png,15.5)
 
-![Gambar 1 — Sky Lobby, L3 Tim Dev, 1280×800. Band jendela kota dusk di atas dinding utara; kaca hanya di HUD, tab, roster, dan zoom.](docs/design/mockups/sky-lobby.png,15.5)
+**Contoh layar.** `docs/design/mockups/l3-side-night.png` · mobile `docs/design/mockups/l3-side-mobile-night.png`.
 
-**Contoh layar.** `docs/design/mockups/sky-lobby.png` · mobile `docs/design/mockups/sky-lobby-mobile.png`.
+### 6.3 Neon Metro — alternatif (bukan tema utama)
 
-### 6.2 Daylight Atrium — siang terang, kaca putih susu, aksen biru
-
-**Konsep.** Atrium dengan curtain wall: cahaya siang, kaca susu, kota biru pucat di luar. Paling "clean" dan paling ramah untuk monitoring seharian; juga yang paling sulit, karena kaca putih di atas lantai terang butuh pemisahan ekstra (bayangan + outline).
-
-**Palet:** `surface #FFFFFF @ 0,66` · `surface-solid #F7FAFD` · `page #EEF3F8` · `floor #E3EAF2` · `wall #DDE6F0` · `desk #FFFFFF` / `desk-top #F2F6FA` · `ink #16202E` · `ink-dim #41506A` · `muted #556377` · `accent #1D4ED8` · `accent-ink #FFFFFF` · `border #0F2440 @ 0,20` · `highlight #FFFFFF @ 0,85` · langit `#A9CBE8 → #CFE3F3 → #E8F3FB → #F7FBFF` · bangunan `#B9CBDE / #A6BACF / #93A9C1 / #7F97B1`.
-
-**Kontras terukur:** ink 13,90:1 · ink-dim 6,90:1 · muted 5,18:1 · aksen 5,68:1 · status dot terendah 4,17:1 (working) · chip text terendah 4,92:1. (Versi pertama gagal di 3 pasangan — muted 4,18, aksen 4,38, chip offline 3,64 — lalu token digelapkan; ini contoh kenapa tabel kontras harus dihitung, bukan dikira-kira.)
-
-**Tipografi.** Sama, tetapi body 13 px dan bobot label 600 → 500 agar tidak terasa "berteriak" di latar terang.
-
-**Perlakuan kaca.** Kaca putih 0,66, blur 20 px, border 0,20 (lebih tegas), bayangan 72/255 (lebih dalam). Ini satu-satunya arah yang butuh outline pada furnitur putih.
-
-**Latar kota.** Siang; bangunan lebih gelap dari langit supaya siluet terbaca; jendela hampir putih (alpha rendah).
-
-**Sprite.** Scene all-vector; ini arah yang paling menuntut kualitas gambar karena tidak ada gelap yang menyembunyikan detail.
-
-![Gambar 2 — Daylight Atrium, L3 Tim Dev, 1280×800. Kaca putih susu, aksen biru, outline furnitur untuk memisahkan putih dari lantai terang.](docs/design/mockups/daylight-atrium.png,15.5)
-
-**Contoh layar.** `docs/design/mockups/daylight-atrium.png`.
-
-### 6.3 Neon Metro — malam, kota neon, kaca gelap dengan tepi bercahaya
-
-**Konsep.** Kantor di kawasan bisnis yang tidak pernah tidur: hitam pekat, neon cyan/magenta, kaca hitam dengan tepi menyala. Paling dramatis dan paling "berani", tetapi juga paling berisiko untuk keterbacaan status dan performa (glow = beberapa lapis blur).
+**Konsep.** Kantor di kawasan bisnis yang tidak pernah tidur: hitam pekat, neon cyan/magenta, kaca hitam dengan tepi menyala. Paling dramatis, tetapi paling berisiko untuk keterbacaan status dan performa (glow = beberapa lapis blur). Dipertahankan sebagai alternatif `?theme=neon` untuk eksperimen visual, bukan sebagai tema harian.
 
 **Palet:** `surface #0B0E1C @ 0,70` · `surface-solid #0B0E1C` · `page #04050B` · `floor #0C1020` · `wall #0A0C18` · `desk #141A30` / `desk-top #1E2742` · `ink #EAF2FF` · `ink-dim #B9C6E0` · `muted #8493B0` · `accent #22D3EE` · `accent-ink #04141A` · `border #22D3EE @ 0,45` · `highlight #67E8F9 @ 0,40` · langit `#04040C → #0B0B22 → #2A0F3A → #7A1E5A` · bangunan `#080A14 / #0D1022 / #141833 / #1C2145` · jendela `#67E8F9`, `#F472B6`.
 
-**Kontras terukur:** ink 16,67:1 · ink-dim 10,92:1 · muted 6,06:1 · aksen 10,39:1 · status dot terendah 5,00:1 · chip text terendah 5,17:1. Kontras bagus — masalahnya bukan kontras teks, melainkan **beban visual** (glow) dan kelelahan mata.
+**Kontras terukur:** ink 16,67:1 · ink-dim 10,92:1 · muted 6,06:1 · aksen 10,39:1 · status teks terendah 5,00:1 · chip terendah 5,17:1. Masalahnya bukan kontras, melainkan **beban visual** (glow) dan kelelahan mata.
 
-**Tipografi.** Sama + angka monospace untuk waktu/counter (memberi kesan "kontrol room").
+**Perlakuan kaca.** Kaca hitam 0,70, border cyan 0,45, glow luar 1 lapis (bukan 3), blur 14 px. Latar kota: jendela neon dua warna, glow horizon magenta, alpha jendela diturunkan ke 80–140 agar tidak bersaing dengan dot status.
 
-**Perlakuan kaca.** Kaca hitam 0,70, border cyan 0,45, glow luar 1 lapis (bukan 3), blur 14 px.
-
-**Latar kota.** Malam; jendela neon dua warna; glow horizon magenta. Risiko: titik terang bersaing dengan dot status → alpha jendela diturunkan ke 80–140 dan glow dibatasi 1 lapis.
-
-**Sprite.** Scene all-vector dengan rim-light tipis di tepi atas meja.
-
-![Gambar 3 — Neon Metro, L3 Tim Dev, 1280×800. Kaca hitam, tepi cyan, glow dibatasi satu lapis.](docs/design/mockups/neon-metro.png,15.5)
+![Gambar 3 — Neon Metro (alternatif), L3 Tim Dev, 1280×800. Kaca hitam, tepi cyan, glow dibatasi satu lapis. Mockup ini masih memakai denah top-down dan disimpan sebagai pembanding arah, bukan sebagai target view.](docs/design/mockups/neon-metro.png,15.5)
 
 **Contoh layar.** `docs/design/mockups/neon-metro.png`.
 
@@ -401,49 +431,49 @@ Semua arah memakai: grid 8 pt, tiga tingkat tipografi, satu aksen, status = warn
 
 Bobot ditetapkan sebelum menilai (agar tidak menyesuaikan diri dengan hasil): keterbacaan status 25 %, biaya implementasi 20 %, risiko performa 15 %, kesan "modern clean" 20 %, konsistensi dengan data/token yang ada 10 %, aksesibilitas 10 %.
 
-| Kriteria (bobot) | Sky Lobby | Daylight Atrium | Neon Metro |
+| Kriteria (bobot) | Terang (Daylight) | Gelap (Sky Lobby) | Neon Metro |
 |---|---|---|---|
-| Keterbacaan status (25 %) | 4 | **5** | 3 |
-| Biaya implementasi (20 %) | **5** | 2 | 4 |
+| Keterbacaan status (25 %) | **5** | 4 | 3 |
+| Biaya implementasi (20 %) | 2 | **5** | 4 |
 | Risiko performa (15 %) | 4 | 4 | 3 |
-| Kesan "modern clean" (20 %) | 4 | **5** | 3 |
-| Konsistensi data & token (10 %) | **5** | 3 | 4 |
-| Aksesibilitas (10 %) | 4 | **5** | 2 |
-| **Skor berbobot** | **4,30** | 4,05 | 3,20 |
+| Kesan "modern clean" (20 %) | **5** | 4 | 3 |
+| Konsistensi data & token (10 %) | 3 | **5** | 4 |
+| Aksesibilitas (10 %) | **5** | 4 | 2 |
+| **Skor berbobot** | **4,05** | **4,30** | 3,20 |
+| Peran dalam produk | **tema siang (06:00–18:00)** | **tema malam (18:00–06:00)** | alternatif `?theme=neon` |
 
-Perhitungan: Sky = 0,25·4 + 0,20·5 + 0,15·4 + 0,20·4 + 0,10·5 + 0,10·4 = 4,30. Daylight = 4,05. Neon = 3,20.
+Skor tidak lagi dipakai untuk memilih salah satu, karena keputusan bos adalah **memakai keduanya**: Terang menang di keterbacaan dan kesan bersih, Gelap menang di biaya dan konsistensi token. Yang diambil dari masing-masing: palet Terang untuk jam kerja, palet Gelap untuk malam, dan Neon hanya untuk eksperimen.
 
-Matriks kedua, untuk pertanyaan "seberapa jauh scene ikut non-pixel" (avatar sudah pasti vector):
+Matriks kedua, untuk keputusan **view** (ini yang mengubah mockup secara mendasar):
 
-| Tingkat | Koherensi visual | Biaya | Risiko | Catatan |
+| Opsi view | Keterbacaan | Biaya | Risiko | Catatan |
 |---|---|---|---|---|
-| (a) hibrida: avatar vector + scene pixel | 2 | **5** | 4 | hanya untuk transisi 1 rilis; tabrakan gaya terlihat di `scene-tech-compare.png` |
-| (b) scene all-vector | **5** | 2 | 4 | target akhir untuk Sky Lobby |
-| (c) (b) + kaca & kota penuh | **5** | 1 | 3 | dipilih, dengan batas: kaca maks 4 permukaan, blur hanya di chrome |
+| denah top-down (sekarang) | 5 | **5** | 5 | kota tidak mungkin di belakang dinding (dinding 7 px) |
+| **(a) elevasi murni** | 2 | **4** | 3 | `z` hanya jadi urutan gambar → agen di `x` sama saling menimpa (L3 punya 3 pasangan seperti itu) |
+| **(b) elevasi 2.5D (lane)** | **4** | 3 | 3 | `z` → 3 lane dengan offset 7 px + skala 1,00/0,96/0,92; tabrakan `x` terpisah, tetap terbaca sebagai view samping |
 
-### Rekomendasi
-
-**Sky Lobby, scene all-vector, kaca & kota penuh dengan anggaran kaca.**
+**Rekomendasi akhir: dua tema (Terang + Gelap) di atas scene view samping 2.5D, all-vector, dengan anggaran kaca.**
 
 Alasan:
 
-1. **Kontras & keterbacaan terbaik yang bisa dipertahankan tanpa mengubah token status.** Palet dark+amber sudah ada di `palette.ts` dan `global.css`; tidak perlu mode terang baru (Daylight menuntut palet status versi terang — risiko drift antara kanvas dan panel).
-2. **Kota dusk adalah latar terbaik untuk kaca.** Langit masih bergradien (kaca jadi terlihat) tetapi tidak seterang siang (teks tetap aman).
-3. **Biaya paling rendah di antara tiga arah** yang sama-sama all-vector: hanya menambah band jendela + kaca chrome, tanpa mengubah geometri, lift, tab, atau kontrak API.
-4. **Ia arah yang paling mudah dihentikan.** Kalau setelah Fase 2 hasilnya jelek, kita berhenti dengan scene vector + panel solid — masih lebih baik dari sekarang.
+1. **Keputusan bos diikuti apa adanya**: dua tema first-class, berganti otomatis menurut WIB, bukan salah satu.
+2. **View samping adalah satu-satunya cara kota benar-benar terlihat** — dan kota adalah inti permintaan. Ia juga membuat lift (naik-turun vertikal) dan kaca (bidang vertikal) terbaca alami, bukan sebagai hiasan.
+3. **Lane 2.5D menyelamatkan data yang sudah ada**: `rooms.ts` tidak berubah; `z` hanya berubah perannya di renderer. Tanpa lane, tiga pasangan agen L3 (DIMAS/BAGAS, RAKA/YOGA, LARAS/SARI) bertumpuk di `x` yang sama dan tidak bisa dibedakan — ini terverifikasi di mockup.
+4. **Biaya kaca terkendali**: empat permukaan kaca di chrome + satu partisi kaca di dalam scene; blur hanya di chrome dan di band kota yang di-cache per (lantai × tema) — lihat §12.
+5. **Bisa dihentikan**: kalau view samping tidak lolos penilaian, kembali ke denah top-down cukup dengan mematikan flag renderer; token, kontras, avatar, dan TOC dokumen tidak terpengaruh.
 
 **Yang TIDAK berubah** (kontrak yang dijaga):
 
-- koordinat: `frontend/src/lib/rooms.ts` (meja, `LIFT`, `POIS`, `NAV`, `SPOTS`) — nol perubahan;
-- kontrak API `/api/status` dan `__office2dFloors()`;
+- koordinat: `frontend/src/lib/rooms.ts` (meja, `LIFT`, `POIS`, `NAV`, `SPOTS`) — nol perubahan; lane dihitung di renderer dari `z`;
+- kontrak API `/api/status`, `/api/config` (termasuk `tz`), dan `__office2dFloors()`;
 - lift: shaft 2,6×3,2, pintu barat, indikator lantai di header;
 - tab lantai: 3 tab, `?floor=` di URL, keyboard access;
 - privasi: tidak ada isi pesan/judul tugas di kanvas maupun panel;
 - gate: `go vet`/`go test`, `tsc --noEmit`, `npm run build`, `verify/e2e_review.sh`, plus gate visual yang di-update (bukan dihapus).
 
-**Yang berubah (dan harus disetujui bos):** avatar jadi vector, font label jadi anti-aliased, tab lantai pindah ke baris HUD (agar band jendela tidak tertutup), dan satu permukaan kaca baru (roster) yang kini boleh ber-blur.
+**Yang berubah (dan sudah disetujui bos):** avatar jadi vector, font label anti-aliased, scene jadi view samping dengan lane, dua palet tema + modul penentu tema, dan satu permukaan kaca baru (partisi di dalam scene).
 
-![Gambar 6 — Sky Lobby di 390×844: bottom sheet kaca, tab lantai di atas sheet, scene tetap terlihat.](docs/design/mockups/sky-lobby-mobile.png,7.6)
+![Gambar 5 — Tema Terang di 390×844: bottom sheet kaca, tab lantai di atas sheet, scene view samping tetap terlihat.](docs/design/mockups/l3-side-mobile-day.png,7.6)
 
 ---
 
@@ -453,19 +483,19 @@ Prinsip: **setiap fase bisa berhenti** dan produksi tetap jalan. Tidak ada fase 
 
 | Fase | Isi | Gate (harus hijau untuk lanjut) | Estimasi | Rollback |
 |---|---|---|---|---|
-| **0 — Spike** | token Sky Lobby di satu blok CSS; band jendela kota (pre-render) di L3; flag `?skin=glass`; bench fps di laptop + HP | fps ≥ 60 desktop / ≥ 30 HP dengan band aktif; tidak ada perubahan visual saat flag mati; screenshot + verdict `vision_analyze` | **1–2 hari** | hapus flag + blok CSS (1 commit) |
-| **1 — Avatar vector** | `avatar.ts`, cache sprite, label anti-aliased, plate baru; 13 look dimigrasi | `visual_check` (plate tidak overlap, nama utuh, tidak keluar kanvas) + `office2d_probe` hijau; before/after screenshot disetujui | **3–4 hari** | revert modul + panggil `drawAgent` lama (2 file) |
-| **2 — Scene vector** | meja, kursi, furnitur, dinding, lift, prop; hapus `fillRect` chibi; zoom 3–4 tetap tajam (DPR-aware) | semua gate visual + `layout_check` (walkability tidak berubah); fps tidak turun > 10 % | **3–5 hari** | flag per-elemen (`?scene=pixel`) selama 2 rilis |
-| **3 — Kaca & polish** | roster/tab/HUD kaca, `backdrop-filter` + fallback, `data-contrast`, reduced-motion/transparency, dokumentasi | audit kontras otomatis (semua pasangan ≥ ambang), fps, screenshot 3 lantai + mobile | **2–3 hari** | matikan blok kaca (CSS-only) |
+| **0 — Spike** | dua palet (Terang + Gelap) di satu blok CSS; `theme.ts` murni + `verify/theme_check.ts`; band kota pre-render; flag `?skin=glass&theme=day\|night`; bench fps di laptop + HP | fps ≥ 60 desktop / ≥ 30 HP dengan band aktif; `theme_check` hijau (05:59/06:00/17:59/18:00 + override + fallback tz); tidak ada perubahan visual saat flag mati | **2–3 hari** | hapus flag + blok CSS (1 commit) |
+| **1 — Avatar vector** | `avatar.ts`, cache sprite, label anti-aliased, plate baru (selalu di atas kepala + gate 0 overlap); 13 look dimigrasi | `visual_check` (plate tidak overlap, nama utuh, tidak keluar kanvas) + `office2d_probe` hijau; before/after screenshot disetujui | **3–4 hari** | revert modul + panggil `drawAgent` lama (2 file) |
+| **2 — Scene vector + view samping** | meja/kursi/furnitur/dinding dalam profil, lane 2.5D dari `z`, curtain wall + kota, partisi kaca; hapus `fillRect` chibi; zoom 3–4 tetap tajam (DPR-aware) | semua gate visual + `layout_check` (walkability tidak berubah); 8 agen L3 terbaca tanpa tumpukan (gate plate 0 overlap/0 head-cover); fps tidak turun > 10 % | **4–6 hari** | flag `?scene=plan\|side` selama 2 rilis |
+| **3 — Tema otomatis + kaca** | HUD toggle + `localStorage`, `prefers-color-scheme`, `?theme=day\|night\|auto`; cache static layer per (lantai × tema); roster/tab/HUD kaca + `backdrop-filter` + fallback; `data-contrast`; reduced-motion/transparency | audit kontras otomatis dua mode (semua pasangan ≥ ambang), fps kedua tema, screenshot 3 lantai × 2 tema + mobile, `theme_check` + `anim_check` hijau | **3–4 hari** | matikan blok kaca (CSS-only) + `?theme=day` paksa |
 
-Total: **9–14 hari kerja**. Titik berhenti yang disarankan: akhir Fase 1 (avatar saja sudah memenuhi koreksi bos) dan akhir Fase 2 (scene bersih tanpa kaca).
+Total: **12–17 hari kerja**. Titik berhenti yang disarankan: akhir Fase 1 (avatar saja sudah memenuhi koreksi bos) dan akhir Fase 2 (scene bersih tanpa kaca).
 
 **Kapan harus berhenti karena hasilnya jelek** (kriteria eksplisit):
 
-- Fase 0: fps desktop < 55 dengan band aktif, atau band membuat teks kanvas sulit dibaca → kembalikan kota ke latar luar denah saja.
+- Fase 0: fps desktop < 55 dengan band aktif, atau band membuat teks kanvas sulit dibaca → kurangi tinggi band kota, jangan lanjut ke view samping.
 - Fase 1: avatar vector terbaca "boneka" pada 50 px di zoom 2 (uji 5 orang) → naikkan tinggi ke 56 px atau sederhanakan detail, jangan lanjut ke scene.
-- Fase 2: meja vector menghilangkan keterbacaan zona (papan sprint, rak server) → pertahankan furnitur pixel untuk prop, vector hanya untuk avatar + meja.
-- Fase 3: dua permukaan kaca ber-blur membuat fps HP < 30 → kaca hanya di roster, tab/HUD solid.
+- Fase 2: view samping membuat posisi agen ambigu walau sudah 3 lane (uji: "siapa di meja mana?" salah > 1 dari 5 kali) → tambah lane ke 4 atau kembalikan `z` ke kedalaman penuh (opsi a) dan sembunyikan agen yang tertimpa di balik nameplate bertumpuk.
+- Fase 3: dua permukaan kaca ber-blur membuat fps HP < 30 → kaca hanya di roster, tab/HUD solid; tema Terang tetap boleh.
 
 ---
 
@@ -504,19 +534,117 @@ Total: **9–14 hari kerja**. Titik berhenti yang disarankan: akhir Fase 1 (avat
 
 Kaca: radius 12 (panel kecil) / 14 (roster) / 18 (bottom sheet). Border 1 px alpha 0,16–0,20. Highlight atas 1 px alpha 0,30–0,85 (mode terang lebih tegas). Bayangan: `0 18px 40px rgba(0,0,0,0.45)` untuk kaca, tanpa bayangan untuk elemen di dalam kanvas.
 
-### 10.4 Tabel kontras lengkap
+### 10.4 Tabel kontras lengkap — dua mode
 
-Lihat `docs/design/mockups/tokens.json` (dihasilkan `tokens.py`) — 60 pasangan, semua ≥ ambangnya. Ringkasan terburuk per arah:
+Sumber tunggal: `docs/design/mockups/tokens.py` → `tokens.json`. Tabel ini mencakup **setiap** warna status dalam **dua perannya** (teks di kaca ≥ 4,5:1 dan dot/garis ≥ 3:1) untuk **kedua mode**, plus chip (teks di atas isian status). Total **78 pasangan, 0 gagal**.
 
-| Arah | teks utama | teks sekunder | muted | aksen | status dot (≥3:1) | chip text |
-|---|---|---|---|---|---|---|
-| Sky Lobby | 14,47 | 10,16 | 5,98 | 8,57 | 5,06 | 6,13 |
-| Daylight Atrium | 13,90 | 6,90 | 5,18 | 5,68 | 4,17 | 4,92 |
-| Neon Metro | 16,67 | 10,92 | 6,06 | 10,39 | 5,00 | 5,17 |
+| Mode | Pasangan | Rasio | Ambang |
+|---|---|---|---|
+| Terang | ink di atas kaca | 13,90 | 4,5 |
+| Terang | ink-dim di atas kaca | 6,90 | 4,5 |
+| Terang | muted di atas kaca | 5,18 | 4,5 |
+| Terang | accent di atas kaca | 5,68 | 4,5 |
+| Terang | status `working` teks / dot | 5,31 / 5,31 | 4,5 / 3,0 |
+| Terang | status `reviewing` teks / dot | 6,02 / 6,02 | 4,5 / 3,0 |
+| Terang | status `idle` teks / dot | 5,68 / 5,68 | 4,5 / 3,0 |
+| Terang | status `blocked` teks / dot | 5,04 / 5,04 | 4,5 / 3,0 |
+| Terang | status `offline` teks / dot | 5,38 / 5,38 | 4,5 / 3,0 |
+| Terang | status `ok` teks / dot | 5,60 / 5,60 | 4,5 / 3,0 |
+| Terang | status `danger` teks / dot | 5,48 / 5,48 | 4,5 / 3,0 |
+| Terang | chip status (terendah, `blocked`) | 5,95 | 4,5 |
+| Gelap | ink / ink-dim / muted / accent | 14,47 / 10,16 / 5,98 / 8,57 | 4,5 |
+| Gelap | status teks terendah (`danger`) | 5,06 | 4,5 |
+| Gelap | status dot terendah (`danger`) | 5,06 | 3,0 |
+| Gelap | chip status terendah (`offline`) | 6,13 | 4,5 |
+| Neon (alt.) | ink / ink-dim / muted / accent | 16,67 / 10,92 / 6,06 / 10,39 | 4,5 |
+| Neon (alt.) | status teks terendah (`offline`) | 5,00 | 4,5 |
+| Neon (alt.) | chip status terendah (`offline`) | 5,17 | 4,5 |
+
+Dua catatan yang menentukan:
+
+1. **Ambang 4,5:1 untuk warna status, bukan 3:1.** Warna status dipakai sebagai *kata* di roster ("working", "blocked"), jadi ia adalah teks biasa. Kalau hanya dinilai sebagai dot (3:1), tiga warna tema Terang akan lolos padahal tidak terbaca sebagai teks — persis kegagalan yang paling sering di tema terang.
+2. **Kontras dihitung terhadap hasil komposit kaca**, bukan terhadap `#FFFFFF` atau `#000000`. Setiap mode mendeklarasikan dua latar ekstrem (gelap & terang) dan tabel melaporkan yang **terburuk**; itu sebabnya angka tema Terang lebih rendah dari tema Gelap meski paletnya terlihat "aman".
 
 ---
 
-## 11. Daftar pustaka
+## 11. Tema mengikuti waktu lokal
+
+**Aturan (mengikat).** Zona waktu dibaca dari `/api/config` → `tz` (sekarang `Asia/Jakarta`; jangan pernah menulis offset `+07:00` di kode). Jam lokal dihitung dengan `Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false })`. Jendela siang: **06:00 ≤ jam < 18:00 waktu lokal → Terang**, di luar itu **Gelap**. Batasnya konstanta bernama `DAY_START_HOUR = 6`, `DAY_END_HOUR = 18` di satu modul murni.
+
+**Modul & uji.** `frontend/src/lib/theme.ts` (murni: tanpa React, tanpa DOM, tanpa `Date.now()` di dalam fungsi — pemanggil yang memberi `nowMs`). Uji headless: `verify/theme_check.ts`, dijalankan seperti check lain:
+
+```
+frontend/node_modules/.bin/esbuild verify/theme_check.ts --bundle --format=esm --platform=node --outfile=/tmp/theme_check.mjs
+node /tmp/theme_check.mjs        # 23 pemeriksaan, "THEME OK", exit 0
+```
+
+Yang diuji: `05:59 → gelap`, `06:00 → terang`, `17:59 → terang`, `18:00 → gelap`, tengah malam (`00:00`, `23:59`) → gelap; override `day` menang pada 23:00 dan `night` menang pada 12:00; `?theme=day|night|auto` terurai, `?theme=bogus`/absen → `null`; `tz` tidak dikenal → fallback `Asia/Jakarta` (sumber `fallback-tz`); dan zona ber-DST (`Europe/Amsterdam`) benar di kedua sisi transisi (CET ↔ CEST) pada 06:30 dan 05:30.
+
+**Urutan keputusan.** override manual (toggle HUD, disimpan di `localStorage`) → `?theme=` di URL → otomatis dari `tz` → `prefers-color-scheme` **hanya** bila `tz` tidak ada dan tidak ada override. Jam kantor menang atas preferensi OS, karena tema ini mengikuti "siang di Jakarta", bukan siang di perangkat pembaca.
+
+**Satu sumber waktu.** Yang dipakai adalah `now` dari `/api/status` (waktu server), bukan jam perangkat. Alasannya konkret: jam laptop yang basi 3 jam akan membuat kantor tampil gelap pada pukul 09:00. Kalau `now` server belum tersedia (fetch pertama gagal), **jangan** memakai jam perangkat — tahan tema terakhir (atau `prefers-color-scheme` saat boot) sampai `now` server datang.
+
+**Tidak boleh berkedip.** Tema hanya diterapkan saat **static layer berikutnya di-render** (per lantai × tema), tidak pernah di tengah frame. Konsekuensinya: pergantian tema paling lambat terlihat satu frame setelah detik batas — tidak terasa, dan tidak ada kedipan putih.
+
+**Skyline ikut waktu.** Siang: langit biru bergradien, matahari tinggi + halo, muka gedung kaca memantul, jendela sebagai refleksi (alpha 40–95), horizon tegas, bayangan furnitur tajam (blur 3 px). Malam: siluet, jendela menyala (alpha 80–165), kabut 22 %, bayangan lembut (blur 7 px). **Dua state transisi (subuh/senja) dipotong**, dan ini alasannya: aturan otomatis berbasis jam (bukan posisi matahari), jadi gradien subuh 20 menit hanya akan terlihat kalau palet diinterpolasi per menit — itu menambah 2 set palet × 3 lantai = 6 cache lagi dan membuat screenshot tidak deterministik. Gantinya murah: **crossfade 400 ms** antara dua cache (satu komposit tambahan) tepat di 06:00 dan 18:00, cukup untuk menghilangkan "kaget" tanpa mesin waktu.
+
+**Cache per (lantai × tema).** Static layer (denah + kota + furnitur, tanpa avatar) di-cache per pasangan: 3 lantai × 2 tema = **6 cache** (Neon, kalau diaktifkan, jadi 9). Ukuran: satu layer 768×576 @ DPR 2 ≈ 3,5 MB, jadi 6 cache ≈ 21 MB — masih di bawah anggaran memori tab biasa, tetapi tidak gratis; karena itu cache di-cap LRU 6 dan di-invalidasi saat: tema berganti, resize/DPR berubah, atau data roster berubah bentuk (bukan tiap frame). Waktu bangun cache diukur sekali di Fase 2; kalau > 30 ms, bangun di `requestIdleCallback` setelah frame pertama tema lama.
+
+**Determinisme screenshot.** `?still=1` **tidak boleh** bergantung jam dinding: tanpa `?theme=`, `?still=1` memakai tema hasil `resolveTheme` pada `now` server; dengan `?theme=day|night`, override eksplisit menang. Gate visual memakai `?theme=` supaya screenshot tidak berubah sendiri antara pagi dan malam.
+
+**Kalau `tz` tidak valid atau tidak ada.** Dua kasus berbeda, dan keduanya harus ditangani berbeda: (1) `tz` **ada tetapi tidak dikenal** → `Intl` melempar `RangeError`, modul menangkapnya, memakai `Asia/Jakarta`, dan menandai `source: 'fallback-tz'`; (2) `tz` **tidak ada / kosong** → tidak ada jam kantor yang bisa dipakai, jadi tema jatuh ke `prefers-color-scheme` (`source: 'prefers-color-scheme'`). Backend sendiri sudah memvalidasi `OFFICE_TZ` saat boot (`LocationOf`), jadi kasus (1) hanya muncul kalau payload dipotong proxy atau versi API lebih tua.
+
+---
+
+## 12. Dari top-down ke view samping
+
+**Alasan.** Pada denah top-down, dinding utara hanya strip 0,22 unit (≈7 px di zoom 2): kota tidak mungkin berada "di belakang dinding", jadi ia hanya bisa jadi hiasan di atas denah. Permintaan bos — kaca + pemandangan kota — baru masuk akal kalau scene digambar sebagai **elevasi/potongan gedung dilihat dari depan**: lantai jadi band horizontal, curtain wall kaca jadi bidang vertikal, kota besar di belakangnya, meja dan orang terlihat dari depan/samping.
+
+**Pemetaan data.** Koordinat sekarang `(x, z)` per lantai. Di view samping `x` tetap horizontal layar, dan `z` berubah peran menjadi **kedalaman**. Dua opsi:
+
+| Opsi | Cara | Kelebihan | Kekurangan |
+|---|---|---|---|
+| **(a) elevasi murni** | `z` hanya menentukan urutan gambar | paling murah (0 perubahan data), komposisi paling "bersih" | dua agen dengan `x` sama saling menimpa → ambigu; L3 punya **3 pasangan** seperti itu |
+| **(b) elevasi 2.5D (lane)** | `z` → salah satu dari 3 lane; tiap lane punya offset vertikal kecil dan skala sedikit lebih kecil | kedalaman tidak hilang, tabrakan `x` terpisah, tetap terbaca sebagai view samping | perlu aturan lane + skala per lane; satu tingkat kesulitan baru di hit-test |
+
+**Rekomendasi: (b).** Bukti dari data L3 (bukan dugaan): `coder (-1,62; -0,78)` vs `coder2 (-1,62; 0)`, `planner (0; 0)` vs `reviewer (0; -0,78)`, `uiux (1,62; 0)` vs `tester (1,62; -0,78)` — tiga pasang agen menempati `x` yang sama. Dengan opsi (a) mereka bertumpuk persis dan satu agen hilang dari pandangan; dengan lane, tiap pasangan terpisah 7 px + skala 0,96 vs 1,00 dan tetap terbaca.
+
+**Aturan lane yang dipakai di mockup.**
+
+| Lane | Skala | Offset y | Agen L3 |
+|---|---|---|---|
+| 0 (belakang) | 0,92 | 0 px | WAHYU (z −6,2) |
+| 1 (tengah) | 0,96 | +7 px | DIMAS, YOGA, SARI (z −0,78) |
+| 2 (depan) | 1,00 | +14 px | BIMA, BAGAS, RAKA, LARAS (z ≥ −0,39) |
+
+Catatan penting: pitch `z` di data hanya 0,78 unit, jauh lebih kecil dari jarak antar-lane, jadi pemetaan **tidak boleh** memakai pembagian linier `z → lane` apa adanya (semua meja island akan jatuh di satu lane). Yang dipakai: lane awal dari ambang `z`, lalu **resolver tabrakan** — pasangan dengan `x` sama digeser satu lane ke belakang. Ini deterministik dan bisa diuji.
+
+**Dampak teknis.**
+
+| Aspek | Sekarang (top-down) | View samping 2.5D |
+|---|---|---|
+| Nav graph | graf 2D `NAV` (node `x,z` + edge) | tetap graf 2D untuk pathfinding, tetapi render memakai **koridor 1D per lane**; agen yang berpindah lane memakai satu edge "tangga" dan offsetnya diinterpolasi 120 ms |
+| Hit-test klik | `nearestAt(x,z)` di bidang | `x` → kandidat terdekat; kalau > 1 kandidat, pilih lane dengan `y` terdekat; radius klik 24 px, lane terdekat menang |
+| Nameplate | di atas kepala (top-down = di atas sprite) | kepala sekarang di `floor_y − avatar_h × skala_lane`; plate di atas itu, jarak tetap 6 px, ditumpuk ke atas bila bentrok, dengan garis penghubung 1 px (gate: 0 overlap, 0 kepala tertutup) |
+| Urutan gambar | z-sort naik | lane 0 (belakang) → lane 2 (depan), lalu `x`; partisi kaca digambar setelah lane belakang |
+| Lift | kotak 2,6×3,2 di denah | naik-turun **vertikal** antar band lantai — animasi 400 ms ease-in-out, pintu 160 ms, indikator lantai di header ikut berubah; ini justru lebih natural dari sekarang |
+| Zoom/pan | bebas 2 arah | pan **horizontal dominan**; vertikal dikunci (hanya 3 lane), zoom mengubah px/unit horizontal |
+
+**Uji kelayakan (diukur di mockup 1280×800, kanvas 1000×688).**
+
+| Pertanyaan | Jawaban terukur |
+|---|---|
+| Tinggi band per lantai | kota 310 px · plafon 26 px · interior 260 px · floor finish 70 px · slab 22 px = **688 px** (pas kanvas) |
+| Berapa lane yang masih terbaca | **3** (offset 7 px, skala 1,00/0,96/0,92); lane ke-4 pada 7 px mulai terbaca sebagai "baris ganda", bukan kedalaman |
+| Apakah 8 agen L3 muat | **ya** — kamera memotong span 10,82 unit (bukan 24 unit penuh) → 88,7 px/unit = **120 px per agen**, tanpa tumpukan; kalau seluruh lantai dipaksa masuk, hasilnya 41 px/unit dan agen bertabrakan |
+| Tinggi avatar & meja | avatar 50 px (× skala lane) · meja 34 px dari garis lantai · monitor 24×15 px |
+| Konsekuensi kamera | view samping **adalah potongan**, bukan seluruh lantai; UI harus menyebut "potongan L3" dan pan horizontal menggantikan pan 2 arah |
+
+**Risiko yang harus dijaga.** (1) Kedalaman tetap bisa ambigu bila dua agen satu lane berdekatan — mitigasi: resolver lane + nameplate berleader. (2) Nameplate bertumpuk di agen yang berdekatan — mitigasi: gate keras 0 overlap/0 kepala tertutup, sudah berjalan di mockup. (3) Sprite harus digambar ulang untuk profil samping (meja, kursi, monitor, rak server) — ini biaya Fase 2, bukan tambahan di luar rencana. (4) Walkability tidak boleh ikut berubah: `layout_check` tetap memakai graf 2D.
+
+---
+
+## 13. Daftar pustaka
 
 1. MDN. *backdrop-filter CSS property.* https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/backdrop-filter
 2. Argyle, A. & Medley, J. *Create OS-style backgrounds with backdrop-filter.* web.dev. https://web.dev/articles/backdrop-filter
@@ -548,13 +676,16 @@ Lihat `docs/design/mockups/tokens.json` (dihasilkan `tokens.py`) — 60 pasangan
 
 | Artefak | Path |
 |---|---|
-| Mockup Sky Lobby | `docs/design/mockups/sky-lobby.png` (1280×800) |
-| Mockup Daylight Atrium | `docs/design/mockups/daylight-atrium.png` (1280×800) |
-| Mockup Neon Metro | `docs/design/mockups/neon-metro.png` (1280×800) |
-| Mockup mobile (Sky Lobby) | `docs/design/mockups/sky-lobby-mobile.png` (390×844) |
-| Perbandingan scene-tech | `docs/design/mockups/scene-tech-compare.png` (1280×800) |
+| Mockup **view samping** — tema Terang (L3) | `docs/design/mockups/l3-side-day.png` (1280×800) |
+| Mockup **view samping** — tema Gelap (L3) | `docs/design/mockups/l3-side-night.png` (1280×800) |
+| Mockup mobile — Terang / Gelap | `docs/design/mockups/l3-side-mobile-day.png`, `l3-side-mobile-night.png` (390×844) |
+| Referensi denah top-down (sebelum perubahan view) | `daylight-atrium.png`, `sky-lobby.png`, `lobby-daylight.png`, `edu-daylight.png`, `sky-lobby-mobile.png`, `daylight-mobile.png` |
+| Neon Metro (alternatif) | `docs/design/mockups/neon-metro.png` (1280×800) |
+| Perbandingan scene-tech (top-down) | `docs/design/mockups/scene-tech-compare.png` (1280×800) |
 | Avatar sebelum/sesudah | `docs/design/mockups/avatar-before-after.png` (1280×640) |
-| Token & kontras | `docs/design/mockups/tokens.py`, `tokens.json` |
+| Token & kontras dua mode | `docs/design/mockups/tokens.py`, `tokens.json` (78 pasangan) |
+| Renderer mockup | `docs/design/mockups/render_mockups.py` |
+| Modul tema + uji | `frontend/src/lib/theme.ts`, `verify/theme_check.ts` |
 | Benchmark blur | `docs/rnd/bench/glass_blur_bench.py`, `glass_blur_bench.json` |
 | Spesifikasi desain | `docs/design/office-glass-city.md` |
 | Laporan DOCX | `docs/rnd/RnD-Office-Glassmorphism.docx` |

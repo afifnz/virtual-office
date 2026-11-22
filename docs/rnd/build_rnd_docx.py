@@ -1,30 +1,43 @@
 """Build docs/rnd/RnD-Office-Glassmorphism.docx from the R&D markdown.
 
 One source of truth: docs/rnd/office-glass-city.md is parsed into blocks and
-rendered with python-docx (A4, 2.5 cm margins, 11 pt body, bold headings, thin
-table borders, page numbers in the footer, clickable bibliography links).
+rendered with python-docx (A4, 2.5 cm margins, 11 pt body, thin table borders,
+page numbers in the footer, clickable bibliography links).
 
-Run:  python3 docs/rnd/build_rnd_docx.py
-Then: soffice --headless --convert-to pdf --outdir docs/rnd docs/rnd/RnD-Office-Glassmorphism.docx
+Headings use real Word styles — md H2 -> 'Heading 1', H3 -> 'Heading 2',
+H4 -> 'Heading 3' (the md's H1 title stays on the cover, not as a heading) —
+so the PDF export carries a bookmark outline per heading.
+
+'Daftar isi' is a real Word TOC field (fldChar begin/instrText/separate/end)
+whose cached result lists every heading with dot leaders and REAL page
+numbers. The numbers are measured in a two-pass build: pass 1 renders blank
+numbers, the exported PDF outline maps each heading title to its page, pass 2
+bakes the numbers in and asserts the pagination did not move.
+
+Run:  python3 docs/rnd/build_rnd_docx.py            # two-pass build + verify
+      python3 docs/rnd/build_rnd_docx.py --verify   # verify existing artifacts
 """
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
+from collections import Counter
 from pathlib import Path
 
+import pymupdf
 from docx import Document
-from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, RGBColor, Emu
+from docx.shared import Cm, Pt, RGBColor
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 MD = HERE / "office-glass-city.md"
-MOCK = REPO / "docs/design/mockups"
 OUT = HERE / "RnD-Office-Glassmorphism.docx"
+PDF = HERE / "RnD-Office-Glassmorphism.pdf"
 
 BODY_FONT = "Liberation Sans"
 MONO_FONT = "DejaVu Sans Mono"
@@ -33,17 +46,21 @@ ACCENT = RGBColor(0xA9, 0x74, 0x1F)
 MUTED = RGBColor(0x55, 0x63, 0x77)
 RULE = "C9D2DE"
 
-# images inserted at the end of the section whose heading contains the key
-IMAGES: list[tuple[str, list[tuple[Path, str, float]]]] = [
-    ("6.1 Sky Lobby", [(MOCK / "sky-lobby.png", "Gambar 1 — Sky Lobby, L3 Tim Dev, 1280×800. Band jendela kota dusk di atas dinding utara; kaca hanya di HUD, tab, roster, dan zoom.", 15.5)]),
-    ("6.2 Daylight Atrium", [(MOCK / "daylight-atrium.png", "Gambar 2 — Daylight Atrium, L3 Tim Dev, 1280×800. Kaca putih susu, aksen biru, outline furnitur untuk memisahkan putih dari lantai terang.", 15.5)]),
-    ("6.3 Neon Metro", [(MOCK / "neon-metro.png", "Gambar 3 — Neon Metro, L3 Tim Dev, 1280×800. Kaca hitam, tepi cyan, glow dibatasi satu lapis.", 15.5)]),
-    ("5.3 Dampak", [(MOCK / "scene-tech-compare.png", "Gambar 4 — Tiga tingkat non-pixel pada crop L3 yang sama: (a) avatar vector di atas scene pixel, (b) seluruh scene vector, (c) scene vector + kaca & kota penuh.", 15.5)]),
-    ("5.6.4", [(MOCK / "avatar-before-after.png", "Gambar 5 — Avatar sebelum/sesudah: 12×16 pixel (atas) dan clean vector 150 px (bawah) untuk delapan look L3 yang sama.", 15.5)]),
-    ("7. Matriks", [(MOCK / "sky-lobby-mobile.png", "Gambar 6 — Sky Lobby di 390×844: bottom sheet kaca, tab lantai di atas sheet, scene tetap terlihat.", 7.6)]),
-]
+# md heading level -> (Word style, size pt, colour, space before pt, space after pt)
+HEADING_SPECS: dict[int, tuple[str, float, RGBColor, float, float]] = {
+    2: ("Heading 1", 16.0, INK, 2, 8),
+    3: ("Heading 2", 13.0, INK, 12, 4),
+    4: ("Heading 3", 11.5, ACCENT, 9, 4),
+}
 
-MOBILE = (MOCK / "sky-lobby-mobile.png", "Gambar 6 — Sky Lobby di 390×844: bottom sheet kaca, tab lantai di atas sheet, scene tetap terlihat.", 7.6)
+# TOC entry look per md level: (indent cm, size pt, colour)
+TOC_SPECS: dict[int, tuple[float, float, RGBColor]] = {
+    2: (0.0, 10.5, INK),
+    3: (0.6, 9.5, MUTED),
+    4: (1.2, 9.0, MUTED),
+}
+
+TOC_INSTR = ' TOC \\o "1-3" \\h \\z \\u '
 
 
 # ------------------------------------------------------------------ markdown
@@ -121,6 +138,29 @@ def parse(md: str) -> list[tuple]:
 INLINE = re.compile(r"(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|https?://[^\s)]+)")
 
 
+def norm(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def plain(text: str) -> str:
+    """Inline markup (bold/italic/code/link) reduced to its visible text."""
+    out = []
+    for part in INLINE.split(text):
+        if not part:
+            continue
+        if part.startswith("**") and part.endswith("**"):
+            out.append(part[2:-2])
+        elif part.startswith("*") and part.endswith("*") and len(part) > 2:
+            out.append(part[1:-1])
+        elif part.startswith("`") and part.endswith("`"):
+            out.append(part[1:-1])
+        elif part.startswith("[") and "](" in part:
+            out.append(re.match(r"\[([^\]]+)\]\(([^)]+)\)", part).group(1))
+        else:
+            out.append(part)
+    return "".join(out)
+
+
 def add_runs(par, text: str, size: float = 11, color: RGBColor = INK, bold: bool = False):
     for part in INLINE.split(text):
         if not part:
@@ -136,6 +176,10 @@ def add_runs(par, text: str, size: float = 11, color: RGBColor = INK, bold: bool
             r.font.name = MONO_FONT
             r._element.rPr.rFonts.set(qn("w:eastAsia"), MONO_FONT)
             r.font.size = Pt(size - 1.2)
+            r.font.color.rgb = color
+            # skip the shared tail below, which would reset the run to the body
+            # font/size and silently undo the mono formatting
+            continue
         elif part.startswith("http://") or part.startswith("https://"):
             add_hyperlink(par, part, part, size - 0.6)
             continue
@@ -317,7 +361,96 @@ def add_cover(doc, meta: dict):
     doc.add_page_break()
 
 
-def add_toc(doc, blocks):
+# ------------------------------------------------------------- heading styles
+def setup_styles(doc: Document):
+    """Normal + real Heading 1-3 styles (design preserved, theme fonts stripped)."""
+    st = doc.styles["Normal"]
+    st.font.name = BODY_FONT
+    st.font.size = Pt(11)
+    st.element.rPr.rFonts.set(qn("w:eastAsia"), BODY_FONT)
+    st.paragraph_format.space_after = Pt(6)
+    st.paragraph_format.line_spacing = 1.15
+
+    for lvl, (name, size, color, before, after) in HEADING_SPECS.items():
+        h = doc.styles[name]
+        h.font.name = BODY_FONT
+        h.font.size = Pt(size)
+        h.font.bold = True
+        h.font.color.rgb = color
+        # replace theme font refs with explicit fonts, else Word falls back to Calibri Light
+        rfonts = h.element.get_or_add_rPr().get_or_add_rFonts()
+        for theme_attr in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme"):
+            key = qn("w:" + theme_attr)
+            if key in rfonts.attrib:
+                del rfonts.attrib[key]
+        for attr in ("ascii", "hAnsi", "eastAsia", "cs"):
+            rfonts.set(qn("w:" + attr), BODY_FONT)
+        h.paragraph_format.space_before = Pt(before)
+        h.paragraph_format.space_after = Pt(after)
+        h.paragraph_format.keep_with_next = True
+        h.paragraph_format.line_spacing = 1.1
+        # explicit outline level -> LibreOffice exports a PDF bookmark per heading
+        ppr = h.element.get_or_add_pPr()
+        for el in ppr.findall(qn("w:outlineLvl")):
+            ppr.remove(el)
+        ol = OxmlElement("w:outlineLvl")
+        ol.set(qn("w:val"), str(lvl - 2))
+        ppr.append(ol)
+
+
+def add_heading(doc, lvl: int, text: str):
+    """Heading paragraph on the real Word style; runs via add_runs (inline markup)."""
+    name, size, color, _before, _after = HEADING_SPECS[lvl]
+    p = doc.add_paragraph(style=name)
+    if lvl == 2 and text.startswith("6."):
+        p.paragraph_format.page_break_before = True
+    if lvl == 2:
+        # thin bottom rule under level-1 headings (kept from the previous design)
+        pPr = p._p.get_or_add_pPr()
+        pbdr = OxmlElement("w:pBdr")
+        bottom = OxmlElement("w:bottom")
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "6")
+        bottom.set(qn("w:color"), RULE)
+        pbdr.append(bottom)
+        pPr.append(pbdr)
+    add_runs(p, text, size=size, color=color, bold=True)
+    return p
+
+
+# ------------------------------------------------------------------ TOC field
+def fld_char(kind: str, dirty: bool = False):
+    r = OxmlElement("w:r")
+    fld = OxmlElement("w:fldChar")
+    fld.set(qn("w:fldCharType"), kind)
+    if dirty:
+        fld.set(qn("w:dirty"), "true")
+    r.append(fld)
+    return r
+
+
+def instr_run(instr: str):
+    r = OxmlElement("w:r")
+    it = OxmlElement("w:instrText")
+    it.set(qn("xml:space"), "preserve")
+    it.text = instr
+    r.append(it)
+    return r
+
+
+def lookup(page_map: dict[str, int], title: str) -> int | None:
+    if title in page_map:
+        return page_map[title]
+    for key, page in page_map.items():
+        if key.startswith(title[:20]) or title.startswith(key[:20]):
+            return page
+    return None
+
+
+def add_toc(doc, headings: list[tuple[int, str]], page_map: dict[str, int] | None = None):
+    """Real TOC field: begin+instrText+separate on the first entry paragraph,
+    one paragraph per heading, fldChar end after the last entry's page number.
+    A short italic note sits AFTER the field so Word never overwrites it."""
     h = doc.add_paragraph()
     r = h.add_run("Daftar isi")
     r.font.size = Pt(15)
@@ -325,26 +458,39 @@ def add_toc(doc, blocks):
     r.font.name = BODY_FONT
     r.font.color.rgb = INK
     h.paragraph_format.space_after = Pt(10)
-    for b in blocks:
-        if b[0] == "h" and b[1] == 2:
-            p = doc.add_paragraph()
-            p.paragraph_format.space_after = Pt(3)
-            p.paragraph_format.left_indent = Cm(0)
-            run = p.add_run(b[2])
-            run.font.size = Pt(10.5)
-            run.font.name = BODY_FONT
-            run.font.color.rgb = INK
-        elif b[0] == "h" and b[1] == 3:
-            p = doc.add_paragraph()
-            p.paragraph_format.space_after = Pt(2)
-            p.paragraph_format.left_indent = Cm(0.6)
-            run = p.add_run(b[2])
-            run.font.size = Pt(9.5)
-            run.font.name = BODY_FONT
-            run.font.color.rgb = MUTED
-    p = doc.add_paragraph()
-    r = p.add_run("Nomor halaman mengikuti render akhir; daftar ini sengaja tanpa nomor agar tidak "
-                  "menyesatkan bila isi berubah.")
+
+    entries = [(lvl, plain(text)) for lvl, text in headings]
+    page_map = page_map or {}
+    last = len(entries) - 1
+    for i, (lvl, text) in enumerate(entries):
+        indent, size, color = TOC_SPECS[lvl]
+        p = doc.add_paragraph()
+        p.paragraph_format.left_indent = Cm(indent)
+        p.paragraph_format.space_after = Pt(3 if lvl == 2 else 2)
+        p.paragraph_format.tab_stops.add_tab_stop(Cm(15.5), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS)
+        if i == 0:
+            p._p.append(fld_char("begin", dirty=True))
+            p._p.append(instr_run(TOC_INSTR))
+            p._p.append(fld_char("separate"))
+        r = p.add_run(text)
+        r.font.size = Pt(size)
+        r.font.name = BODY_FONT
+        r.font.color.rgb = color
+        tab = p.add_run("\t")
+        tab.font.size = Pt(size)
+        tab.font.name = BODY_FONT
+        tab.font.color.rgb = color
+        page = lookup(page_map, norm(text))
+        r2 = p.add_run(str(page) if page else "")
+        r2.font.size = Pt(size)
+        r2.font.name = BODY_FONT
+        r2.font.color.rgb = color
+        if i == last:
+            p._p.append(fld_char("end"))
+
+    note = doc.add_paragraph()
+    r = note.add_run("Nomor halaman di atas diambil dari render final. Bila isi dokumen berubah, "
+                     "perbarui daftar ini dengan F9 atau klik kanan → Update Field.")
     r.font.size = Pt(8.5)
     r.italic = True
     r.font.name = BODY_FONT
@@ -372,17 +518,31 @@ def add_image(doc, path: Path, caption: str, width_cm: float):
         r.font.color.rgb = MUTED
 
 
-def build():
-    md = MD.read_text()
-    blocks = parse(md)
-    doc = Document()
+def body_headings(blocks) -> list[tuple[int, str]]:
+    """Headings the body actually renders, in order (same cover-skip logic)."""
+    headings = []
+    started = False
+    for b in blocks:
+        kind = b[0]
+        if kind == "h" and b[1] == 1 and "R&D — Kantor 2D" in b[2]:
+            started = "meta"
+            continue
+        if started == "meta":
+            if kind == "hr":
+                started = True
+            continue
+        if not started:
+            continue
+        if kind == "h" and b[1] in HEADING_SPECS:
+            headings.append((b[1], b[2]))
+    return headings
 
-    st = doc.styles["Normal"]
-    st.font.name = BODY_FONT
-    st.font.size = Pt(11)
-    st.element.rPr.rFonts.set(qn("w:eastAsia"), BODY_FONT)
-    st.paragraph_format.space_after = Pt(6)
-    st.paragraph_format.line_spacing = 1.15
+
+# ------------------------------------------------------------------ build
+def build_doc(page_map: dict[str, int] | None = None) -> Document:
+    blocks = parse(MD.read_text())
+    doc = Document()
+    setup_styles(doc)
 
     sec = doc.sections[0]
     sec.page_width, sec.page_height = Cm(21.0), Cm(29.7)
@@ -390,15 +550,12 @@ def build():
     add_footer_page_numbers(sec)
 
     add_cover(doc, {"author": "Tim R&D — Hermes (profil dev)", "date": "22 November 2026", "version": "1.0"})
-    add_toc(doc, blocks)
+    add_toc(doc, body_headings(blocks), page_map)
 
     # skip the md's own H1 + metadata block (already on the cover)
     started = False
     num = 0
-    pending_images: list[tuple] = []
-    current_section = ""
-
-    for idx, b in enumerate(blocks):
+    for b in blocks:
         kind = b[0]
         if kind == "h" and b[1] == 1:
             if "R&D — Kantor 2D" in b[2]:
@@ -412,43 +569,11 @@ def build():
             continue
 
         if kind == "h":
-            lvl, text = b[1], b[2]
-            if lvl == 2:
-                current_section = text
-                new_page = text.startswith("6.")
-                p = doc.add_paragraph()
-                p.paragraph_format.space_before = Pt(2)
-                p.paragraph_format.space_after = Pt(8)
-                p.paragraph_format.keep_with_next = True
-                if new_page:
-                    p.paragraph_format.page_break_before = True
-                r = p.add_run(text)
-                r.font.size = Pt(16)
-                r.bold = True
-                r.font.name = BODY_FONT
-                r.font.color.rgb = INK
-                # rule under H1
-                pPr = p._p.get_or_add_pPr()
-                pbdr = OxmlElement("w:pBdr")
-                bottom = OxmlElement("w:bottom")
-                bottom.set(qn("w:val"), "single")
-                bottom.set(qn("w:sz"), "6")
-                bottom.set(qn("w:color"), RULE)
-                pbdr.append(bottom)
-                pPr.append(pbdr)
-            else:
-                p = doc.add_paragraph()
-                p.paragraph_format.space_before = Pt(12 if lvl == 3 else 9)
-                p.paragraph_format.space_after = Pt(4)
-                p.paragraph_format.keep_with_next = True
-                r = p.add_run(text)
-                r.font.size = Pt(13 if lvl == 3 else 11.5)
-                r.bold = True
-                r.font.name = BODY_FONT
-                r.font.color.rgb = INK if lvl == 3 else ACCENT
+            if b[1] in HEADING_SPECS:
+                add_heading(doc, b[1], b[2])
             continue
 
-        if kind != "li" and kind != "h":
+        if kind != "li":
             num = 0
         if kind == "p":
             p = doc.add_paragraph()
@@ -505,12 +630,126 @@ def build():
             pbdr.append(bottom)
             pPr.append(pbdr)
 
-    for path, cap, w in pending_images:
-        add_image(doc, path, cap, w)
+    return doc
 
-    doc.save(OUT)
-    print("wrote", OUT, OUT.stat().st_size, "bytes")
+
+# ------------------------------------------------------------- pdf plumbing
+def convert_pdf(bookmarks: bool = False) -> Path:
+    fmt = 'pdf:writer_pdf_Export:{"ExportBookmarks":{"type":"boolean","value":"true"}}' if bookmarks else "pdf"
+    cmd = ["soffice", "--headless", "-env:UserInstallation=file:///tmp/lo_rnd_build",
+           "--convert-to", fmt, "--outdir", str(HERE), str(OUT)]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if proc.returncode != 0 or not PDF.exists():
+        raise RuntimeError(f"soffice conversion failed ({proc.returncode}): {proc.stdout} {proc.stderr}")
+    return PDF
+
+
+def outline_info(path: Path = PDF) -> tuple[list, int]:
+    with pymupdf.open(path) as f:
+        return f.get_toc(), f.page_count
+
+
+def build_two_pass() -> dict:
+    wanted = [norm(plain(t)) for _lvl, t in body_headings(parse(MD.read_text()))]
+
+    print(f"pass 1: {len(wanted)} headings, TOC page numbers blank")
+    build_doc().save(OUT)
+    convert_pdf()
+    toc1, pages1 = outline_info()
+    if not toc1:
+        print("outline empty on first export; retrying with ExportBookmarks=true")
+        convert_pdf(bookmarks=True)
+        toc1, pages1 = outline_info()
+    if not toc1:
+        raise RuntimeError("PDF outline is empty — LibreOffice did not export bookmarks")
+
+    page_map = {norm(title): page for _lvl, title, page in toc1}
+    missing = [t for t in wanted if lookup(page_map, t) is None]
+    if missing:
+        raise RuntimeError(f"headings not found in the PDF outline: {missing}")
+
+    print(f"pass 2: baking real page numbers (e.g. {wanted[0]} -> hal {lookup(page_map, wanted[0])})")
+    build_doc(page_map).save(OUT)
+    convert_pdf()
+    toc2, pages2 = outline_info()
+
+    if pages1 != pages2:
+        raise RuntimeError(f"pagination moved between passes: {pages1} -> {pages2} pages")
+    if len(toc2) < 25:
+        raise RuntimeError(f"PDF outline has only {len(toc2)} entries (need >= 25)")
+    bad = [(title, lookup(page_map, norm(title)), page) for _lvl, title, page in toc2
+           if lookup(page_map, norm(title)) != page]
+    if bad:
+        raise RuntimeError(f"printed TOC numbers disagree with the PDF outline: {bad}")
+    print(f"two-pass OK: {pages2} pages, {len(toc2)} outline entries, printed numbers match the outline")
+    return {"pages": pages2, "outline": len(toc2)}
+
+
+# ------------------------------------------------------------------ verify
+def pdf_text_lines(page) -> list[str]:
+    """Visual text lines of a PDF page (spans merged by y-coordinate)."""
+    rows: list[tuple[float, float, str]] = []
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            text = "".join(span["text"] for span in line["spans"]).strip()
+            if text:
+                rows.append((round(line["bbox"][1], 1), line["bbox"][0], text))
+    rows.sort()
+    merged: list[list] = []
+    for y, _x, text in rows:
+        if merged and abs(merged[-1][0] - y) <= 2.5:
+            merged[-1][1].append(text)
+        else:
+            merged.append([y, [text]])
+    return ["  ".join(parts).strip() for _y, parts in merged]
+
+
+def verify() -> dict:
+    doc = Document(OUT)
+    hist = Counter(p.style.name for p in doc.paragraphs)
+    print("== verify:", OUT.relative_to(REPO), "/", PDF.relative_to(REPO))
+    print("style histogram:", dict(sorted(hist.items(), key=lambda kv: (-kv[1], kv[0]))))
+
+    heads = [p.style.name for p in doc.paragraphs if p.style.name.startswith("Heading")]
+    print(f"heading paragraphs: {len(heads)} | first 8: {heads[:8]}")
+
+    first = last = None
+    for i, p in enumerate(doc.paragraphs):
+        kinds = {fc.get(qn("w:fldCharType")) for fc in p._p.findall(".//" + qn("w:fldChar"))}
+        if "begin" in kinds and first is None:
+            first = i
+        if "end" in kinds and first is not None and last is None:
+            last = i
+    toc_entries = (last - first + 1) if (first is not None and last is not None) else 0
+    print("TOC field entry paragraphs:", toc_entries)
+
+    with pymupdf.open(PDF) as f:
+        pg = f[0]
+        is_a4 = abs(pg.rect.width - 595) < 3 and abs(pg.rect.height - 842) < 3
+        print(f"PDF: {f.page_count} pages, {pg.rect.width:.0f}x{pg.rect.height:.0f} pt ({'A4' if is_a4 else 'NOT A4!'})")
+        toc = f.get_toc()
+        print("PDF outline entries:", len(toc))
+        for lvl, title, pno in toc[:5]:
+            print(f"   {lvl}: {title}  ->  hal {pno}")
+        toc_page = next((p for p in f if "Daftar isi" in p.get_text()), None)
+        if toc_page is None:
+            print("TOC page: NOT FOUND")
+            numbered = []
+        else:
+            lines = [l for l in pdf_text_lines(toc_page) if "halaman" not in l]
+            numbered = [l for l in lines if re.search(r"\d+$", l.strip())]
+            print(f"TOC page (pdf page {toc_page.number + 1}): {len(numbered)} lines ending in a page number; sample:")
+            for l in numbered[:10]:
+                print("   ", l)
+        pages = f.page_count
+    return {"headings": len(heads), "toc_entries": toc_entries, "outline": len(toc),
+            "pages": pages, "toc_numbered": len(numbered)}
 
 
 if __name__ == "__main__":
-    build()
+    if "--verify" in sys.argv[1:]:
+        verify()
+    else:
+        build_two_pass()
+        print()
+        verify()

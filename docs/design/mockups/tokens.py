@@ -36,9 +36,10 @@ def luminance(h: str) -> float:
 
 
 def contrast(a: str, b: str) -> float:
+    """WCAG 2.x contrast ratio, UNROUNDED — callers round only for display."""
     la, lb = luminance(a), luminance(b)
     hi, lo = max(la, lb), min(la, lb)
-    return round((hi + 0.05) / (lo + 0.05), 2)
+    return (hi + 0.05) / (lo + 0.05)
 
 
 def over(fg: str, alpha: float, bg: str) -> str:
@@ -111,18 +112,24 @@ DAY = {
     "wall": "#DDE6F0",
     "desk": "#FFFFFF",
     "desk_top": "#F2F6FA",
+    # Status colours are used BOTH as a dot/marker (needs 3:1) and as the status
+    # word in the roster (needs 4.5:1). On a bright glass surface the naive
+    # tailwind-700 amber/green/stone tones land at 4.17–4.25:1, so they are
+    # darkened here until the worse of the two light backdrops clears 4.5:1.
     "status": {
-        "working": "#A16207", "reviewing": "#6D28D9", "idle": "#1D4ED8",
-        "blocked": "#B45309", "offline": "#5F6A7D", "ok": "#15803D", "danger": "#B91C1C",
+        "working": "#8A5406", "reviewing": "#6D28D9", "idle": "#1D4ED8",
+        "blocked": "#B33A12", "offline": "#556073", "ok": "#116B33", "danger": "#B91C1C",
     },
     "status_ink": {
         "working": "#FFFFFF", "reviewing": "#FFFFFF", "idle": "#FFFFFF",
         "blocked": "#FFFFFF", "offline": "#FFFFFF", "ok": "#FFFFFF", "danger": "#FFFFFF",
     },
     "city": {
-        "sky_top": "#A9CBE8", "sky_mid": "#CFE3F3", "sky_low": "#E8F3FB", "horizon": "#F7FBFF",
-        "layers": ["#B9CBDE", "#A6BACF", "#93A9C1", "#7F97B1"],
-        "window": "#FBFDFF", "window_cool": "#EAF3FB",
+        # bright midday: a real blue sky, glass towers that reflect it, and a
+        # crisp horizon — the dusk palette was too washed out to read as "siang".
+        "sky_top": "#3E8FD6", "sky_mid": "#7CBCEC", "sky_low": "#C4E1F6", "horizon": "#F0F9FF",
+        "layers": ["#A9C6DD", "#8FB0CC", "#7699B8", "#5E82A3"],
+        "window": "#EAF7FF", "window_cool": "#BFE2F7",
     },
     "type": {"family": "system-ui / Inter", "body": 13, "label": 11, "title": 15, "display": 22},
 }
@@ -166,6 +173,13 @@ NEON = {
 
 DIRECTIONS = [SKY, DAY, NEON]
 
+# The product ships two themes (day + night, see docs/rnd §12); Neon Metro stays
+# as the alternative direction. The contrast table must cover every theme the
+# UI can show, and every status colour in both of its jobs: a 3:1 marker (dot,
+# line, avatar chip) and 4.5:1 body text (the roster prints the status word in
+# the status colour).
+THEMES = [("Terang", DAY), ("Gelap", SKY), ("Neon Metro (alternatif)", NEON)]
+
 
 def surface_hex(d: dict, backdrop: str) -> str:
     fill, a = d["surface"]
@@ -173,29 +187,44 @@ def surface_hex(d: dict, backdrop: str) -> str:
 
 
 def contrast_rows() -> list[dict]:
-    rows = []
-    for d in DIRECTIONS:
+    rows: list[dict] = []
+
+    def add(label: str, d: dict, pair: str, ratio: float, need: float, role: str) -> None:
+        # compare the UNROUNDED ratio; rounding is for display only, otherwise
+        # 4.499 would be printed as 4.50 and silently pass a 4.5 threshold.
+        rows.append({"theme": label, "direction": d["name"], "pair": pair,
+                     "ratio": round(ratio, 2), "raw": ratio,
+                     "need": need, "role": role, "pass": ratio >= need})
+
+    for label, d in THEMES:
+        glass = [surface_hex(d, b) for b in d["backdrops"]]
         for key in ("ink", "ink_dim", "muted", "accent"):
-            worst = min(contrast(d[key], surface_hex(d, b)) for b in d["backdrops"])
-            rows.append({"direction": d["name"], "pair": f"{key} on glass", "ratio": worst})
+            add(label, d, f"{key} di atas kaca", min(contrast(d[key], g) for g in glass), 4.5, "teks")
         for st, col in d["status"].items():
-            worst = min(contrast(col, surface_hex(d, b)) for b in d["backdrops"])
-            rows.append({"direction": d["name"], "pair": f"status {st} (dot, 3:1)", "ratio": worst})
-        for st, col in d["status"].items():
-            rows.append({"direction": d["name"], "pair": f"status {st} chip text", "ratio": contrast(d["status_ink"][st], col)})
-        rows.append({"direction": d["name"], "pair": "accent button text", "ratio": contrast(d["accent_ink"], d["accent"])})
+            add(label, d, f"status {st} · teks di kaca", min(contrast(col, g) for g in glass), 4.5, "teks")
+            add(label, d, f"status {st} · dot/garis", min(contrast(col, g) for g in glass), 3.0, "non-teks")
+            add(label, d, f"status {st} · chip ({d['status_ink'][st]} di atas {col})",
+                contrast(d["status_ink"][st], col), 4.5, "teks")
+        add(label, d, "accent button text", contrast(d["accent_ink"], d["accent"]), 4.5, "teks")
     return rows
 
 
 def main() -> None:
     rows = contrast_rows()
-    payload = {"directions": DIRECTIONS, "contrast": rows}
+    payload = {"directions": DIRECTIONS, "themes": [t[0] for t in THEMES], "contrast": rows}
     (OUT / "tokens.json").write_text(json.dumps(payload, indent=2) + "\n")
-    print("| Direction | Pair | Ratio | AA |")
-    print("|---|---|---|---|")
+    print("| Tema | Pair | Rasio | Ambang | Hasil |")
+    print("|---|---|---|---|---|")
     for r in rows:
-        need = 3.0 if "dot" in r["pair"] else 4.5
-        print(f"| {r['direction']} | {r['pair']} | {r['ratio']}:1 | {'pass' if r['ratio'] >= need else 'FAIL'} |")
+        print(f"| {r['theme']} | {r['pair']} | {r['ratio']}:1 | {r['need']}:1 | "
+              f"{'lulus' if r['pass'] else 'GAGAL'} |")
+    bad = [r for r in rows if not r["pass"]]
+    print(f"\n{len(rows)} pasangan diperiksa · {len(bad)} gagal")
+    for r in bad:
+        print("  GAGAL:", r["theme"], r["pair"], f"{r['raw']:.3f}", "butuh", r["need"])
+    # a contrast audit that prints a failure and exits 0 is not an audit
+    if bad:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
