@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusPayload, Agent, Comm } from '../lib/types'
 import type { AgentMeta } from '../lib/agents'
 import { agentsFor } from '../lib/roster'
+import { LIFT } from '../lib/rooms'
 import type { MoveIntent, RigCommand } from '../lib/view'
 import { SPOT_VIEW } from '../lib/view'
 import { pickTargets, placeAgents, renderFrame, staticLayerFor } from './render'
@@ -228,6 +229,22 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick }
         readyRef.current = true
         ;(window as unknown as { __office2dReady?: boolean }).__office2dReady = true
         ;(window as unknown as { __office2dVp?: () => Viewport }).__office2dVp = () => vpRef.current
+        // verify-office probe hook: per-floor desk/agent/lift facts, no privacy data
+        ;(window as unknown as { __office2dFloors?: () => unknown }).__office2dFloors = () => {
+          const metas = frame.current.metas
+          const byFloor = (fl: number) => metas.filter((m) => m.desk.floor === fl)
+          return {
+            floor: vpRef.current.floor,
+            zoom: vpRef.current.zoom,
+            floors: [1, 2, 3].map((fl) => ({
+              floor: fl,
+              desks: byFloor(fl).length,
+              agents: byFloor(fl).filter((m) => (frame.current.byId.get(m.id)?.status ?? 'offline') !== 'offline')
+                .length,
+              lift: { x: (LIFT[fl as 1 | 2 | 3].shaft.x1 + LIFT[fl as 1 | 2 | 3].shaft.x2) / 2, z: (LIFT[fl as 1 | 2 | 3].shaft.z1 + LIFT[fl as 1 | 2 | 3].shaft.z2) / 2 },
+            })),
+          }
+        }
       }
     }
     raf = requestAnimationFrame(loop)

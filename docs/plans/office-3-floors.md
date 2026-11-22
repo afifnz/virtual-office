@@ -457,9 +457,9 @@ dihapus); `?floor=` menang atas `?spot=`/`?face=`, pindah lantai menulis URL &
 re-fit. Semua gate hijau: tsc, build, roster/layout/anim/visual OK, e2e 51 ok.
 
 ### M3 — visual modern + roster + dokumen
-- [ ] T3.1 [fe] palette + sprites modern (hapus gamelan/lesehan/kucing)
-- [ ] T3.2 [fe] render motif lantai modern + alas beton
-- [ ] T3.3 [fe] Roster grup per lantai 1/4/8
-- [ ] T3.4 [test] visual_check + probe assertion lift/split; probe desktop+mobile
-- [ ] T3.5 [infra] docs/design/office-3-floors.md + screenshot + vision_analyze
-- [ ] T3.6 gate M3 hijau; commit M3
+- [x] T3.1 [fe] palette + sprites modern (hapus gamelan/lesehan/kucing)
+- [x] T3.2 [fe] render motif lantai modern + alas beton
+- [x] T3.3 [fe] Roster grup per lantai 1/4/8
+- [x] T3.4 [test] visual_check + probe assertion lift/split; probe desktop+mobile
+- [x] T3.5 [infra] docs/design/office-3-floors.md (screenshot + vision_analyze dilewati — constraint tanpa screenshot)
+- [x] T3.6 gate M3 hijau; commit M3

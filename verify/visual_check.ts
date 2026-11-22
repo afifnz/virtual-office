@@ -396,7 +396,7 @@ if (phoneNamesOk) ok('zoom 1 (phone default) labels every desk on every floor, n
 // ------------------------------------------------------- 9. zone plaques exist
 // One plaque per zone per floor, hung on the wall band, inside the floor.
 
-const WANT_PLAQUES: Record<FloorId, string[]> = { 1: ['LOBBY', 'MASUK'], 2: ['TIM EDU'], 3: ['TIM DEV'] }
+const WANT_PLAQUES: Record<FloorId, string[]> = { 1: ['L1 LOBBY', 'MASUK'], 2: ['L2 TIM EDU'], 3: ['L3 TIM DEV'] }
 for (const f of FLOOR_IDS) {
   const labels = labelsOf(f)
   const texts = labels.map((l) => l.text)
@@ -459,6 +459,23 @@ for (const f of FLOOR_IDS) {
     }
   }
   ok(`L${f}: shaft lift = obstacle, node ${liftNode(f).id} (${liftNode(f).x},${liftNode(f).z}) walkable & wired`)
+}
+
+// --------------------------- 12. glass partitions render as panes, same obstacles
+// The L1 meeting-room partition is kind 'glass'; wall obstacles must not change
+// shape (layout_check treats every wall segment as a solid band).
+
+import { wallsOf } from '../frontend/src/lib/rooms'
+const glassL1 = wallsOf(1).filter((w) => w.kind === 'glass')
+if (glassL1.length === 0) fail('L1 meeting-room partition is not marked kind:glass')
+else {
+  const lengths = glassL1.reduce((n, w) => n + Math.abs(w.to - w.from), 0)
+  // the partition: two x-runs (3.4 + 4.6) plus one z-run (6.5) = 14.5 units
+  if (lengths < 14) fail(`L1 glass runs total ${lengths} units, want the full meeting-room partition`)
+  else ok(`L1 meeting-room partition: ${glassL1.length} glass panes (${lengths.toFixed(1)} units) with steel frames`)
+}
+for (const w of wallsOf(1)) {
+  if (w.kind !== undefined && w.kind !== 'solid' && w.kind !== 'glass') fail(`L1 wall segment has unknown kind ${w.kind}`)
 }
 
 console.log(fails === 0 ? '\nVISUAL OK' : `\n${fails} MASALAH`)

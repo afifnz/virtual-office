@@ -322,8 +322,10 @@ if (TEAM.lobby !== '#D4805C' || TEAM.dev !== '#82AAC8' || TEAM.edu !== '#DEB860'
   fail('team accents drifted from design §2.7')
 }
 if (STATUS.blocked !== '#FFC93B') fail('blocked chip colour drifted from design §2.2')
-if (PALETTE.navy900 !== '#101828' || PALETTE.terra500 !== '#C4602C') fail('core palette drifted from design §2.1')
-else ok('palette matches the design tokens (team accents, blocked yellow, navy/terra)')
+if (PALETTE.concrete900 !== '#121924' || PALETTE.concrete500 !== '#3B4A5E') fail('core concrete ramp drifted from design §2.1')
+if (PALETTE.glass500 !== '#456E8F' || PALETTE.steel500 !== '#525F6D') fail('glass/steel tones drifted from design §2.1')
+if (PALETTE.lamp !== '#F2E7C4' || PALETTE.amber !== '#E8A33D') fail('lamp/amber accents drifted from design §2.1')
+else ok('palette matches the design tokens (concrete ramp, glass, steel, lamp, amber)')
 
 // --------------------------------------------------------- 11. lift journeys
 // Cross-floor delegation is a lift journey (plan §Lift): walk to the lift on

@@ -38,7 +38,7 @@ import {
   type Rect,
   type Stack,
 } from './labels'
-import { EXTRAS, PALETTE, SCREEN, STATUS, ZONE_FLOOR } from './palette'
+import { EXTRAS, FLOOR_MOTIF, PALETTE, SCREEN, STATUS, TEAM } from './palette'
 import { drawText } from './pixelfont'
 import { getSprite, type Sprite } from './sprites'
 import {
@@ -59,40 +59,109 @@ export type MonitorMode = 'terminal' | 'doc' | 'browser' | 'diff' | 'idle' | 'of
 const WALL_PX = 6 // thick cutaway wall band at 16 px/tile (design: 12 px @ 32)
 const CHAIR_PX = 10
 
-/** Each floor keeps its old zone motif: L1 terracotta checker, L2 woven bamboo, L3 navy plank. */
+/**
+ * Per-floor floor motifs (design §3.1) in the modern palette:
+ *  - L1 lobby: polished concrete slab, terrazzo flecks (deterministic per
+ *    tile, no Math.random), a dark entry mat inside the MASUK door
+ *  - L2 Tim Edu: light concrete slab, a soft zone rug under the 2×2 edu block,
+ *    a glass wall band along the north wall
+ *  - L3 Tim Dev: dark polished concrete, a steel cable tray and warm
+ *    ceiling-light strips across the slab
+ */
 function drawFloor(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   const f = FLOORS[floor]
-  for (let tz = 0; tz < f.d; tz++) {
-    for (let tx = 0; tx < f.w; tx++) {
-      if (floor === 1) {
-        const c = (tx + tz) % 2 === 0 ? ZONE_FLOOR.lobby.a : ZONE_FLOOR.lobby.b
-        ctx.fillStyle = c
-        ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
-      } else if (floor === 2) {
-        // woven bamboo: diagonal 2px lines, alternating direction per tile
-        ctx.fillStyle = ZONE_FLOOR.edu.bamboo
-        ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
-        ctx.fillStyle = ZONE_FLOOR.edu.line
-        const flip = (tx + tz) % 2 === 0
-        for (let k = 0; k < TILE; k += 4) {
-          if (flip) {
-            ctx.fillRect(tx * TILE + k, tz * TILE + TILE - k - 2, 2, 2)
-          } else {
-            ctx.fillRect(tx * TILE + k, tz * TILE + k, 2, 2)
-          }
-        }
-      } else {
-        ctx.fillStyle = ZONE_FLOOR.dev.plank
-        ctx.fillRect(tx * TILE, tz * TILE, TILE, TILE)
-        // plank seam every tile row + amber duct along the north wall
-        ctx.fillStyle = ZONE_FLOOR.dev.seam
-        ctx.fillRect(tx * TILE, (tz + 1) * TILE - 1, TILE, 1)
-        if (tz === 0) {
-          ctx.fillStyle = ZONE_FLOOR.dev.duct
-          ctx.fillRect(tx * TILE, 1, TILE, 2)
-        }
+  const toPx = (v: number) => Math.round((v + f.w / 2) * TILE)
+  const toPy = (v: number) => Math.round((v + f.d / 2) * TILE)
+  if (floor === 1) {
+    const m = FLOOR_MOTIF.lobby
+    ctx.fillStyle = m.slab
+    ctx.fillRect(0, 0, f.w * TILE, f.d * TILE)
+    // terrazzo flecks: a tiny integer hash per tile, 1–2 px chips
+    for (let tz = 0; tz < f.d; tz++) {
+      for (let tx = 0; tx < f.w; tx++) {
+        const hsh = (tx * 73856093) ^ (tz * 19349663)
+        const n = ((hsh % 5) + 5) % 5
+        if (n < 2) continue
+        ctx.fillStyle = n === 2 || n === 4 ? m.fleck : m.fleckLight
+        ctx.fillRect(tx * TILE + ((hsh >> 3) % 12), tz * TILE + ((hsh >> 7) % 12), n === 3 ? 2 : 1, 1)
       }
     }
+    // entry mat inside the MASUK door (x -2.2..2.2 at the south wall)
+    ctx.fillStyle = m.mat
+    ctx.fillRect(toPx(-1.9), toPy(9.1), Math.round(3.8 * TILE), Math.round(0.7 * TILE))
+    ctx.fillStyle = m.matEdge
+    ctx.fillRect(toPx(-1.9), toPy(9.1), Math.round(3.8 * TILE), 1)
+  } else if (floor === 2) {
+    const m = FLOOR_MOTIF.edu
+    ctx.fillStyle = m.slab
+    ctx.fillRect(0, 0, f.w * TILE, f.d * TILE)
+    // slab seams every 4 tiles
+    ctx.fillStyle = m.seam
+    for (let tz = 4; tz < f.d; tz += 4) ctx.fillRect(0, tz * TILE, f.w * TILE, 1)
+    for (let tx = 4; tx < f.w; tx += 4) ctx.fillRect(tx * TILE, 0, 1, f.d * TILE)
+    // glass wall band along the north wall
+    ctx.fillStyle = m.band
+    ctx.fillRect(0, 0, f.w * TILE, 3)
+    ctx.fillStyle = PALETTE.glass300
+    ctx.fillRect(0, 0, f.w * TILE, 1)
+    // soft zone rug under the 2×2 edu block (x ±1.7, z -1.6..2.9)
+    ctx.fillStyle = m.rug
+    ctx.fillRect(toPx(-1.7), toPy(-1.6), Math.round(3.4 * TILE), Math.round(4.5 * TILE))
+    ctx.fillStyle = m.rugEdge
+    ctx.fillRect(toPx(-1.7), toPy(-1.6), Math.round(3.4 * TILE), 1)
+    ctx.fillRect(toPx(-1.7), toPy(2.9) - 1, Math.round(3.4 * TILE), 1)
+  } else {
+    const m = FLOOR_MOTIF.dev
+    ctx.fillStyle = m.slab
+    ctx.fillRect(0, 0, f.w * TILE, f.d * TILE)
+    // slab seams every 3 tiles
+    ctx.fillStyle = m.seam
+    for (let tz = 3; tz < f.d; tz += 3) ctx.fillRect(0, tz * TILE, f.w * TILE, 1)
+    // steel cable tray along the north wall
+    ctx.fillStyle = m.tray
+    ctx.fillRect(0, 3, f.w * TILE, 4)
+    ctx.fillStyle = PALETTE.steel500
+    for (let tx = 2; tx < f.w; tx += 4) ctx.fillRect(tx * TILE, 3, 1, 4)
+    // ceiling-light strips across the slab (the pools sit under them)
+    for (const z of [-4.5, 0.5, 5.5]) {
+      const y = toPy(z)
+      ctx.fillStyle = m.lamp
+      ctx.fillRect(toPx(-9), y, Math.round(18 * TILE), 2)
+      ctx.fillStyle = m.tray
+      ctx.fillRect(toPx(-9), y - 1, Math.round(18 * TILE), 1)
+      ctx.fillRect(toPx(-9), y + 2, Math.round(18 * TILE), 1)
+    }
+  }
+}
+
+/**
+ * Ceiling-light pools and fixtures (design §3.1): warm-white lamps floating
+ * on the slab. Pools are pre-blended solid tones (no alpha); fixtures are
+ * small lamp bars with steel ends. Drawn before walls and furniture.
+ */
+function drawCeilingLights(ctx: CanvasRenderingContext2D, floor: FloorId): void {
+  const f = FLOORS[floor]
+  const m = floor === 1 ? FLOOR_MOTIF.lobby : floor === 2 ? FLOOR_MOTIF.edu : FLOOR_MOTIF.dev
+  const lamp = PALETTE.lamp
+  const pools: Array<[number, number]> =
+    floor === 1 ? [[-5.5, 0.5], [6.5, 5.5]] : floor === 2 ? [[0, 0.6], [-6.5, -5.2], [6.5, 5.2]] : [[-6, -4.5], [0, 0.5], [6, 5.5]]
+  for (const [px, pz] of pools) {
+    const x = Math.round((px - 3 + f.w / 2) * TILE)
+    const y = Math.round((pz - 1.6 + f.d / 2) * TILE)
+    const w = Math.round(6 * TILE)
+    const h = Math.round(3.2 * TILE)
+    // the pool: a lighter patch of slab
+    ctx.fillStyle = m.pool
+    ctx.fillRect(x, y, w, h)
+    // the fixture: a short warm-white bar with steel end caps
+    const fw = Math.round(2.4 * TILE)
+    const fx = x + Math.round((w - fw) / 2)
+    const fy = y + Math.round(h / 2) - 1
+    ctx.fillStyle = PALETTE.steel500
+    ctx.fillRect(fx - 2, fy, 2, 2)
+    ctx.fillRect(fx + fw, fy, 2, 2)
+    ctx.fillStyle = lamp
+    ctx.fillRect(fx, fy, fw, 2)
   }
 }
 
@@ -115,10 +184,31 @@ function drawWalls(ctx: CanvasRenderingContext2D, floor: FloorId): void {
       w = WALL_PX
       h = Math.abs(seg.to - seg.from) * TILE
     }
-    ctx.fillStyle = PALETTE.navy900
+    if (seg.kind === 'glass') {
+      // a glass pane: blue solid tones inside a steel frame (no alpha)
+      ctx.fillStyle = PALETTE.steel700
+      ctx.fillRect(x, y, w, h)
+      ctx.fillStyle = PALETTE.glass500
+      ctx.fillRect(x + 1, y + 1, w - 2, h - 2)
+      ctx.fillStyle = PALETTE.glass300
+      ctx.fillRect(x + 1, y + 1, w - 2, 1)
+      if (seg.axis === 'x') {
+        ctx.fillRect(x + 1, y + 1, 1, h - 2)
+        // steel mullions every 2 world units
+        ctx.fillStyle = PALETTE.steel700
+        for (let mx = x + 2 * TILE; mx < x + w - 2; mx += 2 * TILE) ctx.fillRect(Math.round(mx), y, 2, h)
+      } else {
+        ctx.fillRect(x + 1, y + 1, 1, h - 2)
+        ctx.fillStyle = PALETTE.steel700
+        for (let my = y + 2 * TILE; my < y + h - 2; my += 2 * TILE) ctx.fillRect(x, Math.round(my), w, 2)
+      }
+      continue
+    }
+    // solid concrete wall band
+    ctx.fillStyle = PALETTE.concrete900
     ctx.fillRect(x, y, w, h)
     // trim: light line on the two inner edges of the band
-    ctx.fillStyle = PALETTE.navy700
+    ctx.fillStyle = PALETTE.concrete600
     if (seg.axis === 'x') {
       ctx.fillRect(x, y, w, 1)
       ctx.fillRect(x, y + h - 1, w, 1)
@@ -133,6 +223,7 @@ function drawFurnitureLayer(ctx: CanvasRenderingContext2D, floor: FloorId): void
   const f = FLOORS[floor]
   for (const o of obstaclesOf(floor)) {
     if (o.id.startsWith('desk-')) continue // desks are drawn dynamically
+    if (o.id.startsWith('lift-')) continue // the lift shaft gets its own painter
     const x = (o.x1 + f.w / 2) * TILE
     const y = (o.z1 + f.d / 2) * TILE
     const w = Math.max(1, Math.round((o.x2 - o.x1) * TILE))
@@ -145,8 +236,9 @@ function drawFurnitureLayer(ctx: CanvasRenderingContext2D, floor: FloorId): void
 }
 
 /**
- * The lift: steel shaft with a door on its west face (M1 placeholder — the
- * modern re-skin and the opening animation arrive with the lift journey in M2/M3).
+ * The lift: a steel shaft with two door panels on its west face, a floor
+ * indicator plate above the doors, and — while an agent dwells — the panels
+ * slide apart (the dynamic overlay in drawLiftDoorsOpen).
  */
 function drawLift(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   const f = FLOORS[floor]
@@ -155,22 +247,36 @@ function drawLift(ctx: CanvasRenderingContext2D, floor: FloorId): void {
   const y = (shaft.z1 + f.d / 2) * TILE
   const w = Math.round((shaft.x2 - shaft.x1) * TILE)
   const h = Math.round((shaft.z2 - shaft.z1) * TILE)
-  ctx.fillStyle = PALETTE.navy700
+  // steel shaft body with a lighter face plate
+  ctx.fillStyle = PALETTE.steel700
   ctx.fillRect(x, y, w, h)
+  ctx.fillStyle = PALETTE.steel500
+  ctx.fillRect(x + 2, y + 2, w - 4, h - 4)
   // door frame on the west face, centred on the walk node (z = 0.6)
   const dz = Math.round((0.6 + f.d / 2) * TILE)
-  ctx.fillStyle = PALETTE.navy600
-  ctx.fillRect(x - 1, dz - 12, 3, 24)
-  ctx.fillStyle = PALETTE.muted
-  ctx.fillRect(x - 1, dz - 12, 1, 24)
+  ctx.fillStyle = PALETTE.concrete800
+  ctx.fillRect(x - 2, dz - 14, 4, 28)
   // closed steel door panels; the dynamic layer slides them apart while an
   // agent dwells on this floor (renderFrame → drawLiftDoorsOpen)
-  ctx.fillStyle = PALETTE.navy600
+  ctx.fillStyle = PALETTE.steel300
   ctx.fillRect(x, dz - 12, 7, 24)
   ctx.fillRect(x + 7, dz - 12, 7, 24)
-  ctx.fillStyle = PALETTE.muted
+  ctx.fillStyle = PALETTE.concrete800
   ctx.fillRect(x + 6, dz - 12, 1, 24)
   ctx.fillRect(x + 7, dz - 12, 1, 24)
+  // floor indicator above the doors: dark plate, amber number
+  const label = `L${floor}`
+  const iw = 14
+  const ix = x - 1
+  const iy = dz - 24
+  ctx.fillStyle = PALETTE.concrete900
+  ctx.fillRect(ix, iy, iw, 9)
+  ctx.fillStyle = PALETTE.steel500
+  ctx.fillRect(ix, iy, iw, 1)
+  ctx.fillRect(ix, iy + 8, iw, 1)
+  ctx.fillRect(ix, iy, 1, 9)
+  ctx.fillRect(ix + iw - 1, iy, 1, 9)
+  drawText(ctx, label, ix + 3, iy + 1, 1, PALETTE.amber)
 }
 
 /**
@@ -192,14 +298,17 @@ function drawLiftDoorsOpen(
   const x = Math.round(c.x * dpr)
   const y = Math.round((c.y - h / 2) * dpr)
   // dark car interior
-  ctx.fillStyle = PALETTE.navy900
+  ctx.fillStyle = PALETTE.concrete900
   ctx.fillRect(x, y, w, h)
+  // the warm ceiling light of the car
+  ctx.fillStyle = PALETTE.lamp
+  ctx.fillRect(x + 2 * dpr, y + Math.max(1, dpr), w - 4 * dpr, Math.max(1, dpr))
   // the two panels, slid to the sides of the opening
   const pw = Math.max(2, Math.round(6 * k))
-  ctx.fillStyle = PALETTE.navy600
+  ctx.fillStyle = PALETTE.steel300
   ctx.fillRect(x - pw, y, pw, h)
   ctx.fillRect(x + w, y, pw, h)
-  ctx.fillStyle = PALETTE.muted
+  ctx.fillStyle = PALETTE.steel500
   ctx.fillRect(x - 1, y, Math.max(1, dpr), h)
   ctx.fillRect(x + w, y, Math.max(1, dpr), h)
 }
@@ -213,6 +322,7 @@ export function createStaticLayer(floor: FloorId): HTMLCanvasElement {
   const ctx = canvas.getContext('2d')!
   ctx.imageSmoothingEnabled = false
   drawFloor(ctx, floor)
+  drawCeilingLights(ctx, floor)
   drawWalls(ctx, floor)
   drawFurnitureLayer(ctx, floor)
   drawLift(ctx, floor)
@@ -315,31 +425,31 @@ function bubblePlate(text: string, scale = 1): Sprite {
   const h = (PLATE_H + 3) * scale
   const key = `bubble:${text}:${scale}`
   return getSprite(key, w, h, (ctx) => {
-    ctx.fillStyle = PALETTE.sand200
+    ctx.fillStyle = PALETTE.concrete100
     ctx.fillRect(0, 0, w, h)
-    ctx.fillStyle = PALETTE.navy600
+    ctx.fillStyle = PALETTE.concrete600
     ctx.fillRect(0, 0, w, scale)
     ctx.fillRect(0, h - scale, w, scale)
     ctx.fillRect(0, 0, scale, h)
     ctx.fillRect(w - scale, 0, scale, h)
     // tail, pointing down at the head
-    ctx.fillStyle = PALETTE.sand200
+    ctx.fillStyle = PALETTE.concrete100
     ctx.fillRect(Math.floor(w / 2) - scale, h - scale, 3 * scale, 2 * scale)
-    ctx.fillStyle = PALETTE.navy600
+    ctx.fillStyle = PALETTE.concrete600
     ctx.fillRect(Math.floor(w / 2) - scale, h, 3 * scale, scale)
     drawText(ctx, text, PLATE_PAD * scale, (PLATE_PAD + 1) * scale, scale, SCREEN.bubbleInk)
   })
 }
 
-/** The zone plaque: navy plate, accent-free, always the same size on screen. */
+/** The zone plaque: concrete plate with an amber floor number, accent-free body. */
 function plaquePlate(text: string): Sprite {
   const w = plaqueRect(text, 0, 0).w
   const h = plaqueRect(text, 0, 0).h
   const key = `plaque:${text}`
   return getSprite(key, w, h, (ctx) => {
-    ctx.fillStyle = PALETTE.navy800
+    ctx.fillStyle = PALETTE.concrete800
     ctx.fillRect(0, 0, w, h)
-    ctx.fillStyle = PALETTE.navy600
+    ctx.fillStyle = PALETTE.concrete500
     ctx.fillRect(0, 0, w, 1)
     ctx.fillRect(0, h - 1, w, 1)
     ctx.fillRect(0, 0, 1, h)
@@ -470,12 +580,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     )
   }
 
-  // stone batur platform framing the active floor — a quiet exterior hint
+  // concrete plinth framing the active floor — a quiet exterior hint
   const { w: worldWpx, h: worldHpx } = worldSize(r.vp.floor)
   const tl = toCss(-FLOORS[r.vp.floor].w / 2, -FLOORS[r.vp.floor].d / 2)
-  ctx.fillStyle = '#1f3123'
+  ctx.fillStyle = PALETTE.concrete800
   ctx.fillRect(Math.round(tl.x - 4 * k) * dpr, Math.round(tl.y - 4 * k) * dpr, Math.round((worldWpx + 8) * k) * dpr, Math.round((worldHpx + 8) * k) * dpr)
-  ctx.fillStyle = PALETTE.terra600
+  ctx.fillStyle = PALETTE.concrete600
   ctx.fillRect(Math.round(tl.x - 2 * k) * dpr, Math.round(tl.y - 2 * k) * dpr, Math.round((worldWpx + 4) * k) * dpr, Math.round((worldHpx + 4) * k) * dpr)
 
   blitWorld({ canvas: r.static, w: worldWpx, h: worldHpx }, tl.x, tl.y)
@@ -515,7 +625,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     blitWorld(chair, sd.x - (CHAIR_PX / 2) * k, sd.y - (CHAIR_PX / 2) * k)
     if (pose.offline) {
       // dim the abandoned station — the second, colour-free cue is the empty chair
-      ctx.fillStyle = 'rgba(16, 24, 40, 0.35)'
+      ctx.fillStyle = 'rgba(10, 15, 22, 0.4)'
       ctx.fillRect(
         Math.round(dx.x * dpr),
         Math.round(dx.y * dpr),
@@ -591,8 +701,8 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
       pillPlate(
         shortName(meta.name),
         {
-          bg: offline ? PALETTE.navy800 : PALETTE.navy900,
-          border: offline ? PALETTE.navy600 : teamAccent(meta.team),
+          bg: offline ? PALETTE.concrete800 : PALETTE.concrete900,
+          border: offline ? PALETTE.concrete500 : teamAccent(meta.team),
           ink: offline ? PALETTE.muted : PALETTE.ink,
           dot,
           hollowDot: agent?.status === 'idle' && !offline,
@@ -607,9 +717,9 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
         pillPlate(
           chip,
           {
-            bg: pose.blocked ? STATUS.blocked : PALETTE.navy800,
-            border: pose.blocked ? PALETTE.navy900 : pose.magnifier ? STATUS.reviewing : PALETTE.navy600,
-            ink: pose.blocked ? EXTRAS.inkOnTerra : pose.magnifier ? STATUS.reviewing : PALETTE.inkDim,
+            bg: pose.blocked ? STATUS.blocked : PALETTE.concrete800,
+            border: pose.blocked ? PALETTE.concrete900 : pose.magnifier ? STATUS.reviewing : PALETTE.concrete500,
+            ink: pose.blocked ? EXTRAS.inkOnAmber : pose.magnifier ? STATUS.reviewing : PALETTE.inkDim,
           },
           scale,
         ),
@@ -618,13 +728,13 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
     if (counters) {
       sprites.set(
         `${meta.id}|counters`,
-        pillPlate(counters, { bg: PALETTE.navy900, border: PALETTE.navy700, ink: PALETTE.inkDim }, scale),
+        pillPlate(counters, { bg: PALETTE.concrete900, border: PALETTE.concrete700, ink: PALETTE.inkDim }, scale),
       )
     }
     if (offline && mode !== 'compact') {
       sprites.set(
         `${meta.id}|zzz`,
-        pillPlate('Z Z Z', { bg: PALETTE.navy800, border: PALETTE.muted, ink: PALETTE.muted }, scale),
+        pillPlate('Z Z Z', { bg: PALETTE.concrete800, border: PALETTE.muted, ink: PALETTE.muted }, scale),
       )
     }
     if (bubble) sprites.set(`${meta.id}|bubble`, bubblePlate(bubble, scale))
@@ -671,9 +781,9 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
 }
 
 function teamAccent(team: string): string {
-  if (team === 'dev') return '#82AAC8'
-  if (team === 'edu') return '#DEB860'
-  return '#D4805C'
+  if (team === 'dev') return TEAM.dev
+  if (team === 'edu') return TEAM.edu
+  return TEAM.lobby
 }
 
 function dotsFrame(t: number): string {

@@ -56,7 +56,8 @@ export function ProximityCard({
         <span>{agent.last_active ? `${relTime(agent.last_active, now)} lalu` : ''}</span>
       </p>
 
-      {agent.blocked ? <p className="card-blocked">{agent.blocked.reason}</p> : null}
+      {/* privacy: never show the raw blocked reason — a generic line + tool count only */}
+      {agent.blocked ? <p className="card-blocked">butuh izin · {agent.blocked.tools} alat</p> : null}
 
       <p className="card-desc">{meta.desc}</p>
 

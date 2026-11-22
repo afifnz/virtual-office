@@ -38,6 +38,8 @@ export interface WallSeg {
   from: number
   to: number
   h?: number
+  /** 'solid' (default) = concrete; 'glass' = a blue pane in a steel frame */
+  kind?: 'solid' | 'glass'
 }
 
 /** The outer shell + partitions, flat with a floor field. */
@@ -50,9 +52,9 @@ export const WALLS: WallSeg[] = [
   { floor: 1, axis: 'x', at: 10, from: -14, to: -2.2 },
   { floor: 1, axis: 'x', at: 10, from: 2.2, to: 14 },
   // meeting-room glass: z=-3.5 with a doorway at x 6.6..9.4, plus x=3.2 return
-  { floor: 1, axis: 'x', at: -3.5, from: 3.2, to: 6.6 },
-  { floor: 1, axis: 'x', at: -3.5, from: 9.4, to: 14 },
-  { floor: 1, axis: 'z', at: 3.2, from: -10, to: -3.5 },
+  { floor: 1, axis: 'x', at: -3.5, from: 3.2, to: 6.6, kind: 'glass' },
+  { floor: 1, axis: 'x', at: -3.5, from: 9.4, to: 14, kind: 'glass' },
+  { floor: 1, axis: 'z', at: 3.2, from: -10, to: -3.5, kind: 'glass' },
   // ---- L2 20x16: plain shell (bookshelf & whiteboard hug the north wall)
   { floor: 2, axis: 'x', at: -8, from: -10, to: 10 },
   { floor: 2, axis: 'z', at: -10, from: -8, to: 8 },

@@ -1,5 +1,8 @@
 # Kantor 2D Pixel-Art — Spec UI/UX
 
+> **Superseded by office-3-floors.md** — palet joglo/terakota dan sebagian
+> gaya di dokumen ini digantikan oleh `docs/design/office-3-floors.md` (M3).
+>
 > Pengganti scene 3D (three.js) di `frontend/src/components/Scene.tsx`.
 > Panel yang ada (Hud, Roster, Feed, TaskBoard, KPI, ProximityCard, DPad) **di-restyle**
 > ke gaya pixel — fungsi, data, dan teksnya tetap seperti sekarang.

@@ -2,20 +2,19 @@
  * Procedural sprites — every pixel is a fillRect, no external assets.
  *
  * `drawAgent` turns a `Look` (the same fields the 3D scene reads) into a chibi
- * at 12×16 px; desks, chairs, furniture (keyed by `lib/rooms.ts` OBSTACLES
- * ids), the orange cat and the comms envelope are all drawn the same way.
- * Sprites are cached per (look, pose, frame) in an offscreen canvas so the
- * render loop only blits.
+ * at 12×16 px; desks, chairs and furniture (keyed by `lib/rooms.ts` OBSTACLES
+ * ids) are all drawn the same way. Sprites are cached per (look, pose, frame)
+ * in an offscreen canvas so the render loop only blits.
  */
 import type { Look } from '../lib/agents'
 import type { PoseKind } from './anim'
 import { hashId } from '../lib/roster'
-import { PALETTE, SCREEN, EXTRAS, STATUS } from './palette'
+import { PALETTE, SCREEN, STATUS } from './palette'
 
 export const CHIBI_W = 12
 export const CHIBI_H = 16
 
-const OUTLINE = '#241812' // warm near-black for eyes, outlines, shoes
+const OUTLINE = '#1A2027' // cool near-black for eyes, outlines, shoes
 
 function px(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, c: string): void {
   ctx.fillStyle = c
@@ -173,8 +172,8 @@ export function drawAgent(ctx: CanvasRenderingContext2D, look: Look, pose: PoseK
 
   // pose extras in front of the torso
   if (pose === 'reading') {
-    px(ctx, tx0 + 1, ty + 1, 6, 3, PALETTE.sand200)
-    px(ctx, tx0 + 2, ty + 2, 4, 1, PALETTE.navy600)
+    px(ctx, tx0 + 1, ty + 1, 6, 3, PALETTE.concrete100)
+    px(ctx, tx0 + 2, ty + 2, 4, 1, PALETTE.concrete600)
   } else if (pose === 'typing') {
     const hy_ = ty + 3 - f2
     px(ctx, tx0 + 2, hy_, 2, 1, skin)
@@ -230,13 +229,13 @@ export function drawMonitor(
   // diff: red + green lines and a magnifier
   px(ctx, x + 1, y + 1, w - 2, 1, STATUS.danger)
   px(ctx, x + 1, y + 3, w - 2, 1, STATUS.ok)
-  px(ctx, x + w - 5, y + 1, 3, 3, PALETTE.navy600)
+  px(ctx, x + w - 5, y + 1, 3, 3, PALETTE.concrete600)
   px(ctx, x + w - 4, y + 2, 1, 1, SCREEN.green)
 }
 
 /**
- * A desk drawn into w×h: bright top surface, 1px highlight, dark front panel
- * and a monitor in the middle (design §3.2).
+ * A desk drawn into w×h: white concrete top, pale front panel, steel legs and
+ * a monitor in the middle (design §3.2).
  */
 export function drawDesk(
   ctx: CanvasRenderingContext2D,
@@ -246,35 +245,47 @@ export function drawDesk(
 ): void {
   const front = Math.max(3, Math.min(6, Math.round(h * 0.35)))
   const top = h - front
-  px(ctx, 0, 0, w, top, PALETTE.sand400)
-  px(ctx, 0, 0, w, 1, PALETTE.terra300)
-  px(ctx, 0, top, w, front, PALETTE.terra600)
+  // white concrete top with a pale edge highlight
+  px(ctx, 0, 0, w, top, PALETTE.concrete100)
+  px(ctx, 0, 0, w, 1, PALETTE.concrete200)
+  // pale front panel + steel kick
+  px(ctx, 0, top, w, front, PALETTE.concrete200)
+  px(ctx, 0, h - 1, w, 1, PALETTE.steel500)
+  // steel legs under the front corners
+  const leg = Math.max(1, Math.round(w * 0.08))
+  px(ctx, 1, top, leg, front, PALETTE.steel500)
+  px(ctx, w - 1 - leg, top, leg, front, PALETTE.steel500)
   // monitor, centred on the top surface
   const mw = Math.max(8, Math.min(16, Math.round(w * 0.5)))
   const mh = Math.max(6, Math.min(10, Math.round(top * 0.6)))
   const mx = Math.round((w - mw) / 2)
   const my = Math.max(1, Math.round((top - mh) / 2))
-  px(ctx, mx + Math.round((mw - 3) / 2), my + mh, 3, 1, PALETTE.navy600)
+  px(ctx, mx + Math.round((mw - 3) / 2), my + mh, 3, 1, PALETTE.steel700)
   drawMonitor(ctx, mx, my, mw, mh, mode)
 }
 
 /**
- * A chair drawn into s×s: back rest behind, seat below. `occupied = false`
- * draws the empty seat of an offline agent — a hollow navy frame instead of the
- * warm terracotta, so "nobody is here" reads without relying on colour alone.
+ * A chair drawn into s×s: graphite back rest behind, seat below.
+ * `occupied = false` draws the empty seat of an offline agent — a hollow
+ * graphite frame instead of a filled seat, so "nobody is here" reads without
+ * relying on colour alone.
  */
 export function drawChair(ctx: CanvasRenderingContext2D, s: number, occupied = true): void {
   const back = Math.max(3, Math.round(s * 0.45))
   if (!occupied) {
-    px(ctx, 0, 0, s, back, PALETTE.navy700)
-    px(ctx, 1, 1, s - 2, Math.max(1, back - 1), PALETTE.navy900)
-    px(ctx, 0, back, s, 2, PALETTE.navy600)
-    px(ctx, 0, s - 1, s, 1, PALETTE.navy700)
+    // hollow frame: outline only, the floor shows through the middle
+    px(ctx, 0, 0, s, 1, PALETTE.steel500)
+    px(ctx, 0, back - 1, s, 1, PALETTE.steel500)
+    px(ctx, 0, 0, 1, back, PALETTE.steel500)
+    px(ctx, s - 1, 0, 1, back, PALETTE.steel500)
+    px(ctx, 0, back, s, 2, PALETTE.steel700)
+    px(ctx, 0, s - 1, s, 1, PALETTE.steel500)
     return
   }
-  px(ctx, 0, 0, s, back, PALETTE.terra600)
-  px(ctx, 0, back, s, Math.max(2, Math.round(s * 0.3)), PALETTE.terra500)
-  px(ctx, 0, s - 1, s, 1, PALETTE.terra300)
+  px(ctx, 0, 0, s, back, PALETTE.steel700)
+  px(ctx, 0, 0, s, 1, PALETTE.steel500)
+  px(ctx, 0, back, s, Math.max(2, Math.round(s * 0.3)), PALETTE.steel500)
+  px(ctx, 0, s - 1, s, 1, PALETTE.steel300)
 }
 
 // ---------------------------------------------------------------- furniture
@@ -282,97 +293,127 @@ export function drawChair(ctx: CanvasRenderingContext2D, s: number, occupied = t
 /**
  * Decorative furniture by `lib/rooms.ts` OBSTACLES id, drawn into w×h px
  * (the renderer passes the footprint-derived size). Unknown ids get a generic
- * crate so nothing on the floor disappears.
+ * steel cabinet so nothing on the floor disappears.
  */
 export function drawFurniture(ctx: CanvasRenderingContext2D, id: string, w: number, h: number): void {
   switch (id) {
     case 'server':
-      px(ctx, 0, 0, w, h, PALETTE.navy900)
+      // steel rack with LED rows
+      px(ctx, 0, 0, w, h, PALETTE.steel700)
+      px(ctx, 0, 0, w, 1, PALETTE.steel500)
       for (let s = 0; s < 6; s++) {
-        px(ctx, 2, 2 + s * 4, w - 4, 2, PALETTE.navy700)
-        px(ctx, w - 4, 2 + s * 4, 2, 2, s % 2 === 0 ? STATUS.ok : STATUS.working)
+        const y = 2 + s * 4
+        if (y + 2 > h - 1) break
+        px(ctx, 2, y, w - 4, 2, PALETTE.steel500)
+        px(ctx, w - 4, y, 2, 2, s % 3 === 0 ? STATUS.ok : s % 3 === 1 ? STATUS.working : STATUS.idle)
       }
       return
     case 'meja-rapat':
     case 'rapat':
-      px(ctx, 0, 0, w, h, PALETTE.sand500)
-      px(ctx, 1, 1, w - 2, h - 2, PALETTE.sand400)
+    case 'meja-nook':
+    case 'standup':
+      // glass meeting / standup table: translucent-blue pane in solid tones
+      px(ctx, 0, 0, w, h, PALETTE.glass700)
+      px(ctx, 1, 1, w - 2, h - 2, PALETTE.glass500)
+      px(ctx, 1, 1, w - 2, 1, PALETTE.glass300)
+      px(ctx, 1, 1, 1, h - 2, PALETTE.glass300)
+      // steel legs at the corners
+      px(ctx, 1, h - 2, 2, 1, PALETTE.steel500)
+      px(ctx, w - 3, h - 2, 2, 1, PALETTE.steel500)
       return
     case 'meja-kopi':
     case 'sofa-table':
-      px(ctx, 0, Math.round(h / 2), w, Math.max(1, Math.round(h / 2)), PALETTE.sand500)
-      px(ctx, 1, 0, w - 2, Math.round(h / 2), PALETTE.sand300)
+      // low steel coffee table
+      px(ctx, 0, Math.round(h / 2), w, Math.max(1, Math.round(h / 2)), PALETTE.steel500)
+      px(ctx, 1, 0, w - 2, Math.round(h / 2), PALETTE.steel300)
       return
     case 'kopi':
-      px(ctx, 0, 0, w, h, PALETTE.terra500)
-      px(ctx, 0, 0, w, 2, PALETTE.terra300)
-      px(ctx, 1, 2, w - 2, h - 2, PALETTE.terra600)
+      // pantry / coffee counter: white concrete body, steel top, coffee machine
+      px(ctx, 0, 0, w, h, PALETTE.concrete100)
+      px(ctx, 0, 0, w, 2, PALETTE.steel300)
+      px(ctx, 0, h - 2, w, 2, PALETTE.steel500)
+      // espresso machine: dark body, steel group head, amber ready light
+      const mw = Math.max(4, Math.min(10, Math.round(w * 0.4)))
+      const mx = Math.max(1, Math.round((w - mw) / 2))
+      px(ctx, mx, 2, mw, Math.max(3, Math.round(h * 0.5)), PALETTE.concrete700)
+      px(ctx, mx + 1, 3, mw - 2, 1, PALETTE.steel300)
+      px(ctx, mx + Math.round(mw / 2) - 1, 5, 2, 2, PALETTE.steel500)
+      px(ctx, mx + mw - 2, 3, 1, 1, PALETTE.amber)
       return
     case 'sofa':
-      px(ctx, 0, 0, w, h, PALETTE.terra500)
-      px(ctx, 0, 0, w, 2, PALETTE.terra300)
-      px(ctx, 0, h - 3, w, 3, PALETTE.terra600)
-      return
-    case 'kucing':
-      drawCat(ctx, 0)
-      return
-    case 'berkas':
-    case 'materi':
-      for (let r = 0; r < 3; r++) px(ctx, 0, h - 3 - r, w, 3, r % 2 === 0 ? PALETTE.sand200 : PALETTE.sand300)
-      return
-    case 'gamelan':
-      px(ctx, 0, 0, w, h, PALETTE.terra600)
-      for (let k = 0; k < 3; k++) px(ctx, 1, 1 + k * 3, w - 2, 1, PALETTE.terra300)
+      // grey fabric lounge sofa with cushions
+      px(ctx, 0, 0, w, h, PALETTE.steel500)
+      px(ctx, 0, 0, w, 2, PALETTE.steel300)
+      px(ctx, 0, h - 3, w, 3, PALETTE.steel700)
+      // cushion seams
+      px(ctx, Math.round(w / 2), 2, 1, h - 5, PALETTE.steel700)
+      if (w >= 12) px(ctx, Math.round(w / 4), 2, 1, h - 5, PALETTE.steel700)
       return
     case 'papan-dev':
     case 'papan-edu':
-      px(ctx, 0, 0, w, h, PALETTE.navy800)
-      px(ctx, 1, 1, w - 2, h - 2, PALETTE.navy700)
-      for (let n = 0; n < 3; n++) {
-        px(ctx, 2 + n * 4, 2, 2, 2, n === 0 ? STATUS.working : n === 1 ? STATUS.idle : STATUS.danger)
+    case 'papan': {
+      // whiteboard / sprint board: white surface, steel frame, marker columns
+      px(ctx, 0, 0, w, h, PALETTE.steel700)
+      const bx = w >= 4 ? 1 : 0
+      const by = h >= 4 ? 1 : 0
+      px(ctx, bx, by, w - 2 * bx, h - 2 * by, PALETTE.concrete100)
+      if (w >= 8 && h >= 6) {
+        const cols = ['#6FB1E8', '#7FC08C', '#E8A33D']
+        for (let c = 0; c < 3; c++) {
+          const cx = bx + 1 + c * Math.max(2, Math.floor((w - 2 * bx - 2) / 3))
+          for (let r = 0; r < 2; r++) {
+            const ry = by + 1 + r * 2
+            if (ry < h - by - 1 && cx < w - bx - 2) px(ctx, cx, ry, Math.min(2, w - bx - 1 - cx), 1, cols[c]!)
+          }
+        }
       }
+      return
+    }
+    case 'printer':
+      // office printer: white body, paper tray, output slot, status LED
+      px(ctx, 0, 0, w, h, PALETTE.concrete100)
+      px(ctx, 0, 0, w, 1, PALETTE.concrete200)
+      px(ctx, 1, Math.max(1, Math.round(h * 0.3)), w - 2, 1, PALETTE.concrete700)
+      px(ctx, 2, Math.max(2, Math.round(h * 0.5)), w - 4, Math.max(1, Math.round(h * 0.2)), PALETTE.concrete200)
+      px(ctx, w - 3, 1, 1, 1, STATUS.ok)
       return
     case 'buku':
-      px(ctx, 0, 0, w, h, PALETTE.navy900)
+      // bookshelf: light case with book spines in muted tones
+      px(ctx, 0, 0, w, h, PALETTE.concrete200)
+      px(ctx, 0, 0, w, 1, PALETTE.concrete100)
+      px(ctx, 0, h - 1, w, 1, PALETTE.steel500)
       for (let r = 0; r < 3; r++) {
-        const c = r % 2 === 0 ? PALETTE.terra500 : PALETTE.terra600
-        px(ctx, 1, 1 + r * 3, w - 2, 2, c)
+        const y = 1 + r * 3
+        if (y + 2 > h - 1) break
+        px(ctx, 1, y, w - 2, 2, PALETTE.concrete700)
+        const spine = ['#6FB1E8', '#A98CE0', '#E8A33D', '#7FC08C'][r % 4]!
+        for (let b = 0; b < 3; b++) {
+          const bx = 2 + b * Math.max(2, Math.floor((w - 4) / 3))
+          if (bx < w - 3) px(ctx, bx, y, Math.min(1, w - 3 - bx) + 1, 2, spine)
+        }
       }
       return
-    case 'lesehan':
-      px(ctx, 0, 0, w, h, PALETTE.sand300)
-      px(ctx, 1, 1, w - 2, h - 2, PALETTE.sand200)
-      return
     case 'resepsionis':
-      px(ctx, 0, 0, w, h, PALETTE.terra500)
-      px(ctx, 0, 0, w, 2, PALETTE.terra300)
-      px(ctx, 1, h - 3, w - 2, 3, PALETTE.terra600)
+      // reception counter: white concrete monolith with a steel top
+      px(ctx, 0, 0, w, h, PALETTE.concrete100)
+      px(ctx, 0, 0, w, 2, PALETTE.steel300)
+      px(ctx, 0, h - 2, w, 1, PALETTE.steel500)
+      px(ctx, 0, h - 1, w, 1, PALETTE.steel700)
       return
     default:
-      // generic crate: navy box with a lighter top edge
-      px(ctx, 0, 0, w, h, PALETTE.navy700)
-      px(ctx, 0, 0, w, 1, PALETTE.navy600)
-      px(ctx, 1, 1, w - 2, h - 2, PALETTE.navy800)
+      // generic cabinet: steel box with a lighter top edge
+      px(ctx, 0, 0, w, h, PALETTE.steel500)
+      px(ctx, 0, 0, w, 1, PALETTE.steel300)
+      px(ctx, 1, 1, w - 2, h - 2, PALETTE.steel700)
   }
 }
 
 // ---------------------------------------------------------------- the extras
 
-/** The orange lobby cat, 12×8, two frames (tail flick). */
-export function drawCat(ctx: CanvasRenderingContext2D, frame: number): void {
-  const f = ((frame % 2) + 2) % 2
-  px(ctx, 1, 1, 8, 5, EXTRAS.cat)
-  px(ctx, 1, 1, 2, 1, OUTLINE) // ears hint
-  px(ctx, 7, 1, 2, 1, OUTLINE)
-  px(ctx, 3, 3, 1, 1, OUTLINE)
-  px(ctx, 6, 3, 1, 1, OUTLINE)
-  px(ctx, 9, 2 + f, 2, 1, EXTRAS.cat) // flicking tail
-}
-
 /** The comms envelope (paper airplane), 10×8. */
 export function drawEnvelope(ctx: CanvasRenderingContext2D): void {
-  px(ctx, 0, 4, 10, 2, PALETTE.sand200)
-  px(ctx, 4, 0, 2, 8, PALETTE.sand200)
-  px(ctx, 0, 4, 3, 1, PALETTE.navy600)
-  px(ctx, 7, 4, 3, 1, PALETTE.navy600)
+  px(ctx, 0, 4, 10, 2, PALETTE.concrete100)
+  px(ctx, 4, 0, 2, 8, PALETTE.concrete100)
+  px(ctx, 0, 4, 3, 1, PALETTE.steel500)
+  px(ctx, 7, 4, 3, 1, PALETTE.steel500)
 }

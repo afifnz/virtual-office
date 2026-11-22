@@ -266,9 +266,9 @@ export interface ZoneLabel {
  * wall band, in the gap between the wall-hugging furniture.
  */
 const ZONE_LABELS: ZoneLabel[] = [
-  { id: 'zone-lobby', floor: 1, text: 'LOBBY', x: -7, z: 9.55 },
-  { id: 'zone-edu', floor: 2, text: 'TIM EDU', x: 0, z: -7.5 },
-  { id: 'zone-dev', floor: 3, text: 'TIM DEV', x: 3.5, z: -8.55 },
+  { id: 'zone-lobby', floor: 1, text: 'L1 LOBBY', x: -7, z: 9.55 },
+  { id: 'zone-edu', floor: 2, text: 'L2 TIM EDU', x: 0, z: -7.5 },
+  { id: 'zone-dev', floor: 3, text: 'L3 TIM DEV', x: 3.5, z: -8.55 },
 ]
 
 /** The entrance plaque, kept from the old 3D door labels (L1 only). */
