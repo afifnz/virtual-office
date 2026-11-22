@@ -263,12 +263,14 @@ export interface ZoneLabel {
  * One plaque per zone per floor (design §3.1: "plakat nama zona ditempel di
  * dinding"). L1 carries the LOBBY plaque west of the MASUK gap on the front
  * band plus the entrance plaque; L2/L3 hang their team plaque on the north
- * wall band, in the gap between the wall-hugging furniture.
+ * wall, clear of the dark band itself and of the furniture that hugs that
+ * wall (the bookshelf/whiteboard on L2, the sprint board and rack on L3), so
+ * the plate never looks glued to the wall's dark edge.
  */
 const ZONE_LABELS: ZoneLabel[] = [
   { id: 'zone-lobby', floor: 1, text: 'L1 LOBBY', x: -7, z: 9.55 },
-  { id: 'zone-edu', floor: 2, text: 'L2 TIM EDU', x: 0, z: -7.5 },
-  { id: 'zone-dev', floor: 3, text: 'L3 TIM DEV', x: 3.5, z: -8.55 },
+  { id: 'zone-edu', floor: 2, text: 'L2 TIM EDU', x: 0, z: -6.8 },
+  { id: 'zone-dev', floor: 3, text: 'L3 TIM DEV', x: 3.5, z: -8.1 },
 ]
 
 /** The entrance plaque, kept from the old 3D door labels (L1 only). */
