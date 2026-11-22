@@ -528,18 +528,23 @@ export function drawStatusBoard(
   ctx.fillText(`${active}/${agents.length}`, s.x + 10, SIDE_BOARD_TOP + 30)
   ctx.restore()
 
-  // 8 status dots in one row, letter under each
-  const n = Math.max(1, agents.length)
-  const gap = (s.w - 20) / n
-  for (let i = 0; i < n; i++) {
-    const a = agents[i]!
-    const x = s.x + 10 + gap * i + gap / 2
-    const y = SIDE_BOARD_TOP + 66
-    ctx.fillStyle = THEME_STATUS[theme][(a.status as keyof typeof THEME_STATUS.day) ?? 'offline'] ?? t.muted
-    ctx.beginPath()
-    ctx.arc(x, y, 4.5, 0, Math.PI * 2)
-    ctx.fill()
-    label(ctx, a.name.slice(0, 1).toUpperCase(), x - 2.4, y + 8, 6.5, t.muted, 600, 0)
+  // one dot per agent on this floor. An empty list is legal — on L1 the only
+  // agent may be walking or riding the lift — so this loop never indexes past
+  // the end (that `agents[0]!` was the crash).
+  const n = agents.length
+  if (n > 0) {
+    const gap = (s.w - 20) / n
+    for (let i = 0; i < n; i++) {
+      const a = agents[i]
+      if (!a) continue
+      const x = s.x + 10 + gap * i + gap / 2
+      const y = SIDE_BOARD_TOP + 66
+      ctx.fillStyle = THEME_STATUS[theme][(a.status as keyof typeof THEME_STATUS.day) ?? 'offline'] ?? t.muted
+      ctx.beginPath()
+      ctx.arc(x, y, 4.5, 0, Math.PI * 2)
+      ctx.fill()
+      label(ctx, a.name.slice(0, 1).toUpperCase(), x - 2.4, y + 8, 6.5, t.muted, 600, 0)
+    }
   }
   // legend
   const counts = new Map<string, number>()

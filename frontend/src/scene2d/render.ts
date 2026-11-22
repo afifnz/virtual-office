@@ -319,10 +319,16 @@ function poseFrame(pose: Pose, t: number, still: boolean): number {
   }
 }
 
+/**
+ * The status key a station is painted with. `agent` is optional on purpose: a
+ * desk always exists, but its `/api/status` row may not (a status-only agent on
+ * another floor, a roster still loading, or an agent that is walking right now).
+ * Never dereference it without the guard — that crash killed the whole loop.
+ */
 function statusOf(agent: Agent | undefined, pose: Pose): keyof typeof THEME_STATUS.day {
   if (pose.offline || !agent) return 'offline'
   if (pose.blocked) return 'blocked'
-  return (agent.status as keyof typeof THEME_STATUS.day) ?? 'idle'
+  return (agent?.status as keyof typeof THEME_STATUS.day) ?? 'offline'
 }
 
 function screenOf(pose: Pose): 'terminal' | 'doc' | 'diff' | 'off' {
@@ -354,12 +360,13 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   const seats = sideSeats(r.metas.filter((m) => m.desk.floor === r.vp.floor))
 
   // ---- live board content + clock hands (the cached board is a blank shell)
+  // The board counts every agent *on this floor*, seated or walking: filtering
+  // to seats made an L1 frame read "0/0" the moment its only agent stepped into
+  // the lift. Presence is the floor's roster; the seat only decides the drawing.
   drawStatusBoard(
     ctx,
     theme,
-    onFloor
-      .filter((p) => p.seat)
-      .map((p) => ({ id: p.meta.id, name: p.meta.name, status: p.agent?.status ?? 'offline' })),
+    onFloor.map((p) => ({ id: p.meta.id, name: p.meta.name, status: p.agent?.status ?? 'offline' })),
   )
   drawClockHands(ctx, theme, r.hour, r.minute)
 
