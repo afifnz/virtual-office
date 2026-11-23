@@ -25,6 +25,12 @@ const (
 	CommsLimit      = 30
 	HourlyBuckets   = 24
 	wibOffset       = 7 * 3600 // the office clock runs on WIB
+
+	// StaleAfter is how long a working/reviewing verdict may stand without a
+	// new event before it is demoted to idle. A delegate_task call used to keep
+	// its parent "working" for the whole MidTurnWindow, so the header counted
+	// agents that had been silent for minutes. OFFICE_STALE_SECONDS overrides it.
+	StaleAfter = 180.0
 )
 
 // Reviewers report "reviewing" instead of "working" while active.
@@ -46,6 +52,13 @@ type Gateway struct {
 type Current struct {
 	Kind  string   `json:"kind"`
 	Tools []string `json:"tools"`
+}
+
+// ChildCount is how many subagent sessions a delegate_task call spawned: total
+// is every child seen for that call, running is the ones that have not ended.
+type ChildCount struct {
+	Total   int `json:"total"`
+	Running int `json:"running"`
 }
 
 // Blocked explains a blocked agent.
@@ -81,6 +94,17 @@ type Agent struct {
 	Task       *string  `json:"task"`
 	Source     string   `json:"source"`
 	Blocked    *Blocked `json:"blocked"`
+
+	// Additive truth fields (never remove the ones above).
+	// Stale marks a working/reviewing verdict that outlived StaleAfter with
+	// nothing new to justify it; the UI must not count it as working.
+	Stale bool `json:"stale"`
+	// LastKind is the kind of the newest event behind the verdict ("tool",
+	// "tool_result", "reply", ...), so a client can explain a stale status.
+	LastKind string `json:"last_kind,omitempty"`
+	// Children is set while the agent waits on the subagents its last
+	// delegate_task call spawned.
+	Children *ChildCount `json:"children,omitempty"`
 }
 
 // FeedEvent is one row of the activity feed.
@@ -153,6 +177,9 @@ type Dataset struct {
 	// Location is the timezone the office day boundary and hourly buckets
 	// follow (OFFICE_TZ). nil means the historical default, WIB.
 	Location *time.Location
+
+	// StaleAfter overrides derive.StaleAfter (seconds). 0 keeps the default.
+	StaleAfter float64
 
 	// Database health, straight from the loader.
 	DBsChecked int
@@ -337,9 +364,21 @@ func routedProfile(parent *sessionWork, idx int) string {
 
 func buildAgents(ds Dataset, works []*sessionWork, byID map[string]*sessionWork, now float64) []Agent {
 	dayStart, dayEnd := dayWindow(now, ds.Location)
+	staleAfter := ds.StaleAfter
+	if staleAfter <= 0 {
+		staleAfter = StaleAfter
+	}
 	byAgent := map[string][]*sessionWork{}
 	for _, w := range works {
 		byAgent[w.owner] = append(byAgent[w.owner], w)
+	}
+	// Children are indexed once for the whole dataset: a subagent session lives
+	// in its parent's DB, and several parents may share a profile.
+	childrenOf := map[string][]*sessionWork{}
+	for _, w := range works {
+		if w.sess.ParentID != "" {
+			childrenOf[w.sess.ParentID] = append(childrenOf[w.sess.ParentID], w)
+		}
 	}
 
 	ids := make([]string, 0, len(ds.ProfileNames)+len(ds.Profiles))
@@ -369,12 +408,12 @@ func buildAgents(ds Dataset, works []*sessionWork, byID map[string]*sessionWork,
 
 	agents := make([]Agent, 0, len(ids))
 	for _, id := range ids {
-		agents = append(agents, buildAgent(id, byAgent[id], now, dayStart, dayEnd))
+		agents = append(agents, buildAgent(id, byAgent[id], childrenOf, staleAfter, now, dayStart, dayEnd))
 	}
 	return agents
 }
 
-func buildAgent(id string, ws []*sessionWork, now, dayStart, dayEnd float64) Agent {
+func buildAgent(id string, ws []*sessionWork, childrenOf map[string][]*sessionWork, staleAfter, now, dayStart, dayEnd float64) Agent {
 	a := Agent{ID: id, Status: "offline", Today: Today{Hourly: make([]int, HourlyBuckets)}}
 	if len(ws) == 0 {
 		return a
@@ -439,9 +478,29 @@ func buildAgent(id string, ws []*sessionWork, now, dayStart, dayEnd float64) Age
 	if live != nil {
 		a.Current = &Current{Kind: eventKind(live, len(live.msgs)-1), Tools: nonNil(live.last.Tools)}
 		a.Source = live.sess.Source
+		a.LastKind = eventKind(live, len(live.msgs)-1)
 	}
 	if a.Current != nil && len(a.Current.Tools) == 0 {
 		a.Current.Tools = []string{}
+	}
+
+	// A delegate_task call at the end of the turn means the agent is waiting on
+	// its children, not working. The distinction is the whole point: a parent
+	// that spawned a running subagent looks identical to one that hung.
+	if a.Status == "working" || a.Status == "reviewing" {
+		if cc := waitingChildren(live, childrenOf); cc != nil {
+			a.Status = "waiting"
+			a.Children = cc
+		}
+	}
+
+	// Stale: the turn is still "open" but nothing has happened for StaleAfter
+	// and neither a reply nor a session end closed it. Demote to idle so the
+	// header stops counting a desk that went quiet. `stale` explains it.
+	if (a.Status == "working" || a.Status == "reviewing") &&
+		now-a.LastActive > staleAfter && !turnOver(ws, a.LastActive) {
+		a.Status = "idle"
+		a.Stale = true
 	}
 
 	// blocked from the newest session
@@ -449,6 +508,8 @@ func buildAgent(id string, ws []*sessionWork, now, dayStart, dayEnd float64) Age
 		if b := blockedOf(newest, now); b != nil {
 			a.Blocked = b
 			a.Status = "blocked"
+			a.Stale = false
+			a.Children = nil
 		}
 	}
 	// task pointer: newest running session
@@ -460,6 +521,51 @@ func buildAgent(id string, ws []*sessionWork, now, dayStart, dayEnd float64) Age
 		a.Status = "idle"
 	}
 	return a
+}
+
+// waitingChildren reports the subagents spawned by the last delegate_task call
+// of a session that are still running, or nil when the agent is not waiting.
+// A child counts when its parent is this session and it started at or after the
+// call — a child that predates the call is an earlier round, already answered.
+func waitingChildren(live *sessionWork, childrenOf map[string][]*sessionWork) *ChildCount {
+	if live == nil || !live.hasMsg || !hasTool(live.last.Tools, "delegate_task") {
+		return nil
+	}
+	callTS := live.last.TS
+	cc := ChildCount{}
+	for _, kid := range childrenOf[live.sess.ID] {
+		if kid.sess.Started < callTS {
+			continue
+		}
+		cc.Total++
+		if !kid.sess.HasEnded {
+			cc.Running++
+		}
+	}
+	if cc.Running == 0 {
+		return nil
+	}
+	return &cc
+}
+
+// turnOver reports whether a reply or a session end closed the turn at or after
+// since. A stale verdict must never override one: the desk is not "stuck", it
+// is done, and the active window is simply wider than the stale one.
+func turnOver(ws []*sessionWork, since float64) bool {
+	for _, w := range ws {
+		if w.sess.HasEnded && w.sess.Ended >= since {
+			return true
+		}
+		if w.hasMsg && w.last.TS >= since && isReply(w.last) {
+			return true
+		}
+	}
+	return false
+}
+
+// isReply is a final assistant answer: no tool calls, so the turn is closed.
+func isReply(m store.Msg) bool {
+	return m.Role == "assistant" && len(m.Tools) == 0
 }
 
 func newestSession(ws []*sessionWork) *sessionWork {

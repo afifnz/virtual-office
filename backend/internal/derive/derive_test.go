@@ -392,7 +392,7 @@ func TestJSONShapeMatchesLegacyContract(t *testing.T) {
 	if len(agents) == 0 {
 		t.Fatal("no agents")
 	}
-	for _, k := range []string{"id", "status", "last_active", "current", "today", "total", "task", "source", "blocked"} {
+	for _, k := range []string{"id", "status", "last_active", "current", "today", "total", "task", "source", "blocked", "stale"} {
 		if _, ok := agents[0][k]; !ok {
 			t.Fatalf("agent key %q missing", k)
 		}
@@ -452,6 +452,211 @@ func TestEmptyHomeStillReturnsValidSnapshot(t *testing.T) {
 	if strings.Contains(string(raw), "null}") && strings.Contains(string(raw), `"feed":null`) {
 		t.Fatalf("null array in payload: %s", raw)
 	}
+}
+
+// --- status truth: stale + waiting -------------------------------------------
+
+// snapshotStale builds a snapshot with an explicit stale threshold.
+func snapshotStale(t *testing.T, home *fixture.Home, stale int, profiles ...string) derive.Snapshot {
+	t.Helper()
+	cfg := config.Config{Home: home.Dir, Profiles: profiles, StaleSeconds: stale,
+		GatewayPath: home.Dir + "/gateway_state.json"}
+	l := loader.New(cfg, testLogger(t))
+	return l.Snapshot(time.Unix(int64(nowF), 0))
+}
+
+// A tool call cannot keep a desk "working" forever: after StaleAfter with no
+// reply and no session end, the verdict is an artefact and must read idle —
+// but the last activity is kept so the UI can explain it.
+func TestStaleWorkingFallsBackToIdle(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("dev")
+	w.Session(fixture.Session{ID: "s1", Profile: "dev", Source: "cli", Started: nowF - 900, Updated: nowF - 400})
+	w.Msg(fixture.Msg{Session: "s1", Role: "user", Content: "mulai", TS: nowF - 900})
+	w.Msg(fixture.Msg{Session: "s1", Role: "assistant", Calls: []map[string]any{
+		fixture.ToolCall("terminal", map[string]any{"command": "sleep 1000"}),
+	}, TS: nowF - 400})
+	w.Close()
+
+	a := agent(t, snapshot(t, home, "dev"), "dev")
+	if a.Status != "idle" {
+		t.Fatalf("status = %q, want idle after 400 s of silence (stale rule)", a.Status)
+	}
+	if !a.Stale {
+		t.Fatal("stale = false, want true so the UI can explain the demotion")
+	}
+	if a.LastKind != "tool" {
+		t.Fatalf("last_kind = %q, want tool", a.LastKind)
+	}
+	// the activity itself is still published: only the verdict changed
+	if a.Current == nil || len(a.Current.Tools) != 1 || a.Current.Tools[0] != "terminal" {
+		t.Fatalf("current = %+v, want the terminal call preserved", a.Current)
+	}
+	if a.LastActive != nowF-400 {
+		t.Fatalf("last_active = %v, want %v", a.LastActive, nowF-400)
+	}
+}
+
+func TestFreshWorkingIsNotStale(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("dev")
+	w.Session(fixture.Session{ID: "s1", Profile: "dev", Source: "cli", Started: nowF - 300, Updated: nowF - 60})
+	w.Msg(fixture.Msg{Session: "s1", Role: "user", Content: "mulai", TS: nowF - 300})
+	w.Msg(fixture.Msg{Session: "s1", Role: "tool", Tool: "terminal", Content: "ok", TS: nowF - 60})
+	w.Close()
+
+	a := agent(t, snapshot(t, home, "dev"), "dev")
+	if a.Status != "working" || a.Stale {
+		t.Fatalf("status=%q stale=%v, want working and fresh", a.Status, a.Stale)
+	}
+}
+
+// OFFICE_STALE_SECONDS is a real knob: the same quiet desk stays working when
+// the threshold is longer than the silence.
+func TestStaleThresholdOverride(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("dev")
+	w.Session(fixture.Session{ID: "s1", Profile: "dev", Source: "cli", Started: nowF - 900, Updated: nowF - 400})
+	w.Msg(fixture.Msg{Session: "s1", Role: "user", Content: "mulai", TS: nowF - 900})
+	w.Msg(fixture.Msg{Session: "s1", Role: "assistant", Calls: []map[string]any{
+		fixture.ToolCall("terminal", map[string]any{"command": "sleep 1000"}),
+	}, TS: nowF - 400})
+	w.Close()
+
+	a := agent(t, snapshotStale(t, home, 600, "dev"), "dev")
+	if a.Status != "working" || a.Stale {
+		t.Fatalf("status=%q stale=%v with 600 s threshold, want working", a.Status, a.Stale)
+	}
+}
+
+// Reviewers get the same treatment: "reviewing" is a verdict, not a fact.
+func TestStaleReviewingFallsBackToIdle(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("reviewer")
+	w.Session(fixture.Session{ID: "s1", Profile: "reviewer", Source: "subagent", Started: nowF - 900, Updated: nowF - 500})
+	w.Msg(fixture.Msg{Session: "s1", Role: "user", Content: "review", TS: nowF - 900})
+	w.Msg(fixture.Msg{Session: "s1", Role: "tool", Tool: "read_file", Content: "ok", TS: nowF - 500})
+	w.Close()
+
+	a := agent(t, snapshot(t, home, "reviewer"), "reviewer")
+	if a.Status != "idle" || !a.Stale {
+		t.Fatalf("status=%q stale=%v, want idle + stale", a.Status, a.Stale)
+	}
+}
+
+// delegateTask seeds a parent session whose last event is a delegate_task call
+// at callTS, in the given profile. targets are the task profiles, one per child.
+func delegateTask(w *fixture.Writer, profile, parentID string, callTS float64, targets ...string) {
+	if len(targets) == 0 {
+		targets = []string{"planner"}
+	}
+	tasks := make([]map[string]any, 0, len(targets))
+	for _, t := range targets {
+		tasks = append(tasks, map[string]any{"goal": "build", "profile": t})
+	}
+	w.Session(fixture.Session{ID: parentID, Profile: profile, Source: "cli", Started: callTS - 60, Updated: callTS})
+	w.Msg(fixture.Msg{Session: parentID, Role: "user", Content: "kerjakan", TS: callTS - 60})
+	w.Msg(fixture.Msg{Session: parentID, Role: "assistant", Calls: []map[string]any{
+		fixture.ToolCall("delegate_task", map[string]any{"tasks": tasks}),
+	}, TS: callTS})
+}
+
+// The parent of a running subagent is waiting, not working: same shape as the
+// trace where `dev` sat on `working` + delegate_task for seven minutes.
+func TestWaitingWhileChildRuns(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("dev")
+	delegateTask(w, "dev", "parent1", nowF-600)
+	w.Session(fixture.Session{ID: "child1", Profile: "dev", Source: "subagent", ParentID: "parent1",
+		ModelConfig: `{"_subagent_id":"sa-0-parent1"}`, Started: nowF - 590, Updated: nowF - 30})
+	w.Msg(fixture.Msg{Session: "child1", Role: "user", Content: "build", TS: nowF - 590})
+	w.Msg(fixture.Msg{Session: "child1", Role: "tool", Tool: "terminal", Content: "ok", TS: nowF - 30})
+	w.Close()
+
+	dev := agent(t, snapshot(t, home, "dev", "planner"), "dev")
+	if dev.Status != "waiting" {
+		t.Fatalf("dev status = %q, want waiting while its child runs", dev.Status)
+	}
+	if dev.Children == nil || dev.Children.Total != 1 || dev.Children.Running != 1 {
+		t.Fatalf("children = %+v, want {total:1 running:1}", dev.Children)
+	}
+	if dev.Stale {
+		t.Fatal("a waiting agent is not stale: the child is doing the work")
+	}
+	if dev.Current == nil || !contains(dev.Current.Tools, "delegate_task") {
+		t.Fatalf("current = %+v, want tools=[delegate_task]", dev.Current)
+	}
+	if dev.LastKind != "tool" {
+		t.Fatalf("last_kind = %q, want tool", dev.LastKind)
+	}
+}
+
+// Once the child answers and the parent records the result, it is working again
+// and the children block disappears.
+func TestWorkingAgainAfterChildResult(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("dev")
+	delegateTask(w, "dev", "parent1", nowF-600)
+	w.Session(fixture.Session{ID: "child1", Profile: "dev", Source: "subagent", ParentID: "parent1",
+		ModelConfig: `{"_subagent_id":"sa-0-parent1"}`, Started: nowF - 590, Updated: nowF - 120,
+		Ended: nowF - 120, EndReason: "ok"})
+	w.Msg(fixture.Msg{Session: "child1", Role: "user", Content: "build", TS: nowF - 590})
+	w.Msg(fixture.Msg{Session: "child1", Role: "assistant", Content: "selesai", TS: nowF - 120})
+	w.Msg(fixture.Msg{Session: "parent1", Role: "user", Content: "ASYNC DELEGATION complete", TS: nowF - 100})
+	w.Close()
+
+	dev := agent(t, snapshot(t, home, "dev", "planner"), "dev")
+	if dev.Status != "working" {
+		t.Fatalf("dev status = %q, want working after the result landed", dev.Status)
+	}
+	if dev.Children != nil {
+		t.Fatalf("children = %+v, want nil once no child is running", dev.Children)
+	}
+	if dev.Stale {
+		t.Fatal("dev is stale right after a result")
+	}
+}
+
+// total counts every child of the call, running only the live ones.
+func TestChildrenTotalCountsFinishedKids(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("dev")
+	delegateTask(w, "dev", "parent1", nowF-600, "planner", "coder")
+	w.Session(fixture.Session{ID: "child1", Profile: "dev", Source: "subagent", ParentID: "parent1",
+		ModelConfig: `{"_subagent_id":"sa-0-parent1"}`, Started: nowF - 590, Updated: nowF - 300,
+		Ended: nowF - 300, EndReason: "ok"})
+	w.Msg(fixture.Msg{Session: "child1", Role: "assistant", Content: "done", TS: nowF - 300})
+	w.Session(fixture.Session{ID: "child2", Profile: "dev", Source: "subagent", ParentID: "parent1",
+		ModelConfig: `{"_subagent_id":"sa-1-parent1"}`, Started: nowF - 280, Updated: nowF - 20})
+	w.Msg(fixture.Msg{Session: "child2", Role: "tool", Tool: "terminal", Content: "ok", TS: nowF - 20})
+	w.Close()
+
+	dev := agent(t, snapshot(t, home, "dev", "planner"), "dev")
+	if dev.Status != "waiting" {
+		t.Fatalf("dev status = %q, want waiting", dev.Status)
+	}
+	if dev.Children == nil || dev.Children.Total != 2 || dev.Children.Running != 1 {
+		t.Fatalf("children = %+v, want {total:2 running:1}", dev.Children)
+	}
+}
+
+// A desk with a database but no session at all is offline, never idle-by-luck.
+func TestAgentWithoutSessionsStaysOffline(t *testing.T) {
+	home := fixture.New(t)
+	home.Profile("edu").Close()
+	a := agent(t, snapshot(t, home, "edu"), "edu")
+	if a.Status != "offline" || a.Stale || a.Children != nil {
+		t.Fatalf("status=%q stale=%v children=%+v, want offline", a.Status, a.Stale, a.Children)
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func keys(m map[string]json.RawMessage) []string {
