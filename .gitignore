@@ -20,3 +20,6 @@ deploy/office-api
 _probe*.mjs
 verify/_probe.mjs
 verify/layout_*.py
+# python bytecode (mockup renderer imports tokens.py next to it)
+__pycache__/
+*.pyc

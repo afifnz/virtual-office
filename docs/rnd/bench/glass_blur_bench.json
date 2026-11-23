@@ -1,0 +1,194 @@
+{
+  "host": {
+    "python": "3.13.16",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.41",
+    "cpu_count": 2,
+    "pillow": "12.3.0",
+    "numpy": "2.5.5"
+  },
+  "note": "Software rasteriser (Pillow) reference numbers, single core. Browser Canvas2D blur runs on the GPU (Skia) and is faster in absolute terms; use these as an upper bound and as the ratio between strategies, which is what the design decision depends on.",
+  "panel_css": [
+    280,
+    640
+  ],
+  "scene_css": [
+    1000,
+    688
+  ],
+  "frame_css": [
+    1280,
+    800
+  ],
+  "rows": [
+    {
+      "dpr": 1,
+      "radius_css": 8,
+      "panel_px": 179200,
+      "a_blur_per_frame": {
+        "mean_ms": 7.831,
+        "p95_ms": 8.797,
+        "min_ms": 7.483
+      },
+      "b_cached_blur_composite": {
+        "mean_ms": 0.025,
+        "p95_ms": 0.032,
+        "min_ms": 0.023
+      },
+      "d_half_res_blur": {
+        "mean_ms": 4.602,
+        "p95_ms": 4.655,
+        "min_ms": 4.497
+      },
+      "e_scene_plus_panel": {
+        "mean_ms": 0.253,
+        "p95_ms": 0.358,
+        "min_ms": 0.162
+      }
+    },
+    {
+      "dpr": 1,
+      "radius_css": 12,
+      "panel_px": 179200,
+      "a_blur_per_frame": {
+        "mean_ms": 7.85,
+        "p95_ms": 9.277,
+        "min_ms": 7.507
+      },
+      "b_cached_blur_composite": {
+        "mean_ms": 0.026,
+        "p95_ms": 0.031,
+        "min_ms": 0.024
+      },
+      "d_half_res_blur": {
+        "mean_ms": 4.692,
+        "p95_ms": 4.926,
+        "min_ms": 4.533
+      },
+      "e_scene_plus_panel": {
+        "mean_ms": 0.235,
+        "p95_ms": 0.453,
+        "min_ms": 0.164
+      }
+    },
+    {
+      "dpr": 1,
+      "radius_css": 20,
+      "panel_px": 179200,
+      "a_blur_per_frame": {
+        "mean_ms": 7.738,
+        "p95_ms": 8.327,
+        "min_ms": 7.402
+      },
+      "b_cached_blur_composite": {
+        "mean_ms": 0.03,
+        "p95_ms": 0.038,
+        "min_ms": 0.025
+      },
+      "d_half_res_blur": {
+        "mean_ms": 4.686,
+        "p95_ms": 5.056,
+        "min_ms": 4.494
+      },
+      "e_scene_plus_panel": {
+        "mean_ms": 0.25,
+        "p95_ms": 0.356,
+        "min_ms": 0.168
+      }
+    },
+    {
+      "dpr": 1,
+      "radius_css": null,
+      "panel_px": 179200,
+      "c_fake_glass": {
+        "mean_ms": 1.436,
+        "p95_ms": 1.533,
+        "min_ms": 1.375
+      }
+    },
+    {
+      "dpr": 2,
+      "radius_css": 8,
+      "panel_px": 716800,
+      "a_blur_per_frame": {
+        "mean_ms": 31.618,
+        "p95_ms": 33.553,
+        "min_ms": 30.58
+      },
+      "b_cached_blur_composite": {
+        "mean_ms": 0.093,
+        "p95_ms": 0.102,
+        "min_ms": 0.086
+      },
+      "d_half_res_blur": {
+        "mean_ms": 19.307,
+        "p95_ms": 20.914,
+        "min_ms": 18.637
+      },
+      "e_scene_plus_panel": {
+        "mean_ms": 2.405,
+        "p95_ms": 2.659,
+        "min_ms": 2.195
+      }
+    },
+    {
+      "dpr": 2,
+      "radius_css": 12,
+      "panel_px": 716800,
+      "a_blur_per_frame": {
+        "mean_ms": 31.126,
+        "p95_ms": 32.835,
+        "min_ms": 30.261
+      },
+      "b_cached_blur_composite": {
+        "mean_ms": 0.104,
+        "p95_ms": 0.117,
+        "min_ms": 0.091
+      },
+      "d_half_res_blur": {
+        "mean_ms": 19.171,
+        "p95_ms": 20.475,
+        "min_ms": 18.414
+      },
+      "e_scene_plus_panel": {
+        "mean_ms": 2.353,
+        "p95_ms": 2.587,
+        "min_ms": 2.125
+      }
+    },
+    {
+      "dpr": 2,
+      "radius_css": 20,
+      "panel_px": 716800,
+      "a_blur_per_frame": {
+        "mean_ms": 32.278,
+        "p95_ms": 35.103,
+        "min_ms": 30.515
+      },
+      "b_cached_blur_composite": {
+        "mean_ms": 0.096,
+        "p95_ms": 0.108,
+        "min_ms": 0.087
+      },
+      "d_half_res_blur": {
+        "mean_ms": 19.524,
+        "p95_ms": 21.106,
+        "min_ms": 18.753
+      },
+      "e_scene_plus_panel": {
+        "mean_ms": 2.248,
+        "p95_ms": 2.45,
+        "min_ms": 2.107
+      }
+    },
+    {
+      "dpr": 2,
+      "radius_css": null,
+      "panel_px": 716800,
+      "c_fake_glass": {
+        "mean_ms": 6.662,
+        "p95_ms": 7.294,
+        "min_ms": 6.323
+      }
+    }
+  ]
+}
