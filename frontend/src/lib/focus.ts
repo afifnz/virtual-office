@@ -12,5 +12,5 @@ import { agentMeta } from './roster'
  */
 export function agentFocus(id: string): RigCommand['focus'] {
   const meta = agentMeta(id)
-  return { x: meta.desk.x, z: meta.desk.z, rot: meta.desk.rot, floor: meta.desk.floor }
+  return { id, x: meta.desk.x, z: meta.desk.z, rot: meta.desk.rot, floor: meta.desk.floor }
 }

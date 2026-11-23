@@ -13,34 +13,23 @@
    sans-serif for data and the 4/8/12/16 spacing scale. */
 
 :root {
-  /* core palette — cool grey-blue concrete ramp + one amber accent */
-  --bg: #0a0f16;
-  --concrete-900: #121924;
-  --concrete-800: #1a2330;
-  --concrete-700: #24303f;
-  --concrete-600: #2e3b4d;
-  --concrete-500: #3b4a5e;
-  --concrete-300: #8a97a9;
-  --concrete-200: #c7d2de;
-  --concrete-100: #e4eaf0;
-  --amber: #e8a33d;
-  --amber-light: #f0be6e;
-  --amber-deep: #9a6a1e;
-  --steel-500: #525f6d;
-  --px-ink: #edf1f6;
-
-  /* panel tokens */
-  --panel: #1a2330;
-  --panel-solid: #1a2330;
-  --panel-2: #24303f;
-  --ink: #edf1f6;
-  --ink-dim: #c3cdd9;
-  --muted: #8a97a9;
-  --line: #3b4a5e;
-  --brass: #e8a33d;
-  --on-brass: #191104;
-
-  /* status colours — identical to the canvas (design §2.2) */
+  /* ---- theme tokens: GELAP (Sky Lobby) is the default without a tz ---- */
+  --surface-glass: rgba(20, 27, 46, 0.62);
+  --surface-solid: #141b2e;
+  --surface-raised: #1b2334;
+  --page: #080c16;
+  --floor: #1a2230;
+  --wall: #121a29;
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-highlight: rgba(255, 255, 255, 0.3);
+  --glass-noise: 0.04;
+  --glass-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  --ink: #f2f5fa;
+  --ink-dim: #c6d0e0;
+  --muted: #93a0b6;
+  --accent: #f0b45a;
+  --accent-deep: #a9741f;
+  --accent-ink: #1a1206;
   --working: #f2b434;
   --reviewing: #a98ce0;
   --idle: #6fb1e8;
@@ -48,10 +37,43 @@
   --offline: #8b93a5;
   --ok: #7fc08c;
   --danger: #e2705f;
+  --glass-radius-sm: 12px;
+  --glass-radius-md: 14px;
+  --glass-radius-lg: 18px;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --label-size: 11px;
+  --label-weight: 600;
+  --label-track: 0.08em;
+  --meta-size: 9.5px;
+  --body-size: 12.5px;
+  --title-size: 15px;
+  --display-size: 22px;
 
-  --radius: 0px;
-  --shadow: 4px 4px 0 rgba(0, 0, 0, 0.45);
-  --bevel: inset 2px 2px 0 rgba(244, 233, 214, 0.06), inset -2px -2px 0 rgba(0, 0, 0, 0.35);
+  /* ---- legacy aliases: the panel components keep working untouched ---- */
+  --bg: var(--page);
+  --panel: var(--surface-solid);
+  --panel-solid: var(--surface-solid);
+  --panel-2: var(--surface-raised);
+  --line: var(--glass-border);
+  --concrete-900: var(--page);
+  --concrete-800: var(--surface-solid);
+  --concrete-700: var(--surface-raised);
+  --concrete-600: var(--wall);
+  --concrete-500: var(--muted);
+  --concrete-300: var(--muted);
+  --concrete-200: var(--ink-dim);
+  --concrete-100: var(--ink);
+  --amber: var(--accent);
+  --amber-light: var(--accent);
+  --amber-deep: var(--accent-deep);
+  --steel-500: var(--muted);
+  --px-ink: var(--ink);
+  --brass: var(--accent);
+  --on-brass: var(--accent-ink);
+
+  --radius: var(--glass-radius-sm);
+  --shadow: var(--glass-shadow);
+  --bevel: none;
 
   --hud-h: 56px;
   --toolbar-h: 56px;
@@ -62,6 +84,36 @@
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
   color-scheme: dark;
+}
+
+/* ---- theme tokens: TERANG (Daylight Atrium), 06:00–18:00 office time ---- */
+:root[data-theme='day'] {
+  --surface-glass: rgba(255, 255, 255, 0.66);
+  --surface-solid: #f7fafd;
+  --surface-raised: #ffffff;
+  --page: #eef3f8;
+  --floor: #e3eaf2;
+  --wall: #dde6f0;
+  --glass-border: rgba(15, 36, 64, 0.2);
+  --glass-highlight: rgba(255, 255, 255, 0.85);
+  --glass-noise: 0.04;
+  --glass-shadow: 0 18px 40px rgba(15, 36, 64, 0.1);
+  --ink: #16202e;
+  --ink-dim: #41506a;
+  --muted: #556377;
+  --accent: #1d4ed8;
+  --accent-deep: #1d4ed8;
+  --accent-ink: #ffffff;
+  --working: #8a5406;
+  --reviewing: #6d28d9;
+  --idle: #1d4ed8;
+  --blocked: #b33a12;
+  --offline: #556073;
+  --ok: #116b33;
+  --danger: #b91c1c;
+  --body-size: 13px;
+  --label-weight: 500;
+  color-scheme: light;
 }
 
 * {
@@ -1743,3 +1795,616 @@ ul {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ==========================================================================
+   GLASS THEME LAYER (M1) — tokens above, surfaces here.
+   No backdrop-filter on anything that covers the animated canvas: glass is an
+   alpha fill + a 1 px inner highlight + a very light noise, so the compositor
+   never re-blurs the scene every frame (design §5.3).
+   ========================================================================== */
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--body-size);
+}
+
+.canvas-wrap {
+  background: var(--page);
+  border: 0;
+}
+
+/* the scene is vector now: never let the browser nearest-scale it */
+.scene2d-canvas {
+  image-rendering: auto;
+}
+
+.hud,
+.toolbar,
+.mobile-bar {
+  background: var(--surface-solid);
+  border-color: var(--glass-border);
+  border-width: 1px;
+}
+
+.hud {
+  box-shadow: 0 1px 0 var(--glass-highlight) inset;
+}
+
+.brand-mark {
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 2px var(--surface-solid), 0 4px 10px rgba(0, 0, 0, 0.16);
+}
+
+.floor-tabs,
+.zoom-ctrl {
+  background-color: var(--surface-glass);
+  background-image: radial-gradient(var(--glass-border) 0.5px, transparent 0.6px);
+  background-size: 3px 3px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-md);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+
+.floor-tab {
+  border-radius: 10px;
+  color: var(--ink-dim);
+  letter-spacing: 0.06em;
+}
+
+.floor-tab:hover {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.floor-tab.is-active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+.floor-tab.is-active .floor-tab-id,
+.floor-tab.is-active .floor-tab-meta {
+  color: var(--accent-ink);
+}
+
+.zoom-ctrl button {
+  background: transparent;
+  border-radius: 9px;
+  color: var(--ink-dim);
+}
+
+.zoom-ctrl button:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.zoom-ctrl span {
+  color: var(--ink);
+}
+
+.roster,
+.feed {
+  background-color: var(--surface-glass);
+  background-image: radial-gradient(var(--glass-border) 0.5px, transparent 0.6px);
+  background-size: 3px 3px;
+  border: 1px solid var(--glass-border);
+  border-right: 0;
+  border-bottom: 0;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+  border-radius: var(--glass-radius-md) 0 0 0;
+}
+
+.taskboard,
+.kpi,
+.card,
+.prox-chip,
+.boot {
+  background: var(--surface-solid);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-md);
+  box-shadow: var(--glass-shadow);
+}
+
+.panel-head {
+  background: transparent;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.panel-head h2 {
+  font-size: var(--label-size);
+  letter-spacing: var(--label-track);
+  font-weight: var(--label-weight);
+  color: var(--ink);
+}
+
+.icon-btn,
+.filter,
+.ghost-btn,
+.hud-caret,
+.dpad-btn,
+.tabs,
+.tabs button,
+.mobile-bar button {
+  border-radius: 10px;
+  border-width: 1px;
+}
+
+.icon-btn {
+  background: var(--surface-raised);
+  border-color: var(--glass-border);
+  color: var(--ink-dim);
+}
+
+.icon-btn:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.icon-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.icon-btn.is-active .btn-label {
+  color: var(--accent-ink);
+}
+
+.roster-row {
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.roster-row:hover {
+  background: var(--surface-raised);
+  border-color: var(--glass-border);
+}
+
+.roster-name strong {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.roster-name small {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.roster-meta em {
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.team-toggle:hover {
+  background: var(--surface-raised);
+  border-radius: 10px;
+}
+
+.tabs {
+  background: transparent;
+  border: 0;
+}
+
+.tabs button {
+  border: 0;
+  border-radius: 8px;
+  letter-spacing: 0.06em;
+}
+
+.tabs button.is-active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.feed-row,
+.comm-row {
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.feed-rail {
+  width: 2px;
+  border-radius: 2px;
+}
+
+.task-card,
+.column,
+.kpi-num {
+  background: var(--surface-raised);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+}
+
+.task-blocked,
+.card-blocked {
+  border-radius: 8px;
+}
+
+.card {
+  border-left-width: 4px;
+  border-radius: var(--glass-radius-md);
+}
+
+.stale {
+  background: var(--blocked);
+  color: var(--accent-ink);
+  border-top: 1px solid var(--accent-deep);
+}
+
+.hint,
+.scene-loading {
+  background: var(--surface-solid);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+}
+
+/* ---------- status: colour + shape + text (WCAG 1.4.1) ---------- */
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--offline);
+  position: relative;
+}
+
+.dot.working {
+  background: var(--working);
+}
+
+.dot.reviewing {
+  background: var(--reviewing);
+  box-shadow: inset 0 0 0 2px var(--surface-solid);
+}
+
+.dot.idle {
+  background: transparent;
+  border: 1.5px solid var(--idle);
+}
+
+.dot.blocked {
+  background: var(--blocked);
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.dot.offline {
+  background: transparent;
+  border: 1.5px solid var(--offline);
+  border-radius: 1px;
+}
+
+.dot.ok {
+  background: var(--ok);
+}
+
+.dot.danger {
+  background: var(--danger);
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.dot.blocked,
+.dot.reviewing {
+  animation: none;
+}
+
+/* ---------- theme control (HUD) ---------- */
+
+.theme-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.theme-ctrl button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.theme-ctrl button:hover {
+  color: var(--ink);
+}
+
+.theme-ctrl button.is-active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.theme-ctrl .theme-glyph {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* ---------- accessibility fallbacks (design §10) ---------- */
+
+@media (prefers-reduced-transparency: reduce) {
+  .roster,
+  .feed,
+  .floor-tabs,
+  .zoom-ctrl {
+    background-color: var(--surface-solid);
+    background-image: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --glass-border: rgba(255, 255, 255, 0.4);
+    --muted: var(--ink-dim);
+  }
+  :root[data-theme='day'] {
+    --glass-border: rgba(15, 36, 64, 0.4);
+    --muted: var(--ink-dim);
+  }
+}
+
+:root[data-contrast='high'] {
+  --glass-border: rgba(255, 255, 255, 0.4);
+  --muted: var(--ink-dim);
+}
+
+:root[data-contrast='high'][data-theme='day'] {
+  --glass-border: rgba(15, 36, 64, 0.4);
+  --muted: var(--ink-dim);
+}
+
+.theme-state {
+  color: var(--muted);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .theme-ctrl .theme-word {
+    display: none;
+  }
+  .theme-ctrl button {
+    padding: 3px 7px;
+  }
+  .theme-state {
+    display: none;
+  }
+}
+
+/* ---------- floor tabs in the HUD row (M3) ----------
+   The tabs moved out of the canvas so they never cover the window band. */
+.floor-tabs.in-hud {
+  position: static;
+  z-index: auto;
+  top: auto;
+  left: auto;
+  flex: 0 1 auto;
+  padding: 2px;
+  gap: 2px;
+  background: var(--surface-raised);
+  background-image: none;
+  box-shadow: none;
+  border-radius: 10px;
+}
+
+.floor-tabs.in-hud .floor-tab {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.floor-tabs.in-hud .floor-tab-name {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.floor-tabs.in-hud .floor-tab-meta {
+  gap: 4px;
+}
+
+.floor-tabs.in-hud .floor-tab-stat .dot {
+  width: 5px;
+  height: 5px;
+}
+
+@media (max-width: 760px) {
+  .floor-tabs.in-hud {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+  .floor-tabs.in-hud .floor-tab {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* working: the one pulsing dot, 2.4 s (design §9) */
+.dot.working {
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.working {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   M4 — PHONE CANVAS (≤760 px)
+
+   The stage is 1000×688 design px and a 390×692 phone canvas FITS ALL OF IT:
+   0.39 CSS px per design px, i.e. 390×268 CSS px (an avatar is 58.5 px — the
+   R&D mockup). The default zoom is therefore 0.78 (2 = the 150 px/unit
+   camera), every desk and nameplate on the floor is visible, and panning only
+   becomes possible once the user zooms in. Three consequences drive everything
+   below:
+
+     · the whole sheet is on screen at the fit, so nothing can be cut by the
+       screen edge. The painter still keeps the compact wall (plaque + status
+       board + clock) — six cards would render 8 px labels at 3 px — with an
+       8 CSS px margin, and clamps nameplates to a 4 CSS px margin;
+     · the stage is 268 px tall in the middle of a 692 px canvas: ~212 px of
+       empty band above and below, which is where the zoom control and the pad
+       belong — never on top of a desk;
+     · the D-pad is rendered only while the stage is wider than the canvas
+       (`App` hides it at the fit), so it cannot cover the front row.
+
+   `verify/visual_check.ts` §11 and `verify/render_check.ts` §6 parse the
+   `--m-*` values below and assert all of it at 390×692. Change the numbers,
+   keep the gate honest.
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  :root {
+    /* the reference phone the gate measures (Chromium 390×844 minus HUD/bar) */
+    --m-canvas-w: 390px;
+    --m-canvas-h: 692px;
+    --m-app-h: 844px;
+    --m-hud: 96px;
+    --m-toolbar: 56px;
+    /* canvas px the painter keeps clear at the bottom for the pad */
+    --m-ctrl-band: 120px;
+
+    /* zoom control: top-right, in the band above the stage */
+    --m-zoom-top: 8px;
+    --m-zoom-right: 8px;
+    --m-zoom-w: 128px;
+    --m-zoom-h: 42px;
+
+    /* D-pad: bottom-left, in the band below the stage */
+    --m-cell: 48px;
+    --m-pad-left: 12px;
+    --m-pad-bottom: 12px;
+    --m-pad-w: 156px; /* 3 × 48 + 2 × 6 */
+    --m-pad-h: 102px; /* 2 × 48 + 6 */
+
+    /* agent chip: top-left, clear of the zoom control */
+    --m-chip-top: 8px;
+    --m-chip-left: 12px;
+    --m-chip-h: 44px;
+    --m-chip-w: 238px;
+  }
+
+  .zoom-ctrl {
+    top: var(--m-zoom-top);
+    right: calc(var(--m-zoom-right) + var(--safe-r));
+    bottom: auto;
+  }
+
+  /* no --safe-b here on purpose: the pad already sits 12 px above the canvas,
+     i.e. 68 px above the screen edge — far clear of the home indicator — and a
+     pad that moved with the inset would need a larger reserved band than the
+     painter keeps. */
+  .dpad {
+    left: calc(var(--m-pad-left) + var(--safe-l));
+    bottom: calc(var(--m-toolbar) + var(--m-pad-bottom));
+    grid-template-columns: repeat(3, var(--m-cell));
+    grid-template-rows: repeat(2, var(--m-cell));
+  }
+
+  .dpad-btn {
+    width: var(--m-cell);
+    height: var(--m-cell);
+    font-size: 15px;
+  }
+
+  /* the chip is a toast, not a card: it sits above the stage instead of on the
+     front-row desks it used to cover. It is positioned against `.app`, so the
+     HUD height is added back to land it at the top of the canvas. */
+  .prox-chip {
+    top: calc(var(--m-hud) + var(--m-chip-top));
+    bottom: auto;
+    left: calc(var(--m-chip-left) + var(--safe-l));
+    max-width: var(--m-chip-w);
+    min-height: var(--m-chip-h);
+  }
+
+  /* --- header: one row of floors, one row of numbers (no dot parades) --- */
+  .hud-row {
+    min-height: 40px;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .hud-caret {
+    order: 3;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .floor-tabs.in-hud {
+    order: 2;
+    flex: 1 1 auto;
+    justify-content: flex-start;
+  }
+
+  .floor-tabs.in-hud .floor-tab {
+    flex: 0 1 auto;
+    justify-content: center;
+    min-height: 40px;
+    padding: 4px 9px;
+    gap: 5px;
+  }
+
+  /* L1/L2/L3 + how many agents sit there; the per-floor dot parade is gone */
+  .floor-tabs.in-hud .floor-tab-name,
+  .floor-tabs.in-hud .floor-tab-stat {
+    display: none;
+  }
+
+  .floor-tabs.in-hud .floor-tab-meta {
+    font-size: 11px;
+  }
+
+  .hud-summary {
+    order: 4;
+    flex: 1 1 auto;
+    margin: 0;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .hud-summary b {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .theme-ctrl {
+    order: 5;
+  }
+
+  .hud-detail {
+    order: 9;
+  }
+}
+

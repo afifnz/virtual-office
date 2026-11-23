@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Scene } from './components/Scene'
 import type { MoveIntent, RigCommand } from './lib/view'
 import { Hud } from './components/Hud'
-import { FloorTabs } from './components/FloorTabs'
 import { Roster } from './components/Roster'
 import { Feed, type FeedTab } from './components/Feed'
 import { TaskBoard } from './components/TaskBoard'
@@ -13,9 +12,19 @@ import { useStatus } from './hooks/useStatus'
 import { useIsMobile, useIsTouch } from './hooks/useViewport'
 import { resolveAgentId } from './lib/agents'
 import { agentFocus } from './lib/focus'
-import { agentMeta } from './lib/roster'
+import { agentMeta, officeTZ } from './lib/roster'
 import { SPOT_FLOOR } from './lib/view'
 import type { FloorId } from './lib/rooms'
+import {
+  applyTheme,
+  effectiveOverride,
+  parseThemeParam,
+  prefersDark,
+  readStoredOverride,
+  resolveTheme,
+  writeStoredOverride,
+  type ThemeOverride,
+} from './lib/theme'
 
 /** `?floor=1|2|3` — the highest-priority deep link; absent/invalid → null. */
 function queryFloor(): FloorId | null {
@@ -33,7 +42,7 @@ function writeFloorToUrl(floor: FloorId): void {
 }
 
 export default function App() {
-  const { data, error, stale } = useStatus()
+  const { data, error, stale, lastOk } = useStatus()
   const mobile = useIsMobile()
   const touch = useIsTouch()
 
@@ -56,7 +65,26 @@ export default function App() {
   const [nearId, setNearId] = useState<string | null>(null)
   const [pickedId, setPickedId] = useState<string | null>(null)
   const [chipVisible, setChipVisible] = useState(true)
+  // the phone shows the whole floor by default, so there is nothing to pan to
+  // until the user zooms in — the pad appears only then (never over a desk)
+  const [canPan, setCanPan] = useState(false)
   const moveIntent = useRef<MoveIntent>({ x: 0, z: 0 })
+
+  // theme: stored override → ?theme= → the office clock (never the device clock)
+  const [themeOverride, setThemeOverride] = useState<ThemeOverride | null>(() =>
+    effectiveOverride(readStoredOverride(), parseThemeParam(new URLSearchParams(window.location.search).get('theme'))),
+  )
+  const theme = useMemo(
+    () => resolveTheme(lastOk ? data?.now ?? null : null, officeTZ(), themeOverride, prefersDark()),
+    [data?.now, lastOk, themeOverride],
+  )
+  useEffect(() => {
+    applyTheme(theme.mode, theme.source)
+  }, [theme])
+  const chooseTheme = useCallback((value: ThemeOverride) => {
+    setThemeOverride(value === 'auto' ? null : value)
+    writeStoredOverride(value)
+  }, [])
 
   const now = data?.now ?? Date.now() / 1000
   const agentById = useMemo(() => {
@@ -148,7 +176,6 @@ export default function App() {
       }`}
     >
       <div className="canvas-wrap">
-        <FloorTabs floor={command.floor ?? 1} status={data} onFloor={goFloor} />
         <Scene
           status={data}
           command={command}
@@ -156,6 +183,8 @@ export default function App() {
           onNear={setNearId}
           onMove={onMove}
           onPick={onPick}
+          onPan={setCanPan}
+          theme={theme.mode}
           dpr={mobile ? [1, 1.5] : [1, 1.8]}
         />
       </div>
@@ -176,6 +205,12 @@ export default function App() {
         expanded={hudOpen}
         onToggleExpanded={() => setHudOpen((v) => !v)}
         stale={stale}
+        floor={command.floor ?? 1}
+        onFloor={goFloor}
+        theme={theme.mode}
+        themeOverride={themeOverride}
+        themeSource={theme.source}
+        onTheme={chooseTheme}
       />
 
       {rosterOpen ? (
@@ -216,10 +251,12 @@ export default function App() {
       ) : null}
 
       {/* the sheet and the taskboard are modal: the pad and bar step aside so
-          nothing ever sits on top of the movement controls */}
+          nothing ever sits on top of the movement controls. The pad itself is
+          only there while panning can do something (the phone default fits the
+          whole floor). */}
       {mobile && !feedOpen && !taskOpen && !kpiOpen ? (
         <>
-          <DPad intent={moveIntent} />
+          {canPan ? <DPad intent={moveIntent} /> : null}
           <nav className="mobile-bar" aria-label="Panel">
             <button
               type="button"

@@ -17,6 +17,8 @@ interface FloorTabsProps {
   floor: FloorId
   status: StatusPayload | null
   onFloor: (floor: FloorId) => void
+  /** 'overlay' floats above the canvas; 'hud' sits in the HUD row */
+  variant?: 'overlay' | 'hud'
 }
 
 /** The three statuses worth scanning on a foreign floor (same dots as the HUD legend). */
@@ -26,7 +28,7 @@ const SUMMARY: Array<{ key: string; label: string }> = [
   { key: 'blocked', label: 'terblokir' },
 ]
 
-export function FloorTabs({ floor, status, onFloor }: FloorTabsProps) {
+export function FloorTabs({ floor, status, onFloor, variant = 'overlay' }: FloorTabsProps) {
   const floorOf = new Map(rosterAgents().map((m) => [m.id, m.desk.floor]))
   const agentsByFloor: Record<FloorId, StatusPayload['agents']> = { 1: [], 2: [], 3: [] }
   for (const a of status?.agents ?? []) {
@@ -47,7 +49,7 @@ export function FloorTabs({ floor, status, onFloor }: FloorTabsProps) {
   }, [onFloor])
 
   return (
-    <nav className="floor-tabs" aria-label="Lantai">
+    <nav className={`floor-tabs ${variant === 'hud' ? 'in-hud' : ''}`} aria-label="Lantai">
       {FLOOR_IDS.map((f) => {
         const agents = agentsByFloor[f]
         const counts = new Map<string, number>()

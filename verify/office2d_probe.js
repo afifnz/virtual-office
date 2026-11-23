@@ -10,7 +10,7 @@
  *   1. serve a build:  cd frontend && npm run build && npm run preview
  *      (preview proxies /api to the Go API on 127.0.0.1:8131; or use
  *       `npm run dev` on 127.0.0.1:5173)
- *   2. open  http://127.0.0.1:4173/?still=1  (desktop 1280x800)
+ *   2. open  http://127.0.0.1:4173/?still=1&theme=day&floor=3  (desktop 1280x800)
  *   3. DevTools → Console → paste this whole file → Enter.
  *      Or from CI/CDP:
  *        Runtime.evaluate({ expression: <this file>, awaitPromise: true, returnByValue: true })
@@ -102,19 +102,27 @@
     notes.push('no .roster-body — the agent panel is closed (open [Agen] to test the scroll)')
   }
 
-  // 3. zoom control shows the design's percentages and the view fits the floor
+  // 3. side camera: the fit (≈0.78 on a phone) up to the 150 px/unit camera at
+  //    2, horizontal pan inside the 1000 px stage
   const zoomText = document.querySelector('.zoom-ctrl span')?.textContent ?? null
   const vp = typeof window.__office2dVp === 'function' ? window.__office2dVp() : null
   if (vp && canvasRect) {
-    // world px per floor at TILE=16: L1 448×320, L2 320×256, L3 384×288
-    const FLOOR_PX = { 1: [448, 320], 2: [320, 256], 3: [384, 288] }
-    const size = FLOOR_PX[vp.floor] ?? FLOOR_PX[1]
-    const floorW = size[0] * vp.zoom
-    const floorH = size[1] * vp.zoom
-    if (floorW > canvasRect.w + 1 && vp.zoom > 1) problems.push(`floor ${floorW}px wider than the ${canvasRect.w}px canvas at zoom ${vp.zoom}`)
-    if (floorH > canvasRect.h + 1 && vp.zoom > 1) problems.push(`floor ${floorH}px taller than the ${canvasRect.h}px canvas at zoom ${vp.zoom}`)
+    if (!(vp.zoom > 0.2 && vp.zoom <= 2)) problems.push(`side camera zoom is ${vp.zoom}, want 0.2..2`)
+    if (!Number.isFinite(vp.camX) || vp.camX < 0 || vp.camX > 1000) problems.push(`camX ${vp.camX} outside the 1000 px stage`)
+    if (zoomText !== `${Math.round(vp.zoom * 100)}%`) notes.push(`zoom label ${zoomText} vs vp.zoom ${vp.zoom}`)
   } else {
     problems.push('window.__office2dVp() is missing')
+  }
+
+  // 3a. theme: ?theme= must win, and <html data-theme> must follow
+  const themeParam = new URLSearchParams(window.location.search).get('theme')
+  const themeNow = typeof window.__office2dTheme === 'function' ? window.__office2dTheme() : null
+  const themeAttr = document.documentElement.dataset.theme
+  if (themeParam === 'day' || themeParam === 'night') {
+    if (themeNow !== themeParam) problems.push(`?theme=${themeParam} but canvas theme is ${themeNow}`)
+    if (themeAttr !== themeParam) problems.push(`?theme=${themeParam} but <html data-theme> is ${themeAttr}`)
+  } else if (themeAttr !== 'day' && themeAttr !== 'night') {
+    problems.push(`<html data-theme> is ${themeAttr}, want day|night`)
   }
 
   // 3b. the floor tabs: three of them, and clicking one switches vp.floor
@@ -186,6 +194,25 @@
     problems.push('window.__office2dFloors() is missing')
   }
 
+  // 3e. side layout gate: rows, ratio, plates, wall (headless twin in visual_check)
+  let layout = null
+  if (typeof window.__office2dLayout === 'function') {
+    layout = window.__office2dLayout(vp?.floor ?? 3)
+    if (!(layout.ratio >= 3 && layout.ratio <= 4)) problems.push(`room:avatar ratio 1:${layout.ratio}, want 1:3–1:4`)
+    if (layout.gate.plateOverlaps !== 0) problems.push(`${layout.gate.plateOverlaps} plate overlaps on L${layout.floor}`)
+    if (layout.gate.plateOnHead !== 0) problems.push(`${layout.gate.plateOnHead} plates cover another head on L${layout.floor}`)
+    if (layout.gate.avatarOverlapPct > 20) problems.push(`avatar overlap ${layout.gate.avatarOverlapPct} % > 20 %`)
+    if (layout.wall.glassPct < 80) problems.push(`glass+city only ${layout.wall.glassPct} % of the wall`)
+    if (layout.rows.front.length + layout.rows.back.length !== 8 && layout.floor === 3) {
+      problems.push(`L3 rows ${layout.rows.front.length}+${layout.rows.back.length}, want 4+4`)
+    }
+    if (layout.rows.front.map((r) => r.x).join(',') !== '170,370,570,770' && layout.floor === 3) {
+      problems.push(`L3 front slots ${layout.rows.front.map((r) => r.x).join(',')}`)
+    }
+  } else {
+    problems.push('window.__office2dLayout() is missing')
+  }
+
   // 4. the canvas is actually painted (a blank canvas is all-transparent)
   let painted = null
   try {
@@ -207,6 +234,8 @@
     roster,
     paintedByFloor,
     floorsInfo,
+    layout,
+    theme: { param: themeParam, canvas: themeNow, attr: themeAttr },
     painted: painted === null ? null : Math.round(painted * 100) / 100,
     notes,
     problems,

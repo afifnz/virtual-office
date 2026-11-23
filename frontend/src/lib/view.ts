@@ -16,7 +16,7 @@ export interface RigCommand {
   /** which floor to show (absent → keep the current one, default 1) */
   floor?: FloorId
   /** fly to an agent's desk instead of a named spot */
-  focus?: { x: number; z: number; rot: number; floor: FloorId; seated?: boolean }
+  focus?: { id?: string; x: number; z: number; rot: number; floor: FloorId; seated?: boolean }
   /** portrait mode: get close enough to read the face */
   tight?: boolean
 }

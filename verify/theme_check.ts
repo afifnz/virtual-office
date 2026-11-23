@@ -1,233 +1,158 @@
 /**
- * Theme decision checker: proves the pure behaviour of frontend/src/lib/theme
- * without a browser — the 06:00–18:00 local window (inclusive of 06:00,
- * exclusive of 18:00), the override precedence, the ICU midnight-'24' quirk,
- * the timezone fallback and DST correctness. All instants are fixed epoch
- * millis; 'now' is never read.
+ * Theme gate — replays the day/night rule headless, plus the contrast table
+ * that made the light theme usable.
  *
  *   frontend/node_modules/.bin/esbuild verify/theme_check.ts --bundle \
  *     --format=esm --platform=node --outfile=/tmp/theme_check.mjs
- *   node /tmp/theme_check.mjs
+ *   node /tmp/theme_check.mjs        # "THEME OK", exit 0
+ *
+ * The clock is always an explicit instant: WIB is UTC+7, Amsterdam is
+ * UTC+2 in July (CEST) and UTC+1 in January (CET). Nothing here reads the
+ * device clock, which is exactly the property the app needs.
  */
 import {
   DAY_END_HOUR,
   DAY_START_HOUR,
-  DEFAULT_TZ,
-  chooseSetting,
-  localHour,
+  FALLBACK_TZ,
+  compositeOver,
+  contrastRatio,
+  effectiveOverride,
+  hourInTimeZone,
+  isValidTimeZone,
+  parseThemeParam,
   resolveTheme,
-  resolveThemeChoice,
-  themeForHour,
-  themeFromQuery,
-  type Theme,
-  type ThemeSetting,
 } from '../frontend/src/lib/theme'
+import { THEME_STATUS, THEME_TOKENS } from '../frontend/src/scene2d/palette'
 
 let fails = 0
+let checks = 0
 const fail = (msg: string) => {
   fails++
   console.log('FAIL', msg)
 }
-const ok = (msg: string) => console.log('ok  ', msg)
-
-// ---------------------------------------------------------------- constants
-
-if (DAY_START_HOUR !== 6) fail(`DAY_START_HOUR = ${DAY_START_HOUR}, want 6`)
-if (DAY_END_HOUR !== 18) fail(`DAY_END_HOUR = ${DAY_END_HOUR}, want 18`)
-if (DEFAULT_TZ !== 'Asia/Jakarta') fail(`DEFAULT_TZ = ${DEFAULT_TZ}, want Asia/Jakarta`)
-else ok('constants: window 06:00–18:00, default tz Asia/Jakarta')
-
-// Jakarta is UTC+7 with no DST, so these UTC instants pin the local wall
-// clock on 2026-06-15. (The lib never relies on Jakarta lacking DST — these
-// are just fixed test fixtures.)
-const JKT = (localH: number, localM: number) => Date.UTC(2026, 5, 15, localH - 7, localM)
-
-const autoJkt = (nowMs: number, prefersDark = false) =>
-  resolveTheme({ nowMs, tz: 'Asia/Jakarta', setting: 'auto', prefersDark })
-
-const expect = (
-  label: string,
-  got: { theme: Theme; source: string },
-  wantTheme: Theme,
-  wantSource: string,
-) => {
-  if (got.theme !== wantTheme || got.source !== wantSource) {
-    fail(`${label} → ${got.theme}/${got.source}, want ${wantTheme}/${wantSource}`)
-  } else ok(`${label} → ${wantTheme} (${wantSource})`)
+const ok = (msg: string) => {
+  checks++
+  console.log('ok  ', msg)
+}
+const expect = (label: string, got: unknown, want: unknown) => {
+  if (JSON.stringify(got) !== JSON.stringify(want)) fail(`${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`)
+  else ok(`${label} = ${JSON.stringify(got)}`)
 }
 
-// -------------------------------------------- 1. the 06:00–18:00 local window
+// WIB instants (UTC+7). 2026-11-22 is a Sunday, no DST anywhere in Asia.
+const WIB = {
+  midnight: '2026-11-21T17:00:00Z', // 00:00 WIB
+  beforeDawn: '2026-11-21T22:59:00Z', // 05:59 WIB
+  dawn: '2026-11-21T23:00:00Z', // 06:00 WIB
+  beforeDusk: '2026-11-22T10:59:00Z', // 17:59 WIB
+  dusk: '2026-11-22T11:00:00Z', // 18:00 WIB
+  lateNight: '2026-11-22T16:59:00Z', // 23:59 WIB
+  noon: '2026-11-22T05:00:00Z', // 12:00 WIB
+}
 
-expect('05:59 Jakarta', autoJkt(JKT(5, 59)), 'night', 'auto')
-expect('06:00 Jakarta', autoJkt(JKT(6, 0)), 'day', 'auto')
-expect('17:59 Jakarta', autoJkt(JKT(17, 59)), 'day', 'auto')
-expect('18:00 Jakarta', autoJkt(JKT(18, 0)), 'night', 'auto')
-expect('00:00 Jakarta', autoJkt(JKT(0, 0)), 'night', 'auto')
-expect('23:59 Jakarta', autoJkt(JKT(23, 59)), 'night', 'auto')
+// ---------------------------------------------------------- 1. day window
+expect('05:59 WIB', resolveTheme(WIB.beforeDawn, 'Asia/Jakarta', null, false).mode, 'night')
+expect('06:00 WIB', resolveTheme(WIB.dawn, 'Asia/Jakarta', null, false).mode, 'day')
+expect('17:59 WIB', resolveTheme(WIB.beforeDusk, 'Asia/Jakarta', null, false).mode, 'day')
+expect('18:00 WIB', resolveTheme(WIB.dusk, 'Asia/Jakarta', null, false).mode, 'night')
+expect('00:00 WIB', resolveTheme(WIB.midnight, 'Asia/Jakarta', null, false).mode, 'night')
+expect('23:59 WIB', resolveTheme(WIB.lateNight, 'Asia/Jakarta', null, false).mode, 'night')
+expect('12:00 WIB source', resolveTheme(WIB.noon, 'Asia/Jakarta', null, true).source, 'auto')
+if (DAY_START_HOUR !== 6 || DAY_END_HOUR !== 18) fail(`window is ${DAY_START_HOUR}..${DAY_END_HOUR}, want 6..18`)
+else ok('day window constants are 06:00 ≤ h < 18:00')
 
-// themeForHour / localHour agree with the window at its edges
-if (themeForHour(5) !== 'night' || themeForHour(6) !== 'day') fail('themeForHour edge at 06:00 wrong')
-if (themeForHour(17) !== 'day' || themeForHour(18) !== 'night') fail('themeForHour edge at 18:00 wrong')
-else ok('themeForHour: [06, 18) is day, outside is night')
+// --------------------------------------------------------------- 2. override
+expect('override day at 23:00', resolveTheme(WIB.lateNight, 'Asia/Jakarta', 'day', false).mode, 'day')
+expect('override night at 12:00', resolveTheme(WIB.noon, 'Asia/Jakarta', 'night', true).mode, 'night')
+expect('override auto at 12:00', resolveTheme(WIB.noon, 'Asia/Jakarta', 'auto', true).mode, 'day')
+expect('override source', resolveTheme(WIB.noon, 'Asia/Jakarta', 'night', false).source, 'override')
+expect('override night beats prefers-light', resolveTheme(WIB.noon, 'Asia/Jakarta', 'night', false).mode, 'night')
 
-// The ICU midnight quirk: 00:00 local formats the hour as '24', must read 0.
-const midnightHour = localHour(JKT(0, 0), 'Asia/Jakarta')
-if (midnightHour !== 0) fail(`localHour at midnight = ${midnightHour}, want 0 (ICU '24' quirk)`)
-else ok("localHour maps ICU's midnight '24' to 0")
+// ------------------------------------------------------------- 3. URL param
+expect('?theme=day', parseThemeParam('day'), 'day')
+expect('?theme=night', parseThemeParam('NIGHT'), 'night')
+expect('?theme=auto', parseThemeParam('auto'), 'auto')
+expect('?theme=bogus', parseThemeParam('bogus'), null)
+expect('?theme absent', parseThemeParam(null), null)
+expect('url day beats stored night', effectiveOverride('night', 'day'), 'day')
+expect('url auto clears stored', effectiveOverride('night', 'auto'), null)
+expect('stored wins when no url', effectiveOverride('night', null), 'night')
 
-// ------------------------------------------------- 2. override wins any hour
+// ------------------------------------------------------- 4. missing / bad tz
+expect('missing tz + dark OS', resolveTheme(WIB.noon, '', null, true), {
+  mode: 'night',
+  source: 'prefers-color-scheme',
+  hour: null,
+  tz: FALLBACK_TZ,
+})
+expect('missing tz + light OS', resolveTheme(WIB.noon, undefined, null, false).mode, 'day')
+const badTz = resolveTheme(WIB.noon, 'Mars/Olympus', null, false)
+expect('unknown tz source', badTz.source, 'fallback-tz')
+expect('unknown tz mode', badTz.mode, 'day')
+expect('unknown tz zone', badTz.tz, FALLBACK_TZ)
+if (isValidTimeZone('Mars/Olympus')) fail('isValidTimeZone accepted Mars/Olympus')
+else ok('isValidTimeZone rejects Mars/Olympus')
+if (!isValidTimeZone('Asia/Jakarta')) fail('isValidTimeZone rejected Asia/Jakarta')
+else ok('isValidTimeZone accepts Asia/Jakarta')
+expect('hour in WIB', hourInTimeZone(WIB.noon, 'Asia/Jakarta'), 12)
+expect('hour with bad tz', hourInTimeZone(WIB.noon, 'Mars/Olympus'), null)
 
-expect(
-  "setting 'day' at 23:00 Jakarta",
-  resolveTheme({ nowMs: JKT(23, 0), tz: 'Asia/Jakarta', setting: 'day', prefersDark: false }),
-  'day',
-  'override',
-)
-expect(
-  "setting 'night' at 12:00 Jakarta",
-  resolveTheme({ nowMs: JKT(12, 0), tz: 'Asia/Jakarta', setting: 'night', prefersDark: false }),
-  'night',
-  'override',
-)
+// ------------------------------------------------------------- 5. no clock
+expect('no server now holds OS preference', resolveTheme(null, 'Asia/Jakarta', null, true).source, 'prefers-color-scheme')
+expect('no server now mode', resolveTheme(null, 'Asia/Jakarta', null, false).mode, 'day')
 
-// ------------------------------------- 3. office clock beats the OS preference
+// --------------------------------------------------------------- 6. DST tz
+// Amsterdam: CEST (UTC+2) in July, CET (UTC+1) in January.
+const AMS = {
+  summerBefore: '2026-07-15T03:30:00Z', // 05:30 CEST
+  summerAfter: '2026-07-15T04:30:00Z', // 06:30 CEST
+  winterBefore: '2026-01-15T04:30:00Z', // 05:30 CET
+  winterAfter: '2026-01-15T05:30:00Z', // 06:30 CET
+}
+expect('Amsterdam CEST 05:30', resolveTheme(AMS.summerBefore, 'Europe/Amsterdam', null, false).mode, 'night')
+expect('Amsterdam CEST 06:30', resolveTheme(AMS.summerAfter, 'Europe/Amsterdam', null, false).mode, 'day')
+expect('Amsterdam CET 05:30', resolveTheme(AMS.winterBefore, 'Europe/Amsterdam', null, false).mode, 'night')
+expect('Amsterdam CET 06:30', resolveTheme(AMS.winterAfter, 'Europe/Amsterdam', null, false).mode, 'day')
+expect('Amsterdam CEST hour', hourInTimeZone(AMS.summerAfter, 'Europe/Amsterdam'), 6)
+expect('Amsterdam CET hour', hourInTimeZone(AMS.winterAfter, 'Europe/Amsterdam'), 6)
 
-expect(
-  'auto + valid tz + prefersDark at 12:00',
-  autoJkt(JKT(12, 0), true),
-  'day',
-  'auto',
-)
-expect(
-  'auto + valid tz + !prefersDark at 23:00',
-  autoJkt(JKT(23, 0), false),
-  'night',
-  'auto',
-)
-expect(
-  'auto + no tz + prefersDark',
-  resolveTheme({ nowMs: JKT(12, 0), tz: null, setting: 'auto', prefersDark: true }),
-  'night',
-  'prefers-color-scheme',
-)
-expect(
-  'auto + blank tz + !prefersDark',
-  resolveTheme({ nowMs: JKT(12, 0), tz: '   ', setting: 'auto', prefersDark: false }),
-  'day',
-  'prefers-color-scheme',
-)
+// ------------------------------------------------- 7. two other zones work
+expect('Tokyo 12:00 JST', resolveTheme('2026-11-22T03:00:00Z', 'Asia/Tokyo', null, false).mode, 'day')
+expect('Los Angeles 12:00 PST', resolveTheme('2026-01-15T20:00:00Z', 'America/Los_Angeles', null, false).mode, 'day')
+expect('UTC 18:00', resolveTheme('2026-11-22T18:00:00Z', 'UTC', null, false).mode, 'night')
 
-// --------------------------------------------------------- 4. ?theme= deep link
-
-const cases: Array<[string, ThemeSetting | null]> = [
-  ['?theme=day', 'day'],
-  ['?theme=night', 'night'],
-  ['?theme=auto', 'auto'],
-  ['theme=day&still=1', 'day'],
-  ['https://office.example/?theme=night#top', 'night'],
-  ['?theme=bogus', null],
-  ['?other=1', null],
-  ['', null],
-]
-let queryOk = true
-for (const [input, want] of cases) {
-  const got = themeFromQuery(input)
-  if (got !== want) {
-    queryOk = false
-    fail(`themeFromQuery(${JSON.stringify(input)}) = ${got}, want ${want}`)
+// ---------------------------------------------------------- 8. contrast table
+// Text threshold 4.5:1, dot/line 3:1 (design §3.2). The background is the
+// *composite* glass over the page, not white/black.
+const STATUSES = ['working', 'reviewing', 'idle', 'blocked', 'offline', 'ok', 'danger'] as const
+for (const theme of ['day', 'night'] as const) {
+  const t = THEME_TOKENS[theme]
+  const glass = compositeOver(t.glass.surface, t.glass.alpha, t.page)
+  const ratios: string[] = []
+  for (const s of STATUSES) {
+    const ratio = contrastRatio(THEME_STATUS[theme][s], glass)
+    ratios.push(`${s} ${ratio.toFixed(2)}`)
+    if (ratio < 4.5) fail(`${theme} ${s} text on glass is ${ratio.toFixed(2)}:1 (< 4.5)`)
   }
+  for (const [name, colour] of [
+    ['ink', t.ink],
+    ['ink-dim', t.inkDim],
+    ['muted', t.muted],
+    ['accent', t.accent],
+  ] as const) {
+    const ratio = contrastRatio(colour, glass)
+    if (ratio < 4.5) fail(`${theme} ${name} on glass is ${ratio.toFixed(2)}:1 (< 4.5)`)
+  }
+  ok(`${theme} contrast on glass ${glass}: ${ratios.join(' · ')}`)
 }
-if (queryOk) ok('?theme=day|night|auto parses (bare, query, full URL); bogus/absent → null')
 
-// -------------------------------------------------- 5. invalid tz → fallback
-
-// 12:00 in the fallback zone (Asia/Jakarta) is day — the instant must still
-// resolve correctly, only the source changes.
-expect(
-  "tz 'Not/AZone' at 12:00 Jakarta-equivalent",
-  resolveTheme({ nowMs: JKT(12, 0), tz: 'Not/AZone', setting: 'auto', prefersDark: false }),
-  'day',
-  'fallback-tz',
-)
-expect(
-  "tz 'Not/AZone' at 23:00 Jakarta-equivalent",
-  resolveTheme({ nowMs: JKT(23, 0), tz: 'Not/AZone', setting: 'auto', prefersDark: false }),
-  'night',
-  'fallback-tz',
-)
-
-// ------------------------------------------------------------- 6. DST zones
-// Europe/Amsterdam: CET (+1) in January, CEST (+2) in July. The same UTC
-// instant lands on different local hours — Intl must track it, on both sides
-// of both the winter and summer day windows.
-
-const AMS = (y: number, mo: number, d: number, h: number, mi: number) => Date.UTC(y, mo, d, h, mi)
-const autoAms = (nowMs: number) =>
-  resolveTheme({ nowMs, tz: 'Europe/Amsterdam', setting: 'auto', prefersDark: false })
-
-expect('Amsterdam 2026-01-15T05:30Z = 06:30 CET (winter)', autoAms(AMS(2026, 0, 15, 5, 30)), 'day', 'auto')
-expect('Amsterdam 2026-07-15T04:30Z = 06:30 CEST (summer)', autoAms(AMS(2026, 6, 15, 4, 30)), 'day', 'auto')
-expect('Amsterdam 2026-01-15T04:30Z = 05:30 CET (winter)', autoAms(AMS(2026, 0, 15, 4, 30)), 'night', 'auto')
-expect('Amsterdam 2026-07-15T03:30Z = 05:30 CEST (summer)', autoAms(AMS(2026, 6, 15, 3, 30)), 'night', 'auto')
-
-// The local hour itself must match the wall clock across the DST boundary.
-if (localHour(AMS(2026, 0, 15, 5, 30), 'Europe/Amsterdam') !== 6) {
-  fail('localHour Amsterdam winter 05:30Z != 6')
+// The two accent inks must also survive their own accent fill (buttons/tabs).
+for (const theme of ['day', 'night'] as const) {
+  const t = THEME_TOKENS[theme]
+  const ratio = contrastRatio(t.accentInk, t.accent)
+  if (ratio < 4.5) fail(`${theme} accent-ink on accent is ${ratio.toFixed(2)}:1 (< 4.5)`)
+  else ok(`${theme} accent-ink on accent ${ratio.toFixed(2)}:1`)
 }
-if (localHour(AMS(2026, 6, 15, 4, 30), 'Europe/Amsterdam') !== 6) {
-  fail('localHour Amsterdam summer 04:30Z != 6')
-} else ok('localHour tracks the DST offset change (CET ↔ CEST), no hand-computed offsets')
 
-// ------------------------------------- 7. manual override vs ?theme= deep link
-// Full precedence chain: manual > query > office clock > OS preference.
-expect(
-  'manual night beats query day at 12:00',
-  resolveThemeChoice({ nowMs: JKT(12, 0), tz: 'Asia/Jakarta', manual: 'night', query: 'day', prefersDark: false }),
-  'night',
-  'override',
-)
-expect(
-  'manual day beats query night at 23:00',
-  resolveThemeChoice({ nowMs: JKT(23, 0), tz: 'Asia/Jakarta', manual: 'day', query: 'night', prefersDark: false }),
-  'day',
-  'override',
-)
-expect(
-  'query day beats the office clock at 23:00',
-  resolveThemeChoice({ nowMs: JKT(23, 0), tz: 'Asia/Jakarta', manual: null, query: 'day', prefersDark: false }),
-  'day',
-  'override',
-)
-expect(
-  'query night beats the office clock at 12:00',
-  resolveThemeChoice({ nowMs: JKT(12, 0), tz: 'Asia/Jakarta', manual: null, query: 'night', prefersDark: false }),
-  'night',
-  'override',
-)
-expect(
-  'manual auto + query auto falls through to the office clock at 23:00',
-  resolveThemeChoice({ nowMs: JKT(23, 0), tz: 'Asia/Jakarta', manual: 'auto', query: 'auto', prefersDark: false }),
-  'night',
-  'auto',
-)
-expect(
-  'no override, no query, valid tz -> office clock beats prefersDark',
-  resolveThemeChoice({ nowMs: JKT(12, 0), tz: 'Asia/Jakarta', manual: null, query: null, prefersDark: true }),
-  'day',
-  'auto',
-)
-expect(
-  'no tz and no override -> OS preference is the last resort',
-  resolveThemeChoice({ nowMs: JKT(12, 0), tz: null, manual: null, query: null, prefersDark: true }),
-  'night',
-  'prefers-color-scheme',
-)
-if (chooseSetting('night', 'day') !== 'night') fail('chooseSetting: manual must win over query')
-else if (chooseSetting(null, 'day') !== 'day') fail('chooseSetting: query must win when there is no manual override')
-else if (chooseSetting(undefined, null) !== 'auto') fail('chooseSetting: absent both must be auto')
-else ok('chooseSetting composes manual > query > auto')
-
-// --------------------------------------------------------------- final verdict
-
-console.log(fails === 0 ? '\nTHEME OK' : `\n${fails} MASALAH`)
+console.log(fails === 0 ? `\nTHEME OK (${checks} checks)` : `\n${fails} MASALAH`)
 process.exit(fails === 0 ? 0 : 1)

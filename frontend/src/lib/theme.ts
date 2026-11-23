@@ -1,188 +1,239 @@
 /**
- * Keputusan tema kantor — Terang (day) vs Gelap (night) — as a PURE module.
+ * Theme resolution — the single source of truth for day/night.
  *
- * Rules (boss decision, binding):
- *  - The day window is 06:00–18:00 in the office's LOCAL time. Inclusive of
- *    06:00, exclusive of 18:00. Everything else is night.
- *  - Precedence: manual override / `?theme=` deep link → auto (office clock)
- *    → `prefers-color-scheme`. In auto mode a valid tz ALWAYS beats the OS
- *    dark-mode preference; `prefersDark` only applies when the caller has no
- *    tz and no override. The office clock wins over the OS preference.
+ * Pure: no React, no DOM, no `Date.now()` inside the rule. The caller passes
+ * `now` (seconds from `/api/status`, an ISO string, or a Date), the office
+ * timezone from `/api/config` (`tz`), the manual override and the OS
+ * preference. Everything else is arithmetic on the local hour.
  *
- * Contracts:
- *  (a) ONE time source. Pure functions take `nowMs` from the CALLER — the
- *      caller should pass the server `now` from /api/status, not the device
- *      clock, so a stale device clock cannot flip the theme. This module
- *      never reads `Date.now()` and never touches the browser's own clock.
- *  (b) NO flicker. The theme is decided here and applied when the next static
- *      layer is rendered — never swapped mid-frame. The renderer re-resolves
- *      on a whole-layer repaint, not on a timer.
- *  (c) Missing/blank/invalid tz: in auto mode the office falls back to
- *      DEFAULT_TZ (Asia/Jakarta) and reports source 'fallback-tz'. Intl
- *      throws RangeError for unknown zones; we catch it here.
- *  (d) Asia/Jakarta has no DST, but this code does NOT rely on that: all
- *      local hours come from `Intl.DateTimeFormat` with the caller's zone,
- *      so DST transitions are handled by ICU — offsets are never computed
- *      by hand and never hardcoded (+07:00 appears nowhere).
+ * Rules (design §2.1 / R&D §11):
+ *  - daytime window is 06:00 ≤ local hour < 18:00 in the **office** timezone;
+ *  - an explicit override (`day` / `night`) always wins;
+ *  - `?theme=day|night` is an override too (it wins over the stored one, so a
+ *    screenshot is deterministic on any machine);
+ *  - a missing timezone falls back to `prefers-color-scheme`;
+ *  - an unknown timezone falls back to Asia/Jakarta and reports `fallback-tz`;
+ *  - the device clock is never consulted: without a server `now` we hold the
+ *    OS preference instead of guessing.
  *
- * Pure: no React, no DOM access, no `Date.now()` — fully headless-testable
- * (see verify/theme_check.ts).
+ * `verify/theme_check.ts` replays all of it headless (WIB boundaries, DST).
  */
+
+export type ThemeMode = 'day' | 'night'
+export type ThemeOverride = 'day' | 'night' | 'auto'
+
+export type ThemeSource =
+  | 'override'
+  | 'auto'
+  | 'fallback-tz'
+  | 'prefers-color-scheme'
 
 export const DAY_START_HOUR = 6
 export const DAY_END_HOUR = 18
-export const DEFAULT_TZ = 'Asia/Jakarta'
+export const FALLBACK_TZ = 'Asia/Jakarta'
+export const THEME_STORAGE_KEY = 'office-theme'
 
-export type Theme = 'day' | 'night'
-export type ThemeSetting = 'auto' | 'day' | 'night'
-
-export type ThemeSource = 'override' | 'auto' | 'fallback-tz' | 'prefers-color-scheme'
-
-export interface ThemeChoice {
-  theme: Theme
+export interface ThemeResolution {
+  mode: ThemeMode
   source: ThemeSource
+  /** local hour 0–23 used for the decision (null when no clock was available) */
+  hour: number | null
+  /** timezone actually used */
+  tz: string
 }
 
-/**
- * The local wall-clock hour (0–23) of `nowMs` in `tz`, or null when `tz` is
- * rejected by Intl (RangeError). ICU formats midnight as '24' under
- * hour12: false — that quirk is normalised to 0 here.
- */
-function tryLocalHour(nowMs: number, tz: string): number | null {
+/** Parse `?theme=` — only day/night/auto are valid, anything else is null. */
+export function parseThemeParam(raw: string | null | undefined): ThemeOverride | null {
+  const v = (raw ?? '').trim().toLowerCase()
+  return v === 'day' || v === 'night' || v === 'auto' ? v : null
+}
+
+/** `true` when `Intl` accepts the zone; never throws. */
+export function isValidTimeZone(tz: string): boolean {
+  if (!tz) return false
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz }).format(0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Local hour in `tz` (0–23), or null when the zone is unusable. */
+export function hourInTimeZone(nowISO: string | number | Date, tz: string): number | null {
+  return clockInTimeZone(nowISO, tz)?.hour ?? null
+}
+
+/** Local hour + minute in `tz`, or null when the zone/clock is unusable. */
+export function clockInTimeZone(
+  nowISO: string | number | Date,
+  tz: string,
+): { hour: number; minute: number } | null {
+  if (!isValidTimeZone(tz)) return null
+  const d = toDate(nowISO)
+  if (!d) return null
   try {
     const parts = new Intl.DateTimeFormat('en-GB', {
       timeZone: tz,
       hour: '2-digit',
-      hour12: false,
-    }).formatToParts(new Date(nowMs))
-    const raw = parts.find((p) => p.type === 'hour')?.value
-    if (raw === undefined) return null
-    let hour = parseInt(raw, 10)
-    if (hour === 24) hour = 0 // ICU quirk: midnight formats as '24'
-    if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null
-    return hour
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(d)
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value)
+    const minute = Number(parts.find((p) => p.type === 'minute')?.value)
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+    return { hour: hour % 24, minute: minute % 60 }
   } catch {
     return null
   }
 }
 
-/**
- * Local wall-clock hour of `nowMs` in `tz`. Falls back to DEFAULT_TZ when
- * `tz` is invalid; throws only if even DEFAULT_TZ is rejected (never in
- * practice — kept as a hard error instead of a silent wrong answer).
- */
-export function localHour(nowMs: number, tz: string): number {
-  const hour = tryLocalHour(nowMs, tz)
-  if (hour !== null) return hour
-  const fallback = tryLocalHour(nowMs, DEFAULT_TZ)
-  if (fallback === null) throw new RangeError(`Intl rejected the default timezone ${DEFAULT_TZ}`)
-  return fallback
-}
-
-/** Day when DAY_START_HOUR <= hour < DAY_END_HOUR, night otherwise. */
-export function themeForHour(hour: number): Theme {
-  return hour >= DAY_START_HOUR && hour < DAY_END_HOUR ? 'day' : 'night'
+function toDate(value: string | number | Date | null | undefined): Date | null {
+  if (value === null || value === undefined) return null
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  if (typeof value === 'number') {
+    // `/api/status.now` is Unix seconds; tolerate milliseconds too.
+    const ms = value < 1e12 ? value * 1000 : value
+    const d = new Date(ms)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 /**
- * Resolve the theme for one instant. Precedence:
- *   setting 'day'/'night' → override (wins at any hour)
- *   setting 'auto' + valid tz → office clock (source 'auto')
- *   setting 'auto' + invalid tz → office clock in DEFAULT_TZ (source 'fallback-tz')
- *   setting 'auto' + no tz at all → the OS preference (source 'prefers-color-scheme')
- *
- * `prefersDark` is ONLY consulted in the last branch — it must never override
- * a valid office clock in auto mode (the office clock wins over the OS).
+ * Resolve the theme. `now` may be null while `/api/status` has not answered —
+ * in that case we hold the OS preference (never the device clock).
  */
-export function resolveTheme(opts: {
-  nowMs: number
-  tz: string | null | undefined
-  setting: ThemeSetting
-  prefersDark: boolean
-}): ThemeChoice {
-  if (opts.setting === 'day' || opts.setting === 'night') {
-    return { theme: opts.setting, source: 'override' }
+export function resolveTheme(
+  nowISO: string | number | Date | null | undefined,
+  tz: string | null | undefined,
+  override: ThemeOverride | null | undefined,
+  prefersDark: boolean,
+): ThemeResolution {
+  const zone = (tz ?? '').trim()
+  if (override === 'day' || override === 'night') {
+    return {
+      mode: override,
+      source: 'override',
+      hour: zone && isValidTimeZone(zone) ? hourInTimeZone(nowISO ?? 0, zone) : null,
+      tz: zone || FALLBACK_TZ,
+    }
   }
-  const tz = typeof opts.tz === 'string' ? opts.tz.trim() : ''
-  if (tz !== '') {
-    const hour = tryLocalHour(opts.nowMs, tz)
-    if (hour !== null) return { theme: themeForHour(hour), source: 'auto' }
-    // Unknown zone: fall back to the default office zone, but say so.
-    const fallback = tryLocalHour(opts.nowMs, DEFAULT_TZ)
-    if (fallback === null) throw new RangeError(`Intl rejected the default timezone ${DEFAULT_TZ}`)
-    return { theme: themeForHour(fallback), source: 'fallback-tz' }
+
+  const preferMode: ThemeMode = prefersDark ? 'night' : 'day'
+  if (!zone) {
+    return { mode: preferMode, source: 'prefers-color-scheme', hour: null, tz: FALLBACK_TZ }
   }
-  // No office clock at all and no override: the OS preference is the last resort.
-  return { theme: opts.prefersDark ? 'night' : 'day', source: 'prefers-color-scheme' }
+
+  const valid = isValidTimeZone(zone)
+  const usedTz = valid ? zone : FALLBACK_TZ
+  if (nowISO === null || nowISO === undefined) {
+    return { mode: preferMode, source: 'prefers-color-scheme', hour: null, tz: usedTz }
+  }
+
+  const hour = hourInTimeZone(nowISO, usedTz)
+  if (hour === null) {
+    return { mode: preferMode, source: 'prefers-color-scheme', hour: null, tz: usedTz }
+  }
+  const day = hour >= DAY_START_HOUR && hour < DAY_END_HOUR
+  return {
+    mode: day ? 'day' : 'night',
+    source: valid ? 'auto' : 'fallback-tz',
+    hour,
+    tz: usedTz,
+  }
 }
 
-const decode = (s: string): string => {
+/** The stored manual override, or null. Safe outside a browser. */
+export function readStoredOverride(): ThemeOverride | null {
+  if (typeof window === 'undefined') return null
   try {
-    return decodeURIComponent(s.replace(/\+/g, ' '))
+    return parseThemeParam(window.localStorage.getItem(THEME_STORAGE_KEY))
   } catch {
-    return s
-  }
-}
-
-/**
- * Compose the two explicit sources into the setting `resolveTheme` receives.
- *
- * Precedence: the manual HUD override (persisted in localStorage) wins over
- * the `?theme=` deep link, because the manual toggle is the most recent human
- * action while the query string is a test/screenshot affordance. A manual
- * 'auto' and a query 'auto' are equivalent — both mean "let the office clock
- * decide". Anything absent falls through to 'auto'.
- */
-export function chooseSetting(
-  manual: ThemeSetting | null | undefined,
-  query: ThemeSetting | null | undefined,
-): ThemeSetting {
-  if (manual === 'day' || manual === 'night') return manual
-  if (query === 'day' || query === 'night') return query
-  return 'auto'
-}
-
-/**
- * One-call entry point for the renderer: compose manual + query, then resolve.
- * Keeping the two steps here (instead of in the component) is what makes the
- * full precedence chain testable headless.
- */
-export function resolveThemeChoice(opts: {
-  nowMs: number
-  tz: string | null | undefined
-  manual?: ThemeSetting | null
-  query?: ThemeSetting | null
-  prefersDark: boolean
-}): ThemeChoice {
-  return resolveTheme({
-    nowMs: opts.nowMs,
-    tz: opts.tz,
-    setting: chooseSetting(opts.manual, opts.query),
-    prefersDark: opts.prefersDark,
-  })
-}
-
-/**
- * Parse `?theme=day|night|auto` out of a query string, accepting a leading
- * '?', a bare 'theme=...' string, or a full URL (only its query part is
- * read). Returns null when the parameter is absent or not a valid setting.
- */
-export function themeFromQuery(search: string): ThemeSetting | null {
-  let s = search.trim()
-  if (s === '') return null
-  const q = s.indexOf('?')
-  if (q >= 0) s = s.slice(q + 1)
-  const h = s.indexOf('#')
-  if (h >= 0) s = s.slice(0, h)
-  if (s.startsWith('?')) s = s.slice(1)
-  for (const pair of s.split('&')) {
-    if (pair === '') continue
-    const eq = pair.indexOf('=')
-    const key = eq < 0 ? pair : pair.slice(0, eq)
-    if (decode(key) !== 'theme') continue
-    const value = eq < 0 ? '' : decode(pair.slice(eq + 1))
-    if (value === 'day' || value === 'night' || value === 'auto') return value
     return null
   }
-  return null
+}
+
+/** Persist (or clear, for `auto`) the manual override. */
+export function writeStoredOverride(value: ThemeOverride | null): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (value && value !== 'auto') window.localStorage.setItem(THEME_STORAGE_KEY, value)
+    else window.localStorage.removeItem(THEME_STORAGE_KEY)
+  } catch {
+    /* private mode: the in-memory state still works */
+  }
+}
+
+/**
+ * Merge the two override sources. An explicit URL value is per-request and
+ * wins over the stored one; `?theme=auto` clears it for that request.
+ */
+export function effectiveOverride(
+  stored: ThemeOverride | null,
+  url: ThemeOverride | null,
+): ThemeOverride | null {
+  if (url === 'auto') return null
+  if (url === 'day' || url === 'night') return url
+  return stored === 'auto' ? null : stored
+}
+
+/** Apply the resolved mode to <html data-theme>. */
+export function applyTheme(mode: ThemeMode, source?: ThemeSource): void {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  if (root.dataset.theme !== mode) root.dataset.theme = mode
+  if (source) root.dataset.themeSource = source
+}
+
+export function prefersDark(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  } catch {
+    return true
+  }
+}
+
+// ---------------------------------------------------------------- contrast
+
+/** WCAG 2.x relative luminance of an sRGB hex colour. */
+export function relativeLuminance(hex: string): number {
+  const c = parseHex(hex)
+  if (!c) return 0
+  const lin = (v: number) => {
+    const s = v / 255
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+  }
+  const [r, g, b] = c
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+}
+
+/** WCAG contrast ratio between two opaque hex colours (≥ 1). */
+export function contrastRatio(fg: string, bg: string): number {
+  const a = relativeLuminance(fg)
+  const b = relativeLuminance(bg)
+  const hi = Math.max(a, b)
+  const lo = Math.min(a, b)
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+/** Composite `fg` at `alpha` over opaque `bg`, returning an opaque hex. */
+export function compositeOver(fg: string, alpha: number, bg: string): string {
+  const a = parseHex(fg)
+  const b = parseHex(bg)
+  if (!a || !b) return fg
+  const k = Math.min(1, Math.max(0, alpha))
+  const mix = (x: number, y: number) => Math.round(x * k + y * (1 - k))
+  return `#${[mix(a[0], b[0]), mix(a[1], b[1]), mix(a[2], b[2])]
+    .map((v) => v.toString(16).padStart(2, '0'))
+    .join('')}`
+}
+
+function parseHex(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return null
+  const n = parseInt(m[1]!, 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }

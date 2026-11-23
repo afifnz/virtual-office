@@ -13,22 +13,12 @@ import {
   poseFor,
   type PoseKind,
 } from '../frontend/src/scene2d/anim'
-import {
-  TILE,
-  blitScale,
-  clampCenter,
-  clampZoom,
-  fitZoom,
-  nearestAt,
-  pixelToWorld,
-  screenToWorld,
-  worldToPixel,
-  worldToScreen,
-  worldSize,
-} from '../frontend/src/scene2d/viewport'
-import { FLOORS, type FloorId } from '../frontend/src/lib/rooms'
+import { clampCam, clampZoom, fitZoom, nearestAt } from '../frontend/src/scene2d/viewport'
 import { glyphFor, textWidth } from '../frontend/src/scene2d/pixelfont'
-import { PALETTE, STATUS, TEAM } from '../frontend/src/scene2d/palette'
+import { TEAM, THEME_STATUS, THEME_TOKENS } from '../frontend/src/scene2d/palette'
+import { avatarKey } from '../frontend/src/scene2d/avatar'
+import { sideRows, sideTransform, designToScreen, screenToDesign, PHONE_CTRL_BAND, sideScale } from '../frontend/src/scene2d/side'
+import { rosterAgents } from '../frontend/src/lib/roster'
 
 let fails = 0
 const fail = (msg: string) => {
@@ -186,59 +176,26 @@ const p2 = JSON.stringify(poseFor(agent({ id: 'dev', status: 'working', current:
 if (p1 !== p2) fail('poseFor is not deterministic')
 else ok('poseFor is deterministic for the same input')
 
-// ------------------------------------------------------- 5. world ↔ pixel math
-// per floor: L1 28×20 → 448×320, L2 20×16 → 320×256, L3 24×18 → 384×288
+// ------------------------------------------------------- 5. side camera
+// The stage is 1000×688 design px; zoom 2 is 150 px/unit on both axes.
+const tr = sideTransform(1000, 688, { camX: 500, zoom: 2, floor: 3 })
+if (!near(tr.s, 1) || !near(tr.ppu, 150) || !near(tr.top, 0)) {
+  fail(`sideTransform(1000×688, zoom 2) = s ${tr.s}, ppu ${tr.ppu}, top ${tr.top}; want 1 / 150 / 0`)
+} else ok('side camera: 1000×688 at zoom 2 → s=1, 150 px/unit, top=0')
+const p170 = designToScreen(tr, 170, 640)
+if (!near(p170.x, 170) || !near(p170.y, 640)) fail(`designToScreen(170,640) = ${p170.x},${p170.y}`)
+else ok('design→screen is identity at the reference camera (slot 170, floor line 640)')
+const back = screenToDesign(tr, p170.x, p170.y)
+if (!near(back.x, 170) || !near(back.y, 640)) fail(`screenToDesign roundtrip = ${back.x},${back.y}`)
+else ok('screen→design roundtrips through the side transform')
 
-if (TILE !== 16) fail(`TILE = ${TILE}, want 16`)
-const FLOOR_PX: Array<[FloorId, number, number]> = [
-  [1, 448, 320],
-  [2, 320, 256],
-  [3, 384, 288],
-]
-for (const [f, w, h] of FLOOR_PX) {
-  const size = worldSize(f)
-  if (size.w !== w || size.h !== h) fail(`L${f} worldSize = ${size.w}×${size.h}, want ${w}×${h}`)
-  const c = worldToPixel(0, 0, f)
-  if (c.x !== w / 2 || c.y !== h / 2) fail(`L${f} worldToPixel(0,0) = ${c.x},${c.y}, want ${w / 2},${h / 2}`)
-  const nw = worldToPixel(-FLOORS[f].w / 2, -FLOORS[f].d / 2, f)
-  if (nw.x !== 0 || nw.y !== 0) fail(`L${f} NW corner = ${nw.x},${nw.y}, want 0,0`)
-  const se = worldToPixel(FLOORS[f].w / 2, FLOORS[f].d / 2, f)
-  if (se.x !== w || se.y !== h) fail(`L${f} SE corner = ${se.x},${se.y}, want ${w},${h}`)
-}
-ok('world→pixel: TILE 16; L1 448×320, L2 320×256, L3 384×288; corners exact')
-
-let roundtripOk = true
-for (const [f, , ] of FLOOR_PX) {
-  const halfW = FLOORS[f].w / 2
-  const halfD = FLOORS[f].d / 2
-  for (const [x, z] of [[0, 0], [-3.7, 6.2], [halfW - 1.1, -halfD + 1.6], [-halfW, -halfD], [halfW, halfD]] as Array<[number, number]>) {
-    const p = worldToPixel(x, z, f)
-    const back = pixelToWorld(p.x, p.y, f)
-    if (!near(back.x, x) || !near(back.z, z)) {
-      roundtripOk = false
-      fail(`L${f} roundtrip (${x},${z}) → (${back.x.toFixed(2)},${back.z.toFixed(2)})`)
-    }
-  }
-}
-if (roundtripOk) ok('world→pixel→world roundtrips on sampled points of every floor')
-
-const vp = { x: -1.2, z: 3.4, zoom: 2, floor: 1 as FloorId }
-const w = 800
-const h = 600
-let screenOk = true
-for (const [sx, sy] of [[400, 300], [12, 580], [790, 7]] as Array<[number, number]>) {
-  const world = screenToWorld(vp, w, h, sx, sy)
-  const back = worldToScreen(vp, w, h, world.x, world.z)
-  if (!near(back.x, sx) || !near(back.y, sy)) {
-    screenOk = false
-    fail(`screen roundtrip (${sx},${sy}) → (${back.x.toFixed(2)},${back.y.toFixed(2)})`)
-  }
-}
-if (screenOk) ok('screen→world→screen roundtrips through the viewport')
+// zoom 1 is half scale and still fits the 688 px stage
+const tr1 = sideTransform(1000, 688, { camX: 500, zoom: 1, floor: 1 })
+if (!near(tr1.s, 0.5) || !near(tr1.ppu, 75)) fail(`zoom 1: s ${tr1.s}, ppu ${tr1.ppu}`)
+else ok('zoom 1: 75 px/unit (half scale), stage still 344 px tall')
 
 // -------------------------------------------------------------- 6. zoom clamp
-
-const zooms: Array<[number, number]> = [[0, 1], [1, 1], [1.4, 1], [1.6, 2], [2.4, 2], [3, 3], [4, 4], [9, 4], [-2, 1]]
+const zooms: Array<[number, number]> = [[0, 1], [1, 1], [1.4, 1], [1.6, 2], [2, 2], [9, 2], [-2, 1]]
 let clampOk = true
 for (const [input, want] of zooms) {
   const got = clampZoom(input)
@@ -247,33 +204,29 @@ for (const [input, want] of zooms) {
     fail(`clampZoom(${input}) = ${got}, want ${want}`)
   }
 }
-if (clampOk) ok('zoom clamps to the integer range 1..4')
-
-if (blitScale(2, 1.5) !== 3) fail(`blitScale(2,1.5) = ${blitScale(2, 1.5)}, want 3`)
-if (blitScale(1, 0.5) !== 1) fail(`blitScale(1,0.5) = ${blitScale(1, 0.5)}, want 1`)
-else ok('DPR blit factor is an integer ≥ 1')
+if (clampOk) ok('zoom clamps to the integer range 1..2 (the camera is a fixed section)')
 
 // ------------------------------------------------------------- 6b. default zoom
-// The default view fits the whole floor: desktop 1000×688 → zoom 2 on every
-// floor; mobile 390×692 → zoom 1 (pan, never a fractional "50 %").
+if (fitZoom(3, 1000, 688) !== 2) fail(`fitZoom(1000×688) = ${fitZoom(3, 1000, 688)}, want 2`)
+else if (fitZoom(3, 720, 688) !== 2) fail(`fitZoom(720×688, no band) = ${fitZoom(3, 720, 688)}, want 2`)
+else if (fitZoom(3, 390, 692) !== 1) fail(`fitZoom(390×692, no band) = ${fitZoom(3, 390, 692)}, want 1`)
+else ok('default zoom (non-phone): 1000×688 desktop → 2, a narrow window without the phone band → 1')
 
-let fitOk = true
-for (const [f] of FLOOR_PX) {
-  const desk = fitZoom(f, 1000, 688)
-  const phone = fitZoom(f, 390, 692)
-  if (desk !== 2) {
-    fitOk = false
-    fail(`L${f} fitZoom(1000×688) = ${desk}, want 2`)
-  }
-  if (phone !== 1) {
-    fitOk = false
-    fail(`L${f} fitZoom(390×692) = ${phone}, want 1`)
-  }
-}
-if (fitOk) ok('default zoom: 1000×688 desktop → 2, 390×692 mobile → 1, on all three floors')
+// the phone default is the WHOLE FLOOR: 0.39 CSS px per design px at 390×692,
+// i.e. zoom 0.78, an avatar 58.5 CSS px (the R&D mockup's 55–60)
+const phoneFit = fitZoom(3, 390, 692, PHONE_CTRL_BAND)
+if (!near(phoneFit, 0.78)) fail(`phone fitZoom(390×692, band) = ${phoneFit}, want 0.78`)
+else if (!near(sideScale(390, 692, phoneFit, PHONE_CTRL_BAND), 0.39, 0.001)) {
+  fail(`phone fit scale = ${sideScale(390, 692, phoneFit, PHONE_CTRL_BAND)}, want 0.39`)
+} else ok(`phone default zoom: 390×692 with the control band → ${phoneFit} (fit-to-floor, avatar ${150 * 0.39} px)`)
+
+// a phone zoom is fractional: the fit is the floor, zoom 2 the reference camera
+if (clampZoom(0.5, 0.78) !== 0.78) fail(`phone clampZoom(0.5) = ${clampZoom(0.5, 0.78)}, want 0.78 (the fit)`)
+else if (!near(clampZoom(1.337, 0.78), 1.34)) fail(`phone clampZoom(1.337) = ${clampZoom(1.337, 0.78)}, want 1.34`)
+else if (clampZoom(9, 0.78) !== 2) fail(`phone clampZoom(9) = ${clampZoom(9, 0.78)}, want 2`)
+else ok('phone zoom clamps between the fit (0.78) and 2, keeping fractions')
 
 // ---------------------------------------------------------------- 7. hit test
-
 const pts = [
   { id: 'a', x: 0, z: 0 },
   { id: 'b', x: 3, z: 0 },
@@ -282,50 +235,57 @@ const pts = [
 if (nearestAt(pts, 0.2, 0.1, 0.9) !== 'a') fail('nearestAt should pick a (0.2,0.1)')
 if (nearestAt(pts, 2.9, 0.1, 0.9) !== 'b') fail('nearestAt should pick b (2.9,0.1)')
 if (nearestAt(pts, 5, 5, 0.9) !== null) fail('nearestAt should miss far from everyone')
-else ok('hit-test picks the nearest agent within 0.9 units')
+else ok('hit-test picks the nearest agent within 0.9 world units')
 
 // ---------------------------------------------------------------- 8. pan clamp
+if (!near(clampCam(999, 1000, 688, 2), 500)) fail(`clampCam(999, 1000 wide, zoom 2) = ${clampCam(999, 1000, 688, 2)}, want 500`)
+else ok('pan is pinned at the stage centre when the stage exactly fills the canvas')
+const lo = clampCam(-999, 390, 692, 1)
+const hi = clampCam(999, 390, 692, 1)
+if (!near(lo, 390) || !near(hi, 610)) fail(`clampCam at zoom 1 / 390 wide = ${lo}..${hi}, want 390..610`)
+else ok(`pan clamp at 390 px / zoom 1: camX ${lo}..${hi} (stage 500 px, never leaves the view)`)
 
-const big = { x: 999, z: -999, zoom: 2, floor: 1 as FloorId }
-const clamped = clampCenter(big, 800, 600)
-const visW = 800 / 2 / TILE // visible world extent
-const visH = 600 / 2 / TILE
-const halfW = FLOORS[1].w / 2
-const halfD = FLOORS[1].d / 2
-if (clamped.zoom !== 2) fail(`clampCenter changed zoom: ${clamped.zoom}`)
-if (clamped.floor !== 1) fail(`clampCenter changed floor: ${clamped.floor}`)
-if (clamped.x > halfW - visW / 2 + 0.001 || clamped.x < -(halfW - visW / 2) - 0.001) {
-  fail(`clampCenter x out of range: ${clamped.x.toFixed(2)} (want ±${(halfW - visW / 2).toFixed(2)})`)
+// the phone fit is exactly as wide as the canvas: no pan until the user zooms
+const fitCam = clampCam(999, 390, 692, phoneFit, PHONE_CTRL_BAND)
+if (!near(fitCam, 500)) fail(`phone clampCam at the fit = ${fitCam}, want 500 (nothing to pan)`)
+else ok('pan is locked at the phone fit (stage 390 px = canvas 390 px)')
+const z2lo = clampCam(0, 390, 692, 2, PHONE_CTRL_BAND)
+const z2hi = clampCam(999, 390, 692, 2, PHONE_CTRL_BAND)
+if (!(z2lo < 500 && z2hi > 500)) {
+  fail(`phone pan at zoom 2 is clamped to ${z2lo}..${z2hi} — wants room either side of the centre`)
+} else {
+  ok(`phone pan at zoom 2: camX ${z2lo}..${z2hi} (stage ${(1000 * sideScale(390, 692, 2, PHONE_CTRL_BAND)).toFixed(0)} px wide, pan both ways)`)
 }
-if (clamped.z > halfD - visH / 2 + 0.001 || clamped.z < -(halfD - visH / 2) - 0.001) {
-  fail(`clampCenter z out of range: ${clamped.z.toFixed(2)} (want ±${(halfD - visH / 2).toFixed(2)})`)
-}
-// when the whole floor fits, the centre is pinned to the origin (L2 20 wide
-// at zoom 1 inside a 400 px view: 400/16 = 25 ≥ 20)
-const fit2 = clampCenter({ x: 5, z: 5, zoom: 1, floor: 2 }, 400, 400)
-if (fit2.x !== 0 || fit2.z !== 0) fail(`clampCenter should pin centre to origin when the floor fits: ${fit2.x},${fit2.z}`)
-else ok('pan is clamped so the floor never leaves the view; centre pinned when it fits')
 
 // --------------------------------------------------------------- 9. pixel font
-
 if (textWidth('TEST') !== (4 * 6 - 1)) fail(`textWidth(TEST) = ${textWidth('TEST')}, want 23`)
 if (textWidth('TEST', 2) !== 46) fail(`textWidth(TEST,2) = ${textWidth('TEST', 2)}, want 46`)
 if (textWidth('') !== 0) fail('textWidth("") should be 0')
-if (textWidth('AB') !== (2 * 6 - 1)) fail(`textWidth(AB) = ${textWidth('AB')}, want 11`)
 if (glyphFor('a').rows.join() !== glyphFor('A').rows.join()) fail('glyphFor is not case-insensitive')
-if ((glyphFor('A').rows[0] ?? 0) === 0) fail('glyph A has an empty first row')
-else ok(`pixel font: 5×7 glyphs, textWidth("TEST")=${textWidth('TEST')}, deterministic`)
+else ok('pixel font: 5×7 glyphs, deterministic, used only for plaque + lift numbers')
 
 // --------------------------------------------------------------- 10. palette
+if (TEAM.lobby !== '#D4805C' || TEAM.dev !== '#82AAC8' || TEAM.edu !== '#DEB860') fail('team accents drifted')
+if (THEME_STATUS.day.working !== '#8A5406' || THEME_STATUS.night.working !== '#F2B434') fail('status palette drifted')
+if (THEME_TOKENS.day.glass.alpha !== 0.66 || THEME_TOKENS.night.glass.alpha !== 0.62) fail('glass alpha drifted')
+if (THEME_TOKENS.day.city.layers.length !== 4 || THEME_TOKENS.night.city.layers.length !== 4) fail('city layers drifted')
+else ok('palette: two themes, published status colours, 4 city layers')
 
-if (TEAM.lobby !== '#D4805C' || TEAM.dev !== '#82AAC8' || TEAM.edu !== '#DEB860') {
-  fail('team accents drifted from design §2.7')
-}
-if (STATUS.blocked !== '#FFC93B') fail('blocked chip colour drifted from design §2.2')
-if (PALETTE.concrete900 !== '#121924' || PALETTE.concrete500 !== '#3B4A5E') fail('core concrete ramp drifted from design §2.1')
-if (PALETTE.glass500 !== '#456E8F' || PALETTE.steel500 !== '#525F6D') fail('glass/steel tones drifted from design §2.1')
-if (PALETTE.lamp !== '#F2E7C4' || PALETTE.amber !== '#E8A33D') fail('lamp/amber accents drifted from design §2.1')
-else ok('palette matches the design tokens (concrete ramp, glass, steel, lamp, amber)')
+// ------------------------------------------------------- 10b. avatar keys
+const lookKeys = new Set(rosterAgents().map((m) => avatarKey(m.look, 'seated', 0, 2)))
+if (lookKeys.size !== 13) fail(`avatarKey unique ${lookKeys.size}/13`)
+else ok('avatarKey is unique for all 13 looks (cache never mixes two agents)')
+
+// ------------------------------------------------------- 10c. row resolver
+const l3metas = rosterAgents().filter((m) => m.desk.floor === 3)
+const rowsA = sideRows(l3metas)
+const rowsB = sideRows([...l3metas].reverse())
+if (rowsA.front.map((s) => s.meta.id).join(',') !== rowsB.front.map((s) => s.meta.id).join(',')) {
+  fail('sideRows depends on input order (not deterministic)')
+} else ok(`sideRows deterministic: front ${rowsA.front.map((s) => s.meta.id).join('/')} · back ${rowsA.back.map((s) => s.meta.id).join('/')}`)
+if (rowsA.front.map((s) => s.cx).join(',') !== '170,370,570,770') fail(`L3 front slots ${rowsA.front.map((s) => s.cx).join(',')}`)
+if (rowsA.back.map((s) => s.cx).join(',') !== '270,470,670,870') fail(`L3 back slots ${rowsA.back.map((s) => s.cx).join(',')}`)
+else ok('L3 slots: front 170/370/570/770, back 270/470/670/870')
 
 // --------------------------------------------------------- 11. lift journeys
 // Cross-floor delegation is a lift journey (plan §Lift): walk to the lift on
@@ -395,7 +355,7 @@ if (!dwellAt.inLift || dwellAt.liftTo !== 1 || dwellAt.floor !== 3 || dwellAt.wa
 } else ok('mid-dwell: standing in the lift on L3, liftTo = 1')
 
 const liftChipText = liftChip(dwellAt.liftTo ?? 1)
-if (!/^di lift · L[123]$/.test(liftChipText)) fail(`lift chip "${liftChipText}" must be only "di lift · L<floornum>"`)
+if (!/^DI LIFT · L[123]$/.test(liftChipText)) fail(`lift chip "${liftChipText}" must be only "DI LIFT · L<floornum>"`)
 else ok(`lift chip is generic: "${liftChipText}"`)
 
 const midC = journeyAt(xj, tA + 2.6 + tC / 2)

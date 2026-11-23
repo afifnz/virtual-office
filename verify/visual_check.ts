@@ -1,61 +1,73 @@
 /**
- * Visual-geometry checker (3 floors): proves — without a browser — the things
- * the T1.9 review and the legibility pass found broken on a real screenshot.
+ * Visual-geometry checker for the side view (L1/L2/L3). Proves — without a
+ * browser — the numbers the design review is built on:
  *
- *   1. the 13 seed desks split 1/4/8 over L1/L2/L3, each desk on its own floor
- *   2. no nameplate/chip/bubble rect overlaps another plate or a zone plaque
- *   3. no plate leaves the canvas (the "labels spill off the mobile screen" bug)
- *   4. at 1× (zoom ≥2) every nameplate is narrower than its desk slot; at zoom
- *      1 the 2× plates are deliberately wider than the 26 px pitch and are
- *      staggered by placeStacks instead
- *   5. every nameplate carries the whole first name — never a 3-letter stub
- *   6. offline and idle are distinguishable without colour (empty seat + Zzz +
- *      a status word, not just a grey dot)
- *   7. the label text never exceeds the plate that carries it
- *   8. zoom is an integer in 1..4 and the phone default is 1 (pan, not a
- *      fractional "50 %" view); the desktop default is 2 on every floor
- *   9. every floor carries its zone plaque(s), inside the floor's own bounds
+ *   1. the 13 seed desks still split 1 / 4 / 8 and keep their floor
+ *   2. `z` sorts agents into two rows, `x` orders them left→right, and the
+ *      back row is staggered half a pitch (L3: 170/370/570/770 and 270/470/670/870)
+ *   3. same-row pitch 200 px (≥ 180), row scale 0.94, avatar 150/141 px
+ *   4. room 548 px = floor→ceiling INCLUDING the window band, ratio 1:3.65
+ *   5. roof band ≤ 40 px, glass band 485 px, room 3.65 units
+ *   6. nameplates: 24 px, 8 px above the head, 0 overlap, 0 head cover,
+ *      0 off-canvas, 0 on a board, connector when stacked
+ *   7. avatar bbox overlap ≤ 20 %
+ *   8. wall gate: 0 % naked, glass 88.5 %, boards 27 %
+ *   9. all eight dev looks are distinguishable (≥ 1.0), 13 unique avatar keys
+ *  10. both theme palettes exist with the published status colours
+ *  11. the lift shaft/node contract is unchanged
+ *  12. pixel font is used only for the zone plaque and lift numbers
  *
  *   frontend/node_modules/.bin/esbuild verify/visual_check.ts --bundle \
  *     --format=esm --platform=node --outfile=/tmp/visual_check.mjs
  *   node /tmp/visual_check.mjs
- *
- * Pure: it imports only label/viewport maths, so there is no canvas, no jsdom
- * and no browser in the loop.
  */
+import { readFileSync } from 'node:fs'
 import { AGENTS } from '../frontend/src/lib/agents'
 import { rosterAgents } from '../frontend/src/lib/roster'
-import { seatPoint } from '../frontend/src/lib/routes'
-import { FLOORS, FLOOR_IDS, LIFT, liftNode, navOf, obstaclesOf, type FloorId } from '../frontend/src/lib/rooms'
+import { FLOOR_IDS, LIFT, liftNode, navOf, obstaclesOf, type FloorId } from '../frontend/src/lib/rooms'
 import {
-  NAME_GAP,
-  NAME_MAX,
+  PLATE_GAP,
   PLATE_H,
-  buildStacks,
-  deskSlot,
-  labelsOf,
-  placeStacks,
-  plateHeight,
-  plateMode,
-  plateScale,
+  PLATE_STEP,
+  labelAgentsFor,
+  layoutSideLabels,
+  measureSans,
   plateWidth,
-  plaqueRect,
   rectsOverlap,
-  shortName,
-  type LabelAgent,
-  type Rect,
+  sideGate,
 } from '../frontend/src/scene2d/labels'
-import { CHIBI_H, HEAD_H, HEAD_W } from '../frontend/src/scene2d/sprites'
 import {
-  MAX_ZOOM,
-  MIN_ZOOM,
-  clampZoom,
-  fitZoom,
-  worldSize,
-  worldToScreen,
-  type Viewport,
-} from '../frontend/src/scene2d/viewport'
-import { textWidth } from '../frontend/src/scene2d/pixelfont'
+  COMPACT_MAX_W,
+  PHONE_BOARD_MARGIN,
+  PHONE_CTRL_BAND,
+  SIDE_AVATAR_H,
+  SIDE_BOARD_H,
+  SIDE_BOARD_TOP,
+  SIDE_BOARDS,
+  SIDE_GLASS_BOTTOM,
+  SIDE_GLASS_TOP,
+  SIDE_H,
+  SIDE_PPU,
+  SIDE_ROOF_H,
+  SIDE_ROOM_H,
+  SIDE_ROOM_UNITS,
+  SIDE_ROW_SCALE,
+  SIDE_SLOT_PITCH,
+  SIDE_STAGGER,
+  SIDE_W,
+  boardsFor,
+  fitScale,
+  sideRows,
+  sideScale,
+  sideSeats,
+  sideTransform,
+  sideWallGate,
+  visibleDesignRect,
+} from '../frontend/src/scene2d/side'
+import { clampCam, fitZoom } from '../frontend/src/scene2d/viewport'
+import { lookDistance, lookHash } from '../frontend/src/scene2d/avatar'
+import { THEME_STATUS, THEME_TOKENS } from '../frontend/src/scene2d/palette'
+import { PIXEL_FONT_ROLES } from '../frontend/src/scene2d/props-side'
 
 let fails = 0
 const fail = (msg: string) => {
@@ -63,69 +75,31 @@ const fail = (msg: string) => {
   console.log('FAIL', msg)
 }
 const ok = (msg: string) => console.log('ok  ', msg)
-
-/** Canvas CSS size for a screen of `w`×`h` with the app chrome subtracted. */
-interface Screen {
-  name: string
-  canvasW: number
-  canvasH: number
+const near = (a: number, b: number, eps = 0.01) => Math.abs(a - b) <= eps
+/** L∞ clearance between two rects: ≤ 0 means they overlap or touch. */
+const rectGap = (
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+) =>
+  Math.max(
+    Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w)),
+    Math.max(a.y - (b.y + b.h), b.y - (a.y + a.h)),
+  )
+const expect = (label: string, got: unknown, want: unknown) => {
+  const a = JSON.stringify(got)
+  const b = JSON.stringify(want)
+  if (a !== b) fail(`${label}: got ${a}, want ${b}`)
+  else ok(`${label} = ${b}`)
 }
 
-const SCREENS: Screen[] = [
-  // desktop canvas used by the verify screenshots (1000×688)
-  { name: 'desktop 1000×688', canvasW: 1000, canvasH: 688 },
-  // 390×692 phone canvas: HUD + bottom bar subtracted, full-bleed
-  { name: 'mobile 390×692', canvasW: 390, canvasH: 692 },
-]
+const BOUNDS = { w: SIDE_W, h: SIDE_H }
+const RESERVED = SIDE_BOARDS.map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
 
-/** Every agent's label descriptor at one viewport, exactly as render.ts builds it. */
-function labelsFor(vp: Viewport, canvasW: number, canvasH: number, statuses: Map<string, string>): LabelAgent[] {
-  const mode = plateMode(vp.zoom)
-  return rosterAgents()
-    .filter((meta) => meta.desk.floor === vp.floor)
-    .map((meta) => {
-      const seat = seatPoint(meta)
-      const head = worldToScreen(vp, canvasW, canvasH, seat[0], seat[1])
-      const status = statuses.get(meta.id) ?? 'offline'
-      const offline = status === 'offline'
-      return {
-        id: meta.id,
-        name: meta.name,
-        cx: head.x,
-        topY: head.y - CHIBI_H * vp.zoom,
-        head: { x: head.x - (HEAD_W / 2) * vp.zoom, y: head.y - CHIBI_H * vp.zoom, w: HEAD_W * vp.zoom, h: HEAD_H * vp.zoom },
-        offline,
-        chip: mode === 'compact' ? '' : offline ? 'offline' : status === 'idle' ? 'idle' : status === 'blocked' ? 'butuh izin' : status === 'reviewing' ? 'review' : 'terminal',
-        bubble: mode !== 'compact' && !offline && (status === 'working' || status === 'reviewing' || status === 'blocked') ? (status === 'blocked' ? '!' : '...') : '',
-        counters: mode === 'detail' && !offline ? '12M 34T #a1b2c3' : '',
-        dot: mode === 'compact' ? undefined : offline ? '#8B93A5' : '#F2B434',
-      }
-    })
-    // render.ts draws labels in painter order (back rows first); placeStacks is
-    // greedy, so the gate must replay the same order to be faithful.
-    .sort((a, b) => a.topY - b.topY)
-}
-
-/** Zone plaques of this floor, placed like render.ts does (clamped into the canvas). */
-function zoneRects(vp: Viewport, canvasW: number, canvasH: number): Rect[] {
-  return labelsOf(vp.floor).map((zl) => {
-    const c = worldToScreen(vp, canvasW, canvasH, zl.x, zl.z)
-    const r = plaqueRect(zl.text, c.x, c.y)
-    const x = Math.min(Math.max(r.x, 1), Math.max(1, canvasW - r.w - 1))
-    return { x, y: r.y, w: r.w, h: r.h }
-  })
-}
-
-// ------------------------------------------------------- 1. the roster is 13
-
+// ------------------------------------------------------ 1. roster unchanged
 const metas = rosterAgents()
 if (metas.length !== 13) fail(`roster has ${metas.length} desks, want 13`)
 else ok(`roster: ${metas.length} desks, ${new Set(metas.map((m) => m.id)).size} unique ids`)
 if (metas.length !== AGENTS.length) fail(`roster drifted from the seed roster (${metas.length} vs ${AGENTS.length})`)
-const spots = new Set(metas.map((m) => `${m.desk.floor}:${m.desk.x},${m.desk.z}`))
-if (spots.size !== metas.length) fail(`two desks share a position (${spots.size} unique of ${metas.length})`)
-else ok('every desk has its own position (floor + coords)')
-
 const WANT_SPLIT: Record<FloorId, number> = { 1: 1, 2: 4, 3: 8 }
 for (const f of FLOOR_IDS) {
   const n = metas.filter((m) => m.desk.floor === f).length
@@ -133,372 +107,520 @@ for (const f of FLOOR_IDS) {
   else ok(`L${f}: ${n} seed desks on the floor`)
 }
 
-// ------------------------------- 2. zoom is an integer 1..4, defaults per floor
-
-if (MIN_ZOOM !== 1 || MAX_ZOOM !== 4) fail(`zoom range is ${MIN_ZOOM}..${MAX_ZOOM}, want 1..4`)
-else ok(`zoom range is the integer set {${MIN_ZOOM},2,3,4}`)
-
-const clampCases: Array<[number, number]> = [
-  [0, 1],
-  [0.5, 1],
-  [1, 1],
-  [2, 2],
-  [2.4, 2],
-  [3, 3],
-  [4, 4],
-  [9, 4],
-  [-3, 1],
-]
-let clampBad = 0
-for (const [input, want] of clampCases) {
-  const got = clampZoom(input)
-  if (got !== want || !Number.isInteger(got)) {
-    clampBad++
-    fail(`clampZoom(${input}) = ${got}, want integer ${want}`)
-  }
-}
-if (clampBad === 0) ok(`clampZoom keeps ${clampCases.length} inputs in {1,2,3,4} (0.5 → 1, 9 → 4)`)
-
-const phone = SCREENS[1]!
-const desktop = SCREENS[0]!
-let defaultOk = true
-for (const f of FLOOR_IDS) {
-  const pz = fitZoom(f, phone.canvasW, phone.canvasH)
-  const dz = fitZoom(f, desktop.canvasW, desktop.canvasH)
-  if (pz !== 1) {
-    defaultOk = false
-    fail(`L${f} ${phone.name}: default zoom is ${pz}, want 1 (integer, pan)`)
-  }
-  if (dz !== 2) {
-    defaultOk = false
-    fail(`L${f} ${desktop.name}: default zoom is ${dz}, want 2 (integer)`)
-  }
-}
-if (defaultOk) {
-  ok(`${phone.name}: default zoom = 1 on every floor (integer, the floor pans inside the screen)`)
-  ok(`${desktop.name}: default zoom = 2 on every floor (integer)`)
-}
-
-if (plateScale(1) !== 2) fail(`plateScale(1) = ${plateScale(1)}, want 2 (plan §viewport)`)
-else ok('zoom 1 draws the pixel font at scale 2 (integer)')
-if (plateScale(2) !== 1) fail(`plateScale(2) = ${plateScale(2)}, want 1`)
-else ok('zoom 2 draws the pixel font at scale 1 (integer)')
-if (plateHeight('name', 2) !== 2 * PLATE_H) fail(`scale-2 nameplate is ${plateHeight('name', 2)} px tall, want ${2 * PLATE_H}`)
-else ok(`zoom-1 nameplate is ${2 * PLATE_H} px tall (glyph 14 px), zoom-2 is ${PLATE_H} px`)
-
-// --------------------------- 3. every plate shows the whole first name (zoom 1)
-
-const expectedNames = metas.map((m) => (m.name.trim().split(/\s+/)[0] ?? '').toUpperCase().slice(0, NAME_MAX))
-const actualNames = metas.map((m) => shortName(m.name))
-const stubs = actualNames.filter((text, i) => text !== expectedNames[i])
-if (stubs.length) {
-  fail(`${stubs.length} zoom-1 nameplates are stubs: ${actualNames.join(', ')} (want ${expectedNames.join(', ')})`)
-} else {
-  ok(`zoom 1 names: ${actualNames.join(', ')}`)
-}
-const lengths = actualNames.map((t) => t.length)
-const fivePlus = lengths.filter((n) => n >= 5).length
-const shortOnes = actualNames.filter((t) => t.length < 5)
-ok(
-  `zoom-1 name lengths ${Math.min(...lengths)}–${Math.max(...lengths)}; ${fivePlus}/13 are 5–6 chars, the rest are genuinely short first names (${shortOnes.join(', ')})`,
-)
-if (lengths.some((n) => n < 3)) fail(`a nameplate has fewer than 3 letters: ${actualNames.join(', ')}`)
-
-// the old 3-letter stubs must never come back: at zoom 1 buildStacks must
-// reserve exactly the width of the whole first name, not a 3-letter slice.
-const zoom1Statuses = new Map<string, string>(metas.map((m) => [m.id, 'working']))
-const zoom1Agents = labelsFor(
-  { x: 0, z: 0, zoom: 1, floor: 3 },
-  phone.canvasW,
-  phone.canvasH,
-  zoom1Statuses,
-)
-const zoom1Stacks = buildStacks(zoom1Agents, plateMode(1), plateScale(1))
-const zoom1NameWidths = zoom1Stacks.map((s) => s.plates.find((p) => p.key === 'name')!.w)
-const zoom1WantWidths = expectedNames.map((text) => plateWidth(text, { scale: plateScale(1) }))
-const wantById = new Map(metas.map((m, i) => [m.id, zoom1WantWidths[i]!]))
-const narrow = zoom1Stacks.filter((s, i) => zoom1NameWidths[i] !== wantById.get(s.id))
-if (narrow.length) fail(`${narrow.length} zoom-1 nameplates are narrower than the full first name (stubbed)`)
-else ok(`zoom 1 buildStacks reserves the full-name width for all ${metas.length} desks (no 3-letter stub)`)
-
-// ------------------------------------- 4. the default view fits / pans sanely
-// Replayed per floor, per screen: the active floor's desks must all be on
-// screen, every plate must stay inside the canvas, and no two plates may
-// overlap. This is the headless twin of the screenshot review.
-
+// ------------------------------------------------------------- 2. two rows
 for (const f of FLOOR_IDS) {
   const floorMetas = metas.filter((m) => m.desk.floor === f)
-  const size = worldSize(f)
-  for (const scr of SCREENS) {
-    const zoom = fitZoom(f, scr.canvasW, scr.canvasH)
-    const vp: Viewport = { x: 0, z: 0, zoom, floor: f }
-    const scale = plateScale(zoom)
-    const mode = plateMode(zoom)
-    const fits = size.w * zoom <= scr.canvasW && size.h * zoom <= scr.canvasH
-    if (!fits && zoom > MIN_ZOOM) {
-      fail(`${scr.name} L${f}: floor ${size.w * zoom}×${size.h * zoom} px does not fit the ${scr.canvasW}×${scr.canvasH} canvas at zoom ${zoom}`)
-    } else if (fits) {
-      ok(`${scr.name} L${f}: zoom ${zoom} → floor ${size.w * zoom}×${size.h * zoom} px inside ${scr.canvasW}×${scr.canvasH}`)
-    } else {
-      ok(`${scr.name} L${f}: zoom ${zoom} (minimum) → floor pans, every desk still on screen`)
-    }
+  const { front, back } = sideRows(floorMetas)
+  const wantFront = Math.ceil(floorMetas.length / 2)
+  if (front.length !== wantFront || back.length !== floorMetas.length - wantFront) {
+    fail(`L${f}: rows ${front.length}/${back.length}, want ${wantFront}/${floorMetas.length - wantFront}`)
+  } else ok(`L${f}: ${front.length} front + ${back.length} back`)
+  for (const s of [...front, ...back]) {
+    if (s.floorY !== (s.row === 'front' ? 640 : 596)) fail(`L${f} ${s.meta.id}: floor line ${s.floorY}`)
+    if (!near(s.scale, s.row === 'front' ? 1 : SIDE_ROW_SCALE)) fail(`L${f} ${s.meta.id}: row scale ${s.scale}`)
+    if (!near(s.avatarH, s.row === 'front' ? 150 : 141, 0.01)) fail(`L${f} ${s.meta.id}: avatar ${s.avatarH} px`)
+    if (s.headTop < SIDE_ROOF_H) fail(`L${f} ${s.meta.id}: head above the roof (${s.headTop})`)
+    if (s.cx < 0 || s.cx > SIDE_W) fail(`L${f} ${s.meta.id}: slot ${s.cx} outside the stage`)
+  }
+}
 
-    let offscreen = 0
-    for (const meta of floorMetas) {
-      const seat = seatPoint(meta)
-      const p = worldToScreen(vp, scr.canvasW, scr.canvasH, seat[0], seat[1])
-      // the seat must be inside, and so must the head (16 world px above it)
-      const headTop = p.y - CHIBI_H * zoom
-      if (p.x < 0 || p.x > scr.canvasW || p.y < 0 || p.y > scr.canvasH || headTop < 0) {
-        offscreen++
-        fail(`${scr.name} L${f}: desk ${meta.id} is off-canvas at (${p.x.toFixed(0)},${p.y.toFixed(0)})`)
-      }
+// L3 slot table is the design's measured table
+const l3 = sideRows(metas.filter((m) => m.desk.floor === 3))
+const wantFrontL3: Array<[string, number]> = [
+  ['dev', 170],
+  ['coder2', 370],
+  ['planner', 570],
+  ['uiux', 770],
+]
+const wantBackL3: Array<[string, number]> = [
+  ['coder', 270],
+  ['reviewer', 470],
+  ['tester', 670],
+  ['devops', 870],
+]
+for (const [row, want] of [
+  ['front', wantFrontL3],
+  ['back', wantBackL3],
+] as const) {
+  const got = row === 'front' ? l3.front : l3.back
+  for (let i = 0; i < want.length; i++) {
+    const [id, x] = want[i]!
+    const seat = got[i]
+    if (!seat || seat.meta.id !== id || !near(seat.cx, x, 0.001)) {
+      fail(`L3 ${row} slot ${i}: got ${seat?.meta.id}@${seat?.cx}, want ${id}@${x}`)
     }
-    if (offscreen === 0) ok(`${scr.name} L${f}: all ${floorMetas.length} desks and their heads are on screen`)
+  }
+  ok(`L3 ${row} slots: ${got.map((s) => `${s.meta.id.toUpperCase()} ${s.cx}`).join(' · ')}`)
+}
 
-    // ----------------------------------------- 5. plates stay on screen
-    const statuses = new Map<string, string>(
-      floorMetas.map((m) => [m.id, m.id === 'edu-designer' ? 'offline' : 'working']),
+// same-row pitch and inter-row stagger
+for (const f of FLOOR_IDS) {
+  const { front, back } = sideRows(metas.filter((m) => m.desk.floor === f))
+  for (const row of [front, back]) {
+    for (let i = 1; i < row.length; i++) {
+      const d = row[i]!.cx - row[i - 1]!.cx
+      if (!near(d, SIDE_SLOT_PITCH, 0.001)) fail(`L${f} ${row[i]!.row}: pitch ${d}, want ${SIDE_SLOT_PITCH}`)
+    }
+  }
+  if (front.length && back.length) {
+    const d = Math.abs(back[0]!.cx - front[0]!.cx)
+    if (!near(d, SIDE_STAGGER, 0.001)) fail(`L${f}: back row stagger ${d}, want ${SIDE_STAGGER}`)
+  }
+  if (front.length > 1) ok(`L${f}: same-row pitch ${SIDE_SLOT_PITCH} px (min 180), stagger ${SIDE_STAGGER} px`)
+}
+
+// -------------------------------------------------------- 3. room + avatar
+if (!near(SIDE_ROOM_H, 548, 0.001)) fail(`room height ${SIDE_ROOM_H}, want 548`)
+if (!near(SIDE_ROOM_UNITS, 3.6533, 0.001)) fail(`room units ${SIDE_ROOM_UNITS}, want 3.6533`)
+const ratio = SIDE_ROOM_H / SIDE_AVATAR_H
+if (ratio < 3 || ratio > 4) fail(`room:avatar ratio 1:${ratio.toFixed(2)}, want 1:3–1:4`)
+else ok(`room ${SIDE_ROOM_H} px = ${SIDE_ROOM_UNITS.toFixed(3)} units; avatar 150 px; ratio 1:${ratio.toFixed(2)}`)
+if (SIDE_ROOF_H > 40) fail(`roof band ${SIDE_ROOF_H} px > 40`)
+else ok(`roof band ${SIDE_ROOF_H} px (≤ 40), no sky above the ceiling`)
+const glassH = SIDE_GLASS_BOTTOM - SIDE_GLASS_TOP
+if (glassH !== 485) fail(`glass band ${glassH} px, want 485`)
+else ok(`curtain wall ${glassH} px, inside the 548 px room`)
+if (SIDE_PPU !== 150) fail(`camera ${SIDE_PPU} px/unit, want 150`)
+else ok('camera 150 px/unit on both axes (not fit-to-width)')
+if (SIDE_BOARD_H !== 148) fail(`board height ${SIDE_BOARD_H}, want 148`)
+else ok(`six boards ${SIDE_BOARD_H} px tall (≈1.0 × avatar), y ${SIDE_BOARD_TOP}–${SIDE_BOARD_TOP + SIDE_BOARD_H}`)
+
+// ------------------------------------------------------- 4. nameplate gate
+const statusMap = new Map(
+  metas.map((m) => [m.id, { status: 'working', shape: 'circle' as const, colour: THEME_STATUS.day.working }]),
+)
+for (const f of FLOOR_IDS) {
+  const seats = sideSeats(metas.filter((m) => m.desk.floor === f))
+  const labels = labelAgentsFor(seats, statusMap)
+  const { plates, violations } = layoutSideLabels(labels, BOUNDS, RESERVED)
+  const gate = sideGate(seats, plates, BOUNDS)
+  if (violations.length) fail(`L${f} layout: ${violations.join('; ')}`)
+  if (gate.plateOverlaps !== 0) fail(`L${f}: ${gate.plateOverlaps} plate overlaps`)
+  if (gate.plateOnHead !== 0) fail(`L${f}: ${gate.plateOnHead} plates cover another head`)
+  if (gate.avatarOverlapPct > 20) fail(`L${f}: avatar overlap ${gate.avatarOverlapPct} % > 20 %`)
+  if (seats.filter((x) => x.row === 'front').length > 1 && gate.minSameRowPx < 180) fail(`L${f}: same-row pitch ${gate.minSameRowPx} < 180`)
+  if (gate.minPlateHeadGap < PLATE_GAP - 0.01) fail(`L${f}: plate↔head gap ${gate.minPlateHeadGap} < ${PLATE_GAP}`)
+  for (const p of plates) {
+    if (p.h !== PLATE_H) fail(`L${f} ${p.id}: plate ${p.h} px, want ${PLATE_H}`)
+    if (p.y + p.h > BOUNDS.h || p.x + p.w > BOUNDS.w || p.x < 0 || p.y < 0) fail(`L${f} ${p.id}: plate off-canvas`)
+    for (const b of RESERVED) if (rectsOverlap(p, b)) fail(`L${f} ${p.id}: plate sits on a board`)
+    const a = labels.find((q) => q.id === p.id)!
+    if (p.connector && p.y + p.h < a.headTop - PLATE_GAP - 0.5) {
+      if (p.h !== PLATE_H) fail(`L${f} ${p.id}: connector plate has the wrong height`)
+    }
+    if (!p.connector && !near(a.headTop - (p.y + p.h), PLATE_GAP, 0.01)) {
+      fail(`L${f} ${p.id}: plate sits ${a.headTop - (p.y + p.h)} px above the head, want ${PLATE_GAP}`)
+    }
+  }
+  if (!gate.violations.length) {
+    ok(
+      `L${f}: ${plates.length} plates · overlap ${gate.plateOverlaps} · on-head ${gate.plateOnHead} · avatar overlap ${gate.avatarOverlapPct} % · pitch ${gate.minSameRowPx} · gap ${gate.minPlateHeadGap}`,
     )
-    const agents = labelsFor(vp, scr.canvasW, scr.canvasH, statuses)
-    const reserved = zoneRects(vp, scr.canvasW, scr.canvasH)
-    const stacks = buildStacks(agents, mode, scale)
-    const placed = placeStacks(stacks, { w: scr.canvasW, h: scr.canvasH }, reserved, scale)
+  }
+}
 
-    let outside = 0
-    for (const p of placed) {
-      if (p.x < 1 || p.y < 1 || p.x + p.w > scr.canvasW - 1 || p.y + p.h > scr.canvasH - 1) {
-        outside++
-        fail(`${scr.name} L${f}: plate ${p.id}/${p.key} leaves the canvas (${p.x},${p.y} ${p.w}×${p.h})`)
+// plate width is measured, not guessed
+if (PLATE_STEP !== 27) fail(`plate step ${PLATE_STEP}, want 27`)
+const sample = plateWidth('BAGAS', true)
+if (sample < 40 || sample > 100) fail(`plateWidth(BAGAS) = ${sample}, outside a sane 40–100 px`)
+else ok(`plate widths: BAGAS ${sample} px, WAHYU ${plateWidth('WAHYU', true)} px (measured sans, not 5×7)`)
+if (measureSans('MMMM', 11.5, 700) <= measureSans('iiii', 11.5, 700)) fail('measureSans is not width-aware')
+else ok('measureSans is width-aware (MMMM wider than iiii)')
+
+// --------------------------------------------------------- 5. wall metrics
+const wall = sideWallGate()
+if (wall.emptyPct > 30) fail(`wall empty ${wall.emptyPct} % > 30 %`)
+if (wall.emptyRunPct > 30) fail(`wall empty run ${wall.emptyRunPct} % > 30 %`)
+if (wall.emptyColumns !== 0) fail(`${wall.emptyColumns} columns cross the empty-run limit`)
+if (wall.glassPct < 80) fail(`glass+city covers ${wall.glassPct} %, want ≥ 80 %`)
+if (wall.panelPct < 20) fail(`boards cover ${wall.panelPct} %, want ≥ 20 %`)
+ok(`wall: naked ${wall.emptyPct} % · glass+city ${wall.glassPct} % · boards ${wall.panelPct} %`)
+
+// ---------------------------------------------------- 6. look distinctness
+const dev = metas.filter((m) => m.desk.floor === 3)
+let weakest = { pair: '', d: Infinity }
+let under = 0
+for (let i = 0; i < dev.length; i++) {
+  for (let j = i + 1; j < dev.length; j++) {
+    const d = lookDistance(dev[i]!.look, dev[j]!.look)
+    if (d < weakest.d) weakest = { pair: `${dev[i]!.id}↔${dev[j]!.id}`, d }
+    if (d < 1) under++
+  }
+}
+if (under) fail(`${under} dev look pairs are closer than 1.0 (weakest ${weakest.pair} ${weakest.d})`)
+else ok(`look distinctness: 8/8 ≥ 1.0 (weakest ${weakest.pair} ${weakest.d})`)
+const keys = new Set(metas.map((m) => lookHash(m.look)))
+if (keys.size !== metas.length) fail(`avatar keys collide: ${keys.size} unique of ${metas.length}`)
+else ok(`avatar keys: ${keys.size} unique for ${metas.length} looks`)
+
+// --------------------------------------------------------- 7. theme tokens
+for (const theme of ['day', 'night'] as const) {
+  const t = THEME_TOKENS[theme]
+  if (!t.glass.surface || !t.city.layers?.length) fail(`${theme} palette is incomplete`)
+  if (THEME_STATUS[theme].working === undefined) fail(`${theme} status palette is incomplete`)
+}
+const day = THEME_STATUS.day
+if (day.working !== '#8A5406' || day.blocked !== '#B33A12' || day.ok !== '#116B33' || day.offline !== '#556073') {
+  fail(`day status colours drifted: ${JSON.stringify(day)}`)
+} else ok('day status colours match the 4.5:1 table (working/blocked/ok/offline)')
+if (THEME_TOKENS.day.city.skyTop === THEME_TOKENS.night.city.skyTop) fail('day and night share a sky')
+else ok('two city palettes: Daylight Atrium and Sky Lobby')
+
+// -------------------------------------------------------------- 8. the lift
+for (const f of FLOOR_IDS) {
+  const lift = LIFT[f]
+  const shaft = obstaclesOf(f).find((o) => o.id === `lift-${f}`)
+  if (!shaft) fail(`L${f}: lift shaft is not an obstacle`)
+  else if (!near(shaft.x1, lift.shaft.x1, 1e-9) || !near(shaft.z2, lift.shaft.z2, 1e-9)) fail(`L${f}: lift obstacle drifted`)
+  const node = liftNode(f)
+  if (!navOf(f).some((n) => n.id === node.id)) fail(`L${f}: lift node ${node.id} missing`)
+  else ok(`L${f}: lift shaft + node ${node.id} (${node.x},${node.z}) wired`)
+}
+
+// --------------------------------------------------------- 9. font roles
+if (PIXEL_FONT_ROLES.length !== 2 || !PIXEL_FONT_ROLES.includes('zone-plaque') || !PIXEL_FONT_ROLES.includes('lift-floor-number')) {
+  fail(`pixel font roles: ${PIXEL_FONT_ROLES.join(',')} — only zone plaque + lift number`)
+} else ok('pixel font roles are exactly the zone plaque and the lift floor number')
+
+// ----------------------------------------------------- 10. stage bands sum
+const bands = SIDE_ROOF_H + (SIDE_GLASS_BOTTOM - SIDE_ROOF_H) + (588 - SIDE_GLASS_BOTTOM) + (648 - 588) + (SIDE_H - 648)
+if (bands !== SIDE_H) fail(`bands sum ${bands}, want ${SIDE_H}`)
+else ok(`stage bands sum to ${SIDE_H} px (roof + window + spandrel + floor + slab)`)
+
+// every agent has a unique (floor, slot) pair
+const placed = new Set<string>()
+for (const f of FLOOR_IDS) {
+  for (const s of sideSeats(metas.filter((m) => m.desk.floor === f))) placed.add(`${f}:${s.cx}`)
+}
+if (placed.size !== metas.length) fail(`${metas.length - placed.size} agents share a slot`)
+else ok(`every agent has its own (floor, slot): ${placed.size}`)
+
+// ------------------------------------------- 11. the phone frame (390×692)
+
+/**
+ * The phone shows the WHOLE floor by default — the R&D mockup framing, not a
+ * cropped cluster. The 1000×688 sheet is scaled to fit the 390 px canvas
+ * (0.39 CSS px per design px, so an avatar is 58.5 CSS px), which is why the
+ * phone zoom is fractional: the fit is 0.78, and 2 (the 150 px/unit camera) is
+ * the top of the range. Four things follow, and each one was a reported
+ * defect:
+ *
+ *   a. every desk on the floor is fully inside the canvas (8 on L3, not the
+ *      ~2.6 units the half-scale window showed), so no agent is cut off;
+ *   b. every nameplate rect keeps ≥ 4 CSS px from the canvas edge — "BAGA…";
+ *   c. no control that is actually on screen overlaps a desk rect;
+ *   d. the pad only exists while panning can do something (zoomed in), and
+ *      even then it sits in the band the painter keeps clear.
+ *
+ * The overlay geometry is parsed from `global.css`, so the check follows the
+ * real CSS instead of a copy of it.
+ */
+{
+  const cssPath = 'frontend/src/styles/global.css'
+  let css = ''
+  try {
+    css = readFileSync(cssPath, 'utf8')
+  } catch {
+    fail(`cannot read ${cssPath} — run the check from the repo root`)
+  }
+  const vars: Record<string, number> = {}
+  for (const m of css.matchAll(/--m-([a-z0-9-]+):\s*([0-9.]+)px/g)) vars[m[1]!] = Number(m[2]!)
+  const allVars: Record<string, number> = {}
+  for (const m of css.matchAll(/--([a-z0-9-]+):\s*([0-9.]+)px/g)) allVars[m[1]!] = Number(m[2]!)
+  const needed = [
+    'canvas-w',
+    'canvas-h',
+    'toolbar',
+    'zoom-top',
+    'zoom-right',
+    'zoom-w',
+    'zoom-h',
+    'pad-left',
+    'pad-bottom',
+    'pad-w',
+    'pad-h',
+    'chip-top',
+    'chip-left',
+    'chip-h',
+    'chip-w',
+  ]
+  const missing = needed.filter((k) => vars[k] === undefined)
+  if (missing.length) fail(`global.css: missing phone geometry (${missing.map((k) => `--m-${k}`).join(', ')})`)
+  else ok(`phone geometry from global.css: canvas ${vars['canvas-w']}×${vars['canvas-h']}, zoom ${vars['zoom-w']}×${vars['zoom-h']}, pad ${vars['pad-w']}×${vars['pad-h']}, chip ${vars['chip-w']}×${vars['chip-h']}`)
+
+  expect('COMPACT_MAX_W (phone board breakpoint)', COMPACT_MAX_W, 640)
+
+  const PW = vars['canvas-w'] ?? 390
+  const PH = vars['canvas-h'] ?? 692
+  const band = PHONE_CTRL_BAND
+  const fit = fitScale(PW, PH, band)
+  const fitZ = fitZoom(3, PW, PH, band)
+  const ph = sideTransform(PW, PH, { camX: SIDE_W / 2, zoom: fitZ, floor: 3 }, band)
+  const stageBottom = ph.top + SIDE_H * ph.s
+  const r3 = (v: number) => Math.round(v * 1000) / 1000
+
+  // (a) the default framing: the whole sheet, at a fractional zoom
+  expect(`phone fit zoom (${PW}×${PH})`, fitZ, 0.78)
+  expect(`phone camera at the fit (${PW}×${PH})`, { s: r3(ph.s), left: r3(ph.left), top: r3(ph.top) }, { s: 0.39, left: 0, top: 211.84 })
+  if (Math.abs(SIDE_W * ph.s - PW) > 0.5) {
+    fail(`the fit leaves the stage ${r3(SIDE_W * ph.s)} CSS px wide on a ${PW} px canvas — not a fit-to-floor`)
+  }
+  const avatarCss = SIDE_AVATAR_H * ph.s
+  if (avatarCss < 55 || avatarCss > 60) fail(`avatar is ${r3(avatarCss)} CSS px at the fit, want 55–60 (the mockup)`)
+  else ok(`the whole 1000×688 sheet fits: stage ${r3(SIDE_W * ph.s)}×${r3(SIDE_H * ph.s)} CSS px at y ${r3(ph.top)}–${r3(stageBottom)}, avatar ${r3(avatarCss)} px (mockup 55–60)`)
+  if (!near(clampCam(999, PW, PH, fitZ, band), SIDE_W / 2, 0.01)) {
+    fail(`pan is not locked at the fit: camX ${clampCam(999, PW, PH, fitZ, band)}`)
+  } else ok('pan is locked at the fit (nothing to pan to, so the pad stays hidden)')
+
+  expect(
+    'canvas height = app − HUD − bar',
+    PH,
+    (vars['app-h'] ?? 0) - (vars['hud'] ?? 0) - (vars['toolbar'] ?? 0),
+  )
+  // the gate's copy of the HUD/bar heights must be the layout's own numbers
+  expect('--m-hud = --hud-h', vars['hud'], allVars['hud-h'])
+  expect('--m-toolbar = --toolbar-h', vars['toolbar'], allVars['toolbar-h'])
+
+  const zoomBox = {
+    x: PW - (vars['zoom-right'] ?? 0) - (vars['zoom-w'] ?? 0),
+    y: vars['zoom-top'] ?? 0,
+    w: vars['zoom-w'] ?? 0,
+    h: vars['zoom-h'] ?? 0,
+  }
+  const chipBox = {
+    x: vars['chip-left'] ?? 0,
+    y: vars['chip-top'] ?? 0,
+    w: vars['chip-w'] ?? 0,
+    h: vars['chip-h'] ?? 0,
+  }
+  // the pad lives in `.app` coordinates; the canvas already excludes the bar, so
+  // its canvas-relative top is height − pad-bottom − pad-height
+  const padAt = (h: number) => ({
+    x: vars['pad-left'] ?? 0,
+    y: h - (vars['pad-bottom'] ?? 0) - (vars['pad-h'] ?? 0),
+    w: vars['pad-w'] ?? 0,
+    h: vars['pad-h'] ?? 0,
+  })
+  for (const [name, c] of [['zoom', zoomBox], ['chip', chipBox], ['pad', padAt(PH)]] as const) {
+    if (c.w <= 0 || c.h <= 0) fail(`${name} control has no size`)
+    else if (c.x < 0 || c.y < 0 || c.x + c.w > PW || c.y + c.h > PH) fail(`${name} control leaves the ${PW}×${PH} canvas (${JSON.stringify(c)})`)
+    else ok(`${name} control ${Math.round(c.x)},${Math.round(c.y)} ${c.w}×${c.h} is inside the canvas`)
+  }
+  if (zoomBox.x < chipBox.x + chipBox.w + 4) fail(`zoom control starts at x ${zoomBox.x}, the chip ends at ${chipBox.x + chipBox.w} (need 4 px clear)`)
+  else ok(`top band: chip ${chipBox.x}…${chipBox.x + chipBox.w} · zoom ${zoomBox.x}…${zoomBox.x + zoomBox.w}, 4 px apart`)
+
+  // the painter's reserved band and the pad must agree
+  expect('control band (painter vs css)', band, vars['ctrl-band'])
+  if ((vars['pad-bottom'] ?? 0) + (vars['pad-h'] ?? 0) > band) {
+    fail(`the pad needs ${(vars['pad-bottom'] ?? 0) + (vars['pad-h'] ?? 0)} px but the painter reserves ${band}`)
+  }
+
+  /**
+   * (c) no control that is on screen may sit on a desk. At the fit zoom the
+   * stage is 268 px tall in the middle of the canvas, so the zoom control and
+   * the chip live in the empty band above it and the pad is not rendered at
+   * all; once the user zooms in the stage grows, the pad appears, and the
+   * reserved bottom band is what keeps it off the front row. Heights 470…692
+   * cover a short phone (browser chrome eats the difference) up to 692.
+   */
+  const HEIGHTS = [692, 640, 600, 560, 520, 470]
+  let deskHits = 0
+  /** closest the D-pad ever comes to a desk rect (needs ≥ 8) */
+  let padDeskGap = Infinity
+  let padHidden = 0
+  for (const h of HEIGHTS) {
+    const pad = padAt(h)
+    const fitHere = fitZoom(3, PW, h, band)
+    for (const zoom of [fitHere, 1, 1.5, 2]) {
+      const t = sideTransform(PW, h, { camX: SIDE_W / 2, zoom, floor: 3 }, band)
+      const bottom = t.top + SIDE_H * t.s
+      if (t.s <= 0) fail(`${PW}×${h} zoom ${zoom}: the stage has no scale`)
+      // the pad is only rendered while the stage is wider than the canvas
+      const canPan = SIDE_W * t.s > PW + 0.5
+      if (!canPan) padHidden++
+      if (pad.y < bottom + 4) {
+        fail(`${PW}×${h} zoom ${zoom}: the stage ends at ${bottom.toFixed(1)}, the pad starts at ${pad.y} (need 4 px clear)`)
       }
-    }
-    if (outside === 0) ok(`${scr.name} L${f}: all ${placed.length} plates inside ${scr.canvasW}×${scr.canvasH} (edges clamped, ≥1 px margin)`)
-
-    // ----------------------------------------------- 6. no plate overlap
-    let overlaps = 0
-    for (let i = 0; i < placed.length; i++) {
-      for (let j = i + 1; j < placed.length; j++) {
-        const a = placed[i]!
-        const b = placed[j]!
-        if (rectsOverlap(a, b)) {
-          overlaps++
-          if (overlaps <= 5) fail(`${scr.name} L${f}: ${a.id}/${a.key} overlaps ${b.id}/${b.key}`)
-        }
-      }
-    }
-    if (overlaps === 0) ok(`${scr.name} L${f}: no two plates overlap (${placed.length} rects)`)
-
-    let onPlaque = 0
-    for (const p of placed) {
-      for (const z of reserved) {
-        if (rectsOverlap(p, z)) {
-          onPlaque++
-          fail(`${scr.name} L${f}: plate ${p.id}/${p.key} sits on a zone plaque`)
-        }
-      }
-    }
-    if (onPlaque === 0) ok(`${scr.name} L${f}: no plate covers a zone plaque`)
-
-    // ------------------- 6b. no plate sits on a colleague's head (zoom ≥2)
-    // A plate that lands on another agent's head reads as *that* agent's label
-    // (a bubble tail touching someone's hair is the worst offender). From zoom
-    // 2 up buildStacks drops the bubble instead of letting it reach a
-    // colleague's head. At zoom 1 the 2× compact nameplates are deliberately
-    // wider than the desk pitch — placeStacks staggers them — so the rule
-    // starts at zoom 2, where a plate and a head are the same scale.
-    if (scale === 1) {
-      const heads = agents.map((a) => ({ id: a.id, ...a.head }))
-      let onHead = 0
-      for (const p of placed) {
-        for (const hd of heads) {
-          if (hd.id === p.id) continue
-          if (rectsOverlap(p, hd)) {
-            onHead++
-            if (onHead <= 5) fail(`${scr.name} L${f}: plate ${p.id}/${p.key} covers ${hd.id}'s head`)
+      const boxes: Array<[string, typeof pad]> = [
+        ['zoom', zoomBox],
+        ['chip', chipBox],
+      ]
+      if (canPan) boxes.push(['pad', pad])
+      for (const f of FLOOR_IDS) {
+        for (const s of sideSeats(metas.filter((m) => m.desk.floor === f))) {
+          const desk = {
+            x: t.left + (s.cx - 64 * s.scale) * t.s,
+            y: t.top + (s.floorY - s.avatarH) * t.s,
+            w: 128 * s.scale * t.s,
+            h: (s.avatarH + 4) * t.s,
+          }
+          for (const [name, c] of boxes) {
+            if (rectsOverlap(c, desk)) {
+              deskHits++
+              fail(`${PW}×${h} zoom ${zoom}: the ${name} control covers L${f} ${s.meta.id}'s desk (${JSON.stringify(c)} vs ${JSON.stringify(desk)})`)
+            }
+          }
+          // the pad must also keep a real gap, not just avoid a pixel overlap
+          if (canPan) {
+            const gap = rectGap(pad, desk)
+            padDeskGap = Math.min(padDeskGap, gap)
+            if (gap < 8) {
+              fail(
+                `${PW}×${h} zoom ${zoom}: the pad is ${gap.toFixed(1)} px from L${f} ${s.meta.id}'s desk (need ≥ 8)`,
+              )
+            }
           }
         }
       }
-      if (onHead === 0) ok(`${scr.name} L${f}: no plate covers another agent's head (${placed.length} plates)`)
     }
+  }
+  if (!deskHits) ok(`0 of ${metas.length} desks are covered by a visible control at ${HEIGHTS.join('/')} × zoom fit–2`)
+  if (padHidden !== HEIGHTS.length) fail(`the pad is rendered at the fit zoom (${padHidden} of ${HEIGHTS.length} heights hid it)`)
+  else ok(`the pad is hidden at the fit zoom on all ${HEIGHTS.length} heights, and keeps ${padDeskGap.toFixed(1)} px from the nearest desk once it appears (≥ 8)`)
 
-    // --------------------------- 7. nameplates fit their slot at 1×, read at 2×
-    const slot = deskSlot(zoom)
-    const widths = agents.map((a) => plateWidth(shortName(a.name), { dot: Boolean(a.dot), scale }))
-    const widest = Math.max(...widths)
-    if (scale === 1) {
-      let tooWide = 0
-      for (const a of agents) {
-        const text = shortName(a.name)
-        const w = plateWidth(text, { dot: Boolean(a.dot), scale })
-        if (w > slot) {
-          tooWide++
-          fail(`${scr.name} L${f}: nameplate "${text}" is ${w} px wide, desk slot is ${slot.toFixed(1)} px`)
+  // a desktop window narrowed by the roster rail keeps its 150 px/unit camera
+  const narrow = sideTransform(720, 688, { camX: SIDE_W / 2, zoom: 2, floor: 3 })
+  expect('desktop canvas 720×688 (sidebar open) keeps the camera', { s: narrow.s, top: narrow.top }, { s: 1, top: 0 })
+  const wide = sideTransform(1280, 800, { camX: SIDE_W / 2, zoom: 2, floor: 3 })
+  expect('desktop camera (1280×800, zoom 2) unchanged', { s: wide.s, top: wide.top }, { s: 1, top: 56 })
+
+  // (c) the phone wall is the compact set, laid out inside the window
+  if (boardsFor(false).length !== 6) fail(`boardsFor(false) has ${boardsFor(false).length} boards, want 6`)
+  const hiddenBoards = ['pinboard', 'burndown', 'architecture']
+  for (const id of hiddenBoards) {
+    if (boardsFor(true).some((b) => b.id === id)) fail(`the phone wall still hangs ${id}`)
+  }
+  expect('phone wall board ids', boardsFor(true).map((b) => b.id), ['plaque', 'status', 'clock'])
+  // the six-board wall would now fit the width, but its 8 px labels land on
+  // 3.1 CSS px at the fit — wallpaper, not a board. The three-card wall stays.
+  const boardLabelCss = 8 * fit
+  if (boardLabelCss >= 4) {
+    fail(`an 8 px board label is ${boardLabelCss.toFixed(1)} CSS px at the fit — the compact wall would be unnecessary`)
+  } else {
+    ok(`the six-board wall's 8 px labels land on ${boardLabelCss.toFixed(1)} CSS px at the fit, so the phone keeps three cards`)
+  }
+
+  /**
+   * (a) + (b) every desk, board and nameplate stays on screen. Swept over the
+   * phone widths people actually hold (390/375/360/320) plus 760 (the widest
+   * compact canvas), at the fit zoom: the whole floor is visible, the cards
+   * keep ≥ 8 CSS px from the screen edge and every plate rect ≥ 4.
+   */
+  const WIDTHS = [760, 390, 375, 360, 320]
+  let fitDesks = 0
+  let fitPlates = 0
+  let worstPlateEdge = Infinity
+  for (const w of WIDTHS) {
+    const fitHere = fitZoom(3, w, PH, band)
+    const sHere = sideScale(w, PH, fitHere, band)
+    const t = sideTransform(w, PH, { camX: SIDE_W / 2, zoom: fitHere, floor: 3 }, band)
+    const win = visibleDesignRect(w, PH, fitHere, SIDE_W / 2, band)
+    const wall = boardsFor(true, win, Math.ceil(PHONE_BOARD_MARGIN / sHere))
+    let worstEdge = Infinity
+    for (const b of wall) {
+      const sx = t.left + b.x * t.s
+      const sy = t.top + SIDE_BOARD_TOP * t.s
+      const sw = b.w * t.s
+      const sh = b.h * t.s
+      worstEdge = Math.min(worstEdge, sx, sy, w - (sx + sw), PH - (sy + sh))
+      if (sx < 8 - 1e-6 || sy < 8 - 1e-6 || sx + sw > w - 8 + 1e-6 || sy + sh > PH - 8 + 1e-6) {
+        fail(
+          `${w} px: board ${b.id} leaves the ${w}×${PH} canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)}, y ${sy.toFixed(1)}…${(sy + sh).toFixed(1)})`,
+        )
+      }
+    }
+    ok(`${w} px: 3 boards at x ${wall.map((b) => Math.round(b.x)).join(',')} keep ${worstEdge.toFixed(1)} px inside the canvas (≥ 8)`)
+
+    // (a) the fit really shows the floor: desk rects inside the canvas = agents
+    let hereDesks = 0
+    for (const f of FLOOR_IDS) {
+      const seats = sideSeats(metas.filter((m) => m.desk.floor === f))
+      for (const s of seats) {
+        const x = t.left + (s.cx - 64 * s.scale) * t.s
+        const y = t.top + (s.floorY - s.avatarH) * t.s
+        const dw = 128 * s.scale * t.s
+        const dh = (s.avatarH + 4) * t.s
+        if (x >= 0 && y >= 0 && x + dw <= w && y + dh <= PH) hereDesks++
+        else fail(`${w} px: L${f} ${s.meta.id}'s desk is cut by the canvas (${x.toFixed(1)},${y.toFixed(1)} ${dw.toFixed(1)}×${dh.toFixed(1)})`)
+      }
+    }
+    if (hereDesks !== metas.length) fail(`${w} px: ${hereDesks} of ${metas.length} desks visible at the fit`)
+    else if (w === PW) fitDesks = hereDesks
+
+    // (b) every nameplate, at the fit: ≥ 4 CSS px inside the canvas
+    const margin = Math.ceil(4 / sHere)
+    for (const f of FLOOR_IDS) {
+      const seats = sideSeats(metas.filter((m) => m.desk.floor === f))
+      const labels = labelAgentsFor(seats, statusMap)
+      const reserved = wall.map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
+      const { plates, violations } = layoutSideLabels(labels, BOUNDS, reserved, { ...win, margin, visibleHeadsOnly: true })
+      if (violations.length) fail(`${w} px: L${f} ${violations.join('; ')}`)
+      const gate = sideGate(seats, plates, BOUNDS, { ...win, margin, visibleHeadsOnly: true })
+      if (gate.plateOverlaps !== 0) fail(`${w} px: L${f} ${gate.plateOverlaps} plate overlaps`)
+      if (gate.plateOnHead !== 0) fail(`${w} px: L${f} ${gate.plateOnHead} plates cover another head`)
+      for (const p of plates) {
+        const sx = t.left + p.x * t.s
+        const sy = t.top + p.y * t.s
+        const sw = p.w * t.s
+        const sh = p.h * t.s
+        const edge = Math.min(sx, sy, w - (sx + sw), PH - (sy + sh))
+        worstPlateEdge = Math.min(worstPlateEdge, edge)
+        if (edge < 4 - 1e-6) {
+          fail(`${w} px L${f} ${p.id}: nameplate leaves the canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)} of ${w}, ${edge.toFixed(1)} px from the edge)`)
         }
-        // the glyphs must fit the plate they are drawn into
-        const glyphs = textWidth(text, scale)
-        if (glyphs > w) {
-          tooWide++
-          fail(`${scr.name} L${f}: text "${text}" is ${glyphs} px, plate is ${w} px`)
+        if (w === PW) fitPlates++
+      }
+    }
+  }
+  if (fitDesks === metas.length) {
+    ok(`${fitDesks}/${metas.length} desks visible at the fit on ${PW} px (1/4/8 per floor) — no agent is cropped`)
+  }
+  ok(`${fitPlates} nameplates at the fit on ${PW} px, all ≥ ${worstPlateEdge.toFixed(1)} px inside the canvas (≥ 4)`)
+
+  /**
+   * Zoomed in the stage is wider than the canvas, so panning is active; the
+   * plates of the agents still on screen must stay ≥ 4 px inside the canvas at
+   * every pan position (a plate whose head has left the window is cropped with
+   * its desk).
+   */
+  for (const camX of [SIDE_W / 2, SIDE_W / 2 - 110, SIDE_W / 2 + 110]) {
+    const zoom = 2
+    const ct = sideTransform(PW, PH, { camX, zoom, floor: 3 }, band)
+    const cwin = visibleDesignRect(PW, PH, zoom, camX, band)
+    const margin = Math.ceil(4 / sideScale(PW, PH, zoom, band))
+    let visiblePlates = 0
+    for (const f of FLOOR_IDS) {
+      const seats = sideSeats(metas.filter((m) => m.desk.floor === f))
+      const labels = labelAgentsFor(seats, statusMap)
+      const wall = boardsFor(true, visibleDesignRect(PW, PH, fitZ, SIDE_W / 2, band), Math.ceil(PHONE_BOARD_MARGIN / fit))
+      const reserved = wall.map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
+      const { plates, violations } = layoutSideLabels(labels, BOUNDS, reserved, {
+        ...cwin,
+        margin,
+        visibleHeadsOnly: true,
+      })
+      const gate = sideGate(seats, plates, BOUNDS, { ...cwin, margin, visibleHeadsOnly: true })
+      if (violations.length) fail(`zoom ${zoom} camX ${camX}: L${f} ${violations.join('; ')}`)
+      if (gate.plateOverlaps !== 0) fail(`zoom ${zoom} camX ${camX}: L${f} ${gate.plateOverlaps} plate overlaps`)
+      if (gate.plateOnHead !== 0) fail(`zoom ${zoom} camX ${camX}: L${f} ${gate.plateOnHead} plates cover another head`)
+      for (const p of plates) {
+        const seat = seats.find((q) => q.meta.id === p.id)
+        const headCy = seat ? seat.headTop + seat.headH / 2 : 0
+        const headVisible =
+          !!seat && seat.cx >= cwin.x0 && seat.cx <= cwin.x1 && headCy >= cwin.y0 && headCy <= cwin.y1
+        if (!headVisible) continue
+        visiblePlates++
+        const sx = ct.left + p.x * ct.s
+        const sy = ct.top + p.y * ct.s
+        const sw = p.w * ct.s
+        const sh = p.h * ct.s
+        if (sx < 4 - 1e-6 || sy < 4 - 1e-6 || sx + sw > PW - 4 + 1e-6 || sy + sh > PH - 4 + 1e-6) {
+          fail(`zoom ${zoom} camX ${camX} L${f} ${p.id}: nameplate leaves the canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)} of ${PW})`)
         }
       }
-      if (tooWide === 0) ok(`${scr.name} L${f}: ${agents.length} nameplates fit a ${slot.toFixed(1)} px desk slot (widest ${widest} px, no shredded glyphs)`)
-    } else {
-      // At zoom 1 the plan asks for a 2× font, so a plate is wider than the
-      // 26 px desk pitch on purpose; placeStacks staggers the stacks and the
-      // overlap check above is what guarantees they stay apart.
-      if (widest > scr.canvasW - 2) fail(`${scr.name} L${f}: widest nameplate ${widest} px is wider than the canvas`)
-      else
-        ok(
-          `${scr.name} L${f}: zoom ${zoom} font ×${scale}, widest nameplate ${widest} px vs ${slot.toFixed(1)} px desk pitch — staggered, overlap 0`,
-        )
     }
-
-    // every agent owns exactly one nameplate
-    const names = placed.filter((p) => p.key === 'name')
-    if (names.length !== agents.length) fail(`${scr.name} L${f}: ${names.length} nameplates drawn, want ${agents.length}`)
-    else ok(`${scr.name} L${f}: one nameplate per desk (${names.length})`)
-
-    const perId = new Set(names.map((p) => p.id))
-    if (perId.size !== agents.length) fail(`${scr.name} L${f}: ${perId.size} desks have a nameplate, want ${agents.length}`)
+    if (camX === SIDE_W / 2) ok(`zoomed in (${zoom}×): ${visiblePlates} nameplates of visible agents stay ≥4 px inside the canvas`)
   }
-}
-
-// ------------------------------- 8. offline vs idle is not colour-only
-
-const vpL3: Viewport = { x: 0, z: 0, zoom: fitZoom(3, desktop.canvasW, desktop.canvasH), floor: 3 }
-const vpL2: Viewport = { x: 0, z: 0, zoom: fitZoom(2, desktop.canvasW, desktop.canvasH), floor: 2 }
-const statuses = new Map<string, string>()
-for (const m of metas) statuses.set(m.id, m.id === 'edu-designer' ? 'offline' : m.id === 'coder' ? 'idle' : 'working')
-const agentsL3 = labelsFor(vpL3, desktop.canvasW, desktop.canvasH, statuses)
-const stacksL3 = buildStacks(agentsL3, plateMode(vpL3.zoom), plateScale(vpL3.zoom))
-
-const idleStack = stacksL3.find((s) => s.id === 'coder')
-if (!idleStack) fail('idle stack missing on L3 (coder must sit on L3)')
-else {
-  const idleKeys = idleStack.plates.map((p) => p.key)
-  if (idleKeys.includes('zzz')) fail('idle desk must not show Zzz')
-  else ok('idle desk has no Zzz — a shape cue, not just hue')
-  const idleChip = agentsL3.find((a) => a.id === 'coder')!.chip
-  if (idleChip !== 'idle') fail(`idle chip is "${idleChip}", want "idle"`)
-  else ok(`idle desk carries the status word "idle"`)
-}
-const agentsL2 = labelsFor(vpL2, desktop.canvasW, desktop.canvasH, statuses)
-const stacksL2 = buildStacks(agentsL2, plateMode(vpL2.zoom), plateScale(vpL2.zoom))
-const offlineStack = stacksL2.find((s) => s.id === 'edu-designer')
-if (!offlineStack) fail('offline stack missing on L2 (edu-designer must sit on L2)')
-else {
-  const offKeys = offlineStack.plates.map((p) => p.key)
-  if (!offKeys.includes('zzz')) fail(`offline stack has no Zzz plate: ${offKeys.join(',')}`)
-  else ok('offline desk carries a "Z Z Z" plate (no colour needed)')
-  if (offKeys.includes('bubble')) fail('offline desk should not carry a speech bubble')
-  const offlineChip = agentsL2.find((a) => a.id === 'edu-designer')!.chip
-  if (offlineChip !== 'offline') fail(`offline chip is "${offlineChip}", want "offline"`)
-  else ok(`status words differ: offline "offline" vs idle "idle"`)
-}
-
-// the zoom-1 (phone) mode still names every desk, with the full first name
-const phoneStatuses = new Map<string, string>(metas.map((m) => [m.id, m.id === 'edu-designer' ? 'offline' : 'working']))
-let phoneNamesOk = true
-for (const f of FLOOR_IDS) {
-  const pz = fitZoom(f, phone.canvasW, phone.canvasH)
-  const agents = labelsFor({ x: 0, z: 0, zoom: pz, floor: f }, phone.canvasW, phone.canvasH, phoneStatuses)
-  const stacks = buildStacks(agents, plateMode(pz), plateScale(pz))
-  const named = stacks.filter((s) => s.plates.some((p) => p.key === 'name'))
-  const want = metas.filter((m) => m.desk.floor === f).length
-  if (named.length !== want) {
-    phoneNamesOk = false
-    fail(`L${f} zoom 1 names ${named.length} desks, want ${want}`)
-  }
-  if (stacks.some((s) => s.plates.some((p) => p.key === 'chip'))) {
-    phoneNamesOk = false
-    fail(`L${f} zoom 1 must not draw chips: the 2× plates already fill the screen`)
-  }
-}
-if (phoneNamesOk) ok('zoom 1 (phone default) labels every desk on every floor, nameplates only')
-
-// ------------------------------------------------------- 9. zone plaques exist
-// One plaque per zone per floor, hung on the wall band, inside the floor.
-
-const WANT_PLAQUES: Record<FloorId, string[]> = { 1: ['L1 LOBBY', 'MASUK'], 2: ['L2 TIM EDU'], 3: ['L3 TIM DEV'] }
-for (const f of FLOOR_IDS) {
-  const labels = labelsOf(f)
-  const texts = labels.map((l) => l.text)
-  for (const want of WANT_PLAQUES[f]) {
-    if (!texts.includes(want)) fail(`L${f} has no "${want}" plaque`)
-  }
-  for (const zl of labels) {
-    if (zl.floor !== f) fail(`plaque ${zl.text} claims floor ${zl.floor} but labelsOf(${f}) returned it`)
-    if (zl.x < -FLOORS[f].w / 2 || zl.x > FLOORS[f].w / 2 || zl.z < -FLOORS[f].d / 2 || zl.z > FLOORS[f].d / 2) {
-      fail(`L${f} plaque ${zl.text} sits outside the floor`)
-    }
-  }
-  ok(`L${f} plaques: ${texts.join(', ')} — all inside ${FLOORS[f].w}×${FLOORS[f].d}`)
-
-  // at the desktop fit view every plaque is on screen and plates avoid it
-  const dz = fitZoom(f, desktop.canvasW, desktop.canvasH)
-  const vp: Viewport = { x: 0, z: 0, zoom: dz, floor: f }
-  const reserved = zoneRects(vp, desktop.canvasW, desktop.canvasH)
-  let plaqueOff = 0
-  for (const r of reserved) {
-    if (r.x < 1 || r.y < 1 || r.x + r.w > desktop.canvasW - 1 || r.y + r.h > desktop.canvasH - 1) plaqueOff++
-  }
-  if (plaqueOff) fail(`L${f}: ${plaqueOff} plaque(s) off-canvas at the desktop fit view`)
-}
-
-// ------------------------------------------- 10. layout constants stay honest
-
-if (PLATE_H !== 11) fail(`PLATE_H = ${PLATE_H}, want 11`)
-if (NAME_GAP < 1) fail('nameplates must float above the head, not sit on it')
-else ok(`plate geometry: ${PLATE_H} px tall at 1×, ${NAME_GAP} px above the head`)
-
-// ------------------------------------------------- 11. the lift on every floor
-// The lift core follows the identical rule on all three floors: a shaft that
-// is a real obstacle, a walkable nav node wired into that floor's graph, 1.0
-// unit west of the door, inside the floor bounds (plan §Denah/Lift).
-
-for (const f of FLOOR_IDS) {
-  const lift = LIFT[f]
-  if (!lift) fail(`L${f}: LIFT[${f}] missing`)
-  else {
-    const shaft = obstaclesOf(f).find((o) => o.id === `lift-${f}`)
-    if (!shaft) fail(`L${f}: lift shaft is not an obstacle on this floor`)
-    else if (Math.abs(shaft.x1 - lift.shaft.x1) > 1e-9 || Math.abs(shaft.z2 - lift.shaft.z2) > 1e-9) {
-      fail(`L${f}: OBSTACLES lift-${f} != LIFT[${f}].shaft`)
-    }
-    const node = liftNode(f)
-    const nav = navOf(f)
-    const wired = nav.find((n) => n.id === node.id)
-    if (!wired) fail(`L${f}: nav node ${node.id} missing`)
-    else {
-      if (wired.floor !== f) fail(`L${f}: lift nav node claims floor ${wired.floor}`)
-      if (wired.x !== node.x || wired.z !== node.z) fail(`L${f}: lift nav node drifted from LIFT[${f}].node`)
-      if (Math.abs(wired.x - (lift.doorX - 1)) > 1e-9) fail(`L${f}: lift node must stand 1.0 west of the door`)
-      if (wired.z < -FLOORS[f].d / 2 || wired.z > FLOORS[f].d / 2) fail(`L${f}: lift node outside the floor`)
-    }
-    const shaftPxW = (lift.shaft.x2 - lift.shaft.x1) * 16
-    const shaftPxH = (lift.shaft.z2 - lift.shaft.z1) * 16
-    if (Math.abs(shaftPxW - 2.6 * 16) > 1e-9 || Math.abs(shaftPxH - 3.2 * 16) > 1e-9) {
-      fail(`L${f}: shaft is ${shaftPxW}×${shaftPxH}px, want 2.6×3.2 world units`)
-    }
-  }
-  ok(`L${f}: shaft lift = obstacle, node ${liftNode(f).id} (${liftNode(f).x},${liftNode(f).z}) walkable & wired`)
-}
-
-// --------------------------- 12. glass partitions render as panes, same obstacles
-// The L1 meeting-room partition is kind 'glass'; wall obstacles must not change
-// shape (layout_check treats every wall segment as a solid band).
-
-import { wallsOf } from '../frontend/src/lib/rooms'
-const glassL1 = wallsOf(1).filter((w) => w.kind === 'glass')
-if (glassL1.length === 0) fail('L1 meeting-room partition is not marked kind:glass')
-else {
-  const lengths = glassL1.reduce((n, w) => n + Math.abs(w.to - w.from), 0)
-  // the partition: two x-runs (3.4 + 4.6) plus one z-run (6.5) = 14.5 units
-  if (lengths < 14) fail(`L1 glass runs total ${lengths} units, want the full meeting-room partition`)
-  else ok(`L1 meeting-room partition: ${glassL1.length} glass panes (${lengths.toFixed(1)} units) with steel frames`)
-}
-for (const w of wallsOf(1)) {
-  if (w.kind !== undefined && w.kind !== 'solid' && w.kind !== 'glass') fail(`L1 wall segment has unknown kind ${w.kind}`)
 }
 
 console.log(fails === 0 ? '\nVISUAL OK' : `\n${fails} MASALAH`)

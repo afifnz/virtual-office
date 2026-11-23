@@ -1,358 +1,258 @@
 /**
- * The 2D office painter: a prerendered static layer (floor zones, walls,
- * decorative furniture) plus a per-frame dynamic layer (desks whose monitor
- * reflects live activity, chairs, agents, nameplates, status chips and speech
- * bubbles).
+ * Side-view painter: the static stage (roof, curtain wall + city, boards,
+ * floor props) is cached per (floor × theme); the dynamic pass draws desks,
+ * chairs, vector avatars, live status board, clock hands, the lift car and the
+ * nameplates.
  *
- * Two coordinate spaces, on purpose:
- *  - the world is drawn at zoom-1 pixels and blitted with an integer factor, so
- *    every sprite stays nearest-neighbour crisp on any DPR;
- *  - labels are laid out in CSS pixels (`labels.ts`) so a nameplate keeps the
- *    same readable size at every zoom and never grows wider than its desk slot.
- *
- * No text goes through `fillText`: plates are cached offscreen and invalidated
- * only when their contents change.
+ * Coordinates are design px on a 1000×688 stage; the camera transform is
+ * applied once. No `ctx.filter` in the loop, no per-frame text layout beyond
+ * the small plates, and avatars are cached sprites blitted 1:1.
  */
 import type { AgentMeta } from '../lib/agents'
 import type { Agent, Comm } from '../lib/types'
-import { deskObstacle } from '../lib/layout'
-import { FLOORS, LIFT, obstaclesOf, wallsOf, type FloorId } from '../lib/rooms'
-import { rosterAgents } from '../lib/roster'
+import { FLOORS, type FloorId } from '../lib/rooms'
 import { seatPoint } from '../lib/routes'
-import type { Pt } from '../lib/nav'
-import { poseFor, blockedChipText, type Pose } from './anim'
-import { dwellFloors, journeyAt, journeyClock, journeyFor, liftChip, liftDoorRect } from './journey'
+import { rosterAgents, tzLabel } from '../lib/roster'
+import { poseFor, type Pose } from './anim'
+import { journeyAt, journeyClock, journeyFor, liftChip } from './journey'
+import { THEME_STATUS, THEME_TOKENS, type ThemeName } from './palette'
+import { drawAvatar, drawAvatarHands, avatarKey, type AvatarPose } from './avatar'
+import { drawCity } from './city'
 import {
-  DOT,
-  PLATE_H,
-  PLATE_PAD,
-  buildStacks,
-  labelsOf,
-  placeStacks,
-  plateMode,
-  plateScale,
-  plateWidth,
-  plaqueRect,
-  shortName,
-  type LabelAgent,
-  type Rect,
-  type Stack,
-} from './labels'
-import { EXTRAS, FLOOR_MOTIF, PALETTE, SCREEN, STATUS, TEAM } from './palette'
-import { drawText, textWidth } from './pixelfont'
-import { drawProp, propLayer, propsOf } from './props'
-import { getSprite, type Sprite } from './sprites'
-import {
-  CHIBI_W,
-  CHIBI_H,
-  HEAD_H,
-  HEAD_W,
-  agentSprite,
+  drawBoards,
+  drawBookshelf,
   drawChair,
+  drawClockHands,
+  drawCurtainWall,
   drawDesk,
-  drawEnvelope,
-  drawFurniture,
-} from './sprites'
-import { TILE, blitScale, worldSize, worldToPixel, type Viewport } from './viewport'
+  drawFloorPlane,
+  drawKeyboardMouse,
+  drawLiftCar,
+  drawLiftShaft,
+  drawMonitor,
+  drawPlant,
+  drawRoof,
+  drawServerRack,
+  drawSoffit,
+  drawSpandrel,
+  drawStatusBoard,
+} from './props-side'
+import {
+  PLATE_DOT,
+  PLATE_DOT_GAP,
+  PLATE_FONT,
+  PLATE_PAD,
+  labelAgentsFor,
+  layoutSideLabels,
+  shortName,
+  type PlacedPlate,
+} from './labels'
+import {
+  COMPACT_MAX_W,
+  PHONE_BOARD_MARGIN,
+  SIDE_BOARD_TOP,
+  SIDE_BOARDS,
+  SIDE_FLOOR_BACK,
+  SIDE_FLOOR_FRONT,
+  SIDE_GLASS_TOP,
+  SIDE_H,
+  SIDE_W,
+  boardsFor,
+  fitZoomFor,
+  sideScale,
+  sideTransform,
+  sideSeats,
+  visibleDesignRect,
+  worldXToDesign,
+  type SideSeat,
+  type SideViewport,
+  type SideBoard,
+} from './side'
 
-export type MonitorMode = 'terminal' | 'doc' | 'browser' | 'diff' | 'idle' | 'off'
+const FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
 
-// ------------------------------------------------------------------- layers
+// ------------------------------------------------------------------ sprites
 
-const WALL_PX = 6 // thick cutaway wall band at 16 px/tile (design: 12 px @ 32)
-const CHAIR_PX = 10
+const avatarCache = new Map<string, HTMLCanvasElement>()
+const AVATAR_BUCKET = 2
+const AVATAR_LRU = 64
 
-/**
- * Per-floor floor motifs (design §3.1) in the modern palette:
- *  - L1 lobby: polished concrete slab, terrazzo flecks (deterministic per
- *    tile, no Math.random), a dark entry mat inside the MASUK door
- *  - L2 Tim Edu: light concrete slab with its seams, a glass wall band along
- *    the north wall (the zone rug under the 2×2 block is a prop, so it gets a
- *    woven texture and the seams stay continuous around it)
- *  - L3 Tim Dev: dark polished concrete, a steel cable tray and warm
- *    ceiling-light strips across the slab
- *
- * The solid ceiling-light "pool" rectangles are gone: a 6×3.2-unit block of a
- * lighter tone reads as a rug or a placeholder on a bare floor, which is
- * exactly what the screenshot review flagged on L2. The motif itself (flecks,
- * seams, strips) now carries the whole slab without a hole in it.
- */
-function drawFloor(ctx: CanvasRenderingContext2D, floor: FloorId): void {
-  const f = FLOORS[floor]
-  const toPx = (v: number) => Math.round((v + f.w / 2) * TILE)
-  const toPy = (v: number) => Math.round((v + f.d / 2) * TILE)
-  if (floor === 1) {
-    const m = FLOOR_MOTIF.lobby
-    ctx.fillStyle = m.slab
-    ctx.fillRect(0, 0, f.w * TILE, f.d * TILE)
-    // terrazzo flecks: a tiny integer hash per tile, 1–2 px chips
-    for (let tz = 0; tz < f.d; tz++) {
-      for (let tx = 0; tx < f.w; tx++) {
-        const hsh = (tx * 73856093) ^ (tz * 19349663)
-        const n = ((hsh % 5) + 5) % 5
-        if (n < 2) continue
-        ctx.fillStyle = n === 2 || n === 4 ? m.fleck : m.fleckLight
-        ctx.fillRect(tx * TILE + ((hsh >> 3) % 12), tz * TILE + ((hsh >> 7) % 12), n === 3 ? 2 : 1, 1)
-      }
-    }
-    // entry mat inside the MASUK door (x -2.2..2.2 at the south wall)
-    ctx.fillStyle = m.mat
-    ctx.fillRect(toPx(-1.9), toPy(9.1), Math.round(3.8 * TILE), Math.round(0.7 * TILE))
-    ctx.fillStyle = m.matEdge
-    ctx.fillRect(toPx(-1.9), toPy(9.1), Math.round(3.8 * TILE), 1)
-  } else if (floor === 2) {
-    const m = FLOOR_MOTIF.edu
-    ctx.fillStyle = m.slab
-    ctx.fillRect(0, 0, f.w * TILE, f.d * TILE)
-    // slab seams every 4 tiles
-    ctx.fillStyle = m.seam
-    for (let tz = 4; tz < f.d; tz += 4) ctx.fillRect(0, tz * TILE, f.w * TILE, 1)
-    for (let tx = 4; tx < f.w; tx += 4) ctx.fillRect(tx * TILE, 0, 1, f.d * TILE)
-    // glass wall band along the north wall
-    ctx.fillStyle = m.band
-    ctx.fillRect(0, 0, f.w * TILE, 3)
-    ctx.fillStyle = PALETTE.glass300
-    ctx.fillRect(0, 0, f.w * TILE, 1)
-  } else {
-    const m = FLOOR_MOTIF.dev
-    ctx.fillStyle = m.slab
-    ctx.fillRect(0, 0, f.w * TILE, f.d * TILE)
-    // slab seams every 3 tiles
-    ctx.fillStyle = m.seam
-    for (let tz = 3; tz < f.d; tz += 3) ctx.fillRect(0, tz * TILE, f.w * TILE, 1)
-    // steel cable tray along the north wall
-    ctx.fillStyle = m.tray
-    ctx.fillRect(0, 3, f.w * TILE, 4)
-    ctx.fillStyle = PALETTE.steel500
-    for (let tx = 2; tx < f.w; tx += 4) ctx.fillRect(tx * TILE, 3, 1, 4)
-    // ceiling-light strips across the slab: the one light source of L3
-    for (const z of [-4.5, 0.5, 5.5]) {
-      const y = toPy(z)
-      ctx.fillStyle = m.lamp
-      ctx.fillRect(toPx(-9), y, Math.round(18 * TILE), 2)
-      ctx.fillStyle = m.tray
-      ctx.fillRect(toPx(-9), y - 1, Math.round(18 * TILE), 1)
-      ctx.fillRect(toPx(-9), y + 2, Math.round(18 * TILE), 1)
-    }
-  }
-}
-
-function drawWalls(ctx: CanvasRenderingContext2D, floor: FloorId): void {
-  const f = FLOORS[floor]
-  for (const seg of wallsOf(floor)) {
-    const half = WALL_PX / 2
-    let x: number
-    let y: number
-    let w: number
-    let h: number
-    if (seg.axis === 'x') {
-      x = (Math.min(seg.from, seg.to) + f.w / 2) * TILE
-      y = (seg.at + f.d / 2) * TILE - half
-      w = Math.abs(seg.to - seg.from) * TILE
-      h = WALL_PX
-    } else {
-      x = (seg.at + f.w / 2) * TILE - half
-      y = (Math.min(seg.from, seg.to) + f.d / 2) * TILE
-      w = WALL_PX
-      h = Math.abs(seg.to - seg.from) * TILE
-    }
-    if (seg.kind === 'glass') {
-      // a glass pane: blue solid tones inside a steel frame (no alpha)
-      ctx.fillStyle = PALETTE.steel700
-      ctx.fillRect(x, y, w, h)
-      ctx.fillStyle = PALETTE.glass500
-      ctx.fillRect(x + 1, y + 1, w - 2, h - 2)
-      ctx.fillStyle = PALETTE.glass300
-      ctx.fillRect(x + 1, y + 1, w - 2, 1)
-      if (seg.axis === 'x') {
-        ctx.fillRect(x + 1, y + 1, 1, h - 2)
-        // steel mullions every 2 world units
-        ctx.fillStyle = PALETTE.steel700
-        for (let mx = x + 2 * TILE; mx < x + w - 2; mx += 2 * TILE) ctx.fillRect(Math.round(mx), y, 2, h)
-      } else {
-        ctx.fillRect(x + 1, y + 1, 1, h - 2)
-        ctx.fillStyle = PALETTE.steel700
-        for (let my = y + 2 * TILE; my < y + h - 2; my += 2 * TILE) ctx.fillRect(x, Math.round(my), w, 2)
-      }
-      continue
-    }
-    // solid concrete wall band
-    ctx.fillStyle = PALETTE.concrete900
-    ctx.fillRect(x, y, w, h)
-    // trim: light line on the two inner edges of the band
-    ctx.fillStyle = PALETTE.concrete600
-    if (seg.axis === 'x') {
-      ctx.fillRect(x, y, w, 1)
-      ctx.fillRect(x, y + h - 1, w, 1)
-    } else {
-      ctx.fillRect(x, y, 1, h)
-      ctx.fillRect(x + w - 1, y, 1, h)
-    }
-  }
-}
-
-/**
- * The furniture pass: props that lie on the floor (rugs) first, then the
- * collision obstacles (desks aside — those are painted dynamically), then the
- * props that stand on top (chairs, plants, the lift call panel).
- */
-function drawFurnitureLayer(ctx: CanvasRenderingContext2D, floor: FloorId): void {
-  const f = FLOORS[floor]
-  const box = (x1: number, z1: number, x2: number, z2: number) => ({
-    x: Math.round((x1 + f.w / 2) * TILE),
-    y: Math.round((z1 + f.d / 2) * TILE),
-    w: Math.max(1, Math.round((x2 - x1) * TILE)),
-    h: Math.max(1, Math.round((z2 - z1) * TILE)),
-  })
-  const props = propsOf(floor)
-  for (const p of props) {
-    if (propLayer(p) !== 'under') continue
-    const b = box(p.x, p.z, p.x + p.w, p.z + p.h)
-    ctx.save()
-    ctx.translate(b.x, b.y)
-    drawProp(ctx, p, b.w, b.h)
-    ctx.restore()
-  }
-  for (const o of obstaclesOf(floor)) {
-    if (o.id.startsWith('desk-')) continue // desks are drawn dynamically
-    if (o.id.startsWith('lift-')) continue // the lift shaft gets its own painter
-    const b = box(o.x1, o.z1, o.x2, o.z2)
-    ctx.save()
-    ctx.translate(b.x, b.y)
-    drawFurniture(ctx, o.id, b.w, b.h)
-    ctx.restore()
-  }
-  for (const p of props) {
-    if (propLayer(p) !== 'over') continue
-    const b = box(p.x, p.z, p.x + p.w, p.z + p.h)
-    ctx.save()
-    ctx.translate(b.x, b.y)
-    drawProp(ctx, p, b.w, b.h)
-    ctx.restore()
-  }
-}
-
-/**
- * The lift: a steel shaft with two door panels on its west face and the floor
- * number on the shaft header — the number belongs to the shaft, not to the
- * door. While an agent dwells, the panels slide apart (the dynamic overlay in
- * drawLiftDoorsOpen).
- */
-function drawLift(ctx: CanvasRenderingContext2D, floor: FloorId): void {
-  const f = FLOORS[floor]
-  const { shaft } = LIFT[floor]
-  const x = (shaft.x1 + f.w / 2) * TILE
-  const y = (shaft.z1 + f.d / 2) * TILE
-  const w = Math.round((shaft.x2 - shaft.x1) * TILE)
-  const h = Math.round((shaft.z2 - shaft.z1) * TILE)
-  // steel shaft body with a lighter face plate
-  ctx.fillStyle = PALETTE.steel700
-  ctx.fillRect(x, y, w, h)
-  ctx.fillStyle = PALETTE.steel500
-  ctx.fillRect(x + 2, y + 2, w - 4, h - 4)
-  // face plate: a lit top edge and two quiet seams, so the shaft is not a
-  // blank slab next to the furnished floor
-  ctx.fillStyle = PALETTE.steel300
-  ctx.fillRect(x + 2, y + 2, w - 4, 1)
-  ctx.fillStyle = PALETTE.concrete600
-  for (const fx of [x + Math.round(w * 0.55), x + Math.round(w * 0.8)]) {
-    ctx.fillRect(fx, y + 13, 1, h - 15)
-  }
-  // door frame on the west face, centred on the walk node (z = 0.6)
-  const dz = Math.round((0.6 + f.d / 2) * TILE)
-  ctx.fillStyle = PALETTE.concrete800
-  ctx.fillRect(x - 2, dz - 14, 4, 28)
-  // closed steel door panels; the dynamic layer slides them apart while an
-  // agent dwells on this floor (renderFrame → drawLiftDoorsOpen)
-  ctx.fillStyle = PALETTE.steel300
-  ctx.fillRect(x, dz - 12, 7, 24)
-  ctx.fillRect(x + 7, dz - 12, 7, 24)
-  ctx.fillStyle = PALETTE.concrete800
-  ctx.fillRect(x + 6, dz - 12, 1, 24)
-  ctx.fillRect(x + 7, dz - 12, 1, 24)
-  // floor indicator on the shaft header: a dark plate across the top of the
-  // shaft with the amber floor number centred in it
-  const hh = 9
-  const hx = x + 2
-  const hy = y + 2
-  const hw = w - 4
-  ctx.fillStyle = PALETTE.concrete900
-  ctx.fillRect(hx, hy, hw, hh)
-  ctx.fillStyle = PALETTE.steel500
-  ctx.fillRect(hx, hy, hw, 1)
-  ctx.fillRect(hx, hy + hh - 1, hw, 1)
-  ctx.fillRect(hx, hy, 1, hh)
-  ctx.fillRect(hx + hw - 1, hy, 1, hh)
-  const label = `L${floor}`
-  const tw = textWidth(label, 1)
-  drawText(ctx, label, hx + Math.round((hw - tw) / 2), hy + 1, 1, PALETTE.amber)
-}
-
-/**
- * Dynamic overlay: while an agent dwells in the lift on the active floor, the
- * steel doors part and the dark car interior shows. Drawn in CSS px on top of
- * the cached static layer.
- */
-function drawLiftDoorsOpen(
-  ctx: CanvasRenderingContext2D,
-  floor: FloorId,
-  toCss: (x: number, z: number) => { x: number; y: number },
-  k: number,
-  dpr: number,
-): void {
-  const door = liftDoorRect(floor)
-  const c = toCss(door.x, door.z)
-  const w = Math.round(14 * k)
-  const h = Math.round(24 * k)
-  const x = Math.round(c.x * dpr)
-  const y = Math.round((c.y - h / 2) * dpr)
-  // dark car interior
-  ctx.fillStyle = PALETTE.concrete900
-  ctx.fillRect(x, y, w, h)
-  // the warm ceiling light of the car
-  ctx.fillStyle = PALETTE.lamp
-  ctx.fillRect(x + 2 * dpr, y + Math.max(1, dpr), w - 4 * dpr, Math.max(1, dpr))
-  // the two panels, slid to the sides of the opening
-  const pw = Math.max(2, Math.round(6 * k))
-  ctx.fillStyle = PALETTE.steel300
-  ctx.fillRect(x - pw, y, pw, h)
-  ctx.fillRect(x + w, y, pw, h)
-  ctx.fillStyle = PALETTE.steel500
-  ctx.fillRect(x - 1, y, Math.max(1, dpr), h)
-  ctx.fillRect(x + w, y, Math.max(1, dpr), h)
-}
-
-/** Build the static world surface of one floor; the caller caches it. */
-export function createStaticLayer(floor: FloorId): HTMLCanvasElement {
-  const { w, h } = worldSize(floor)
+function avatarSprite(look: AgentMeta['look'], pose: AvatarPose, frame: number, h: number): HTMLCanvasElement {
+  const key = avatarKey(look, pose, frame, AVATAR_BUCKET) + `:${Math.round(h)}`
+  const hit = avatarCache.get(key)
+  if (hit) return hit
+  const w = Math.ceil(h * 0.72)
   const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')!
-  ctx.imageSmoothingEnabled = false
-  drawFloor(ctx, floor)
-  drawWalls(ctx, floor)
-  // the lift sits on the slab before the furniture, so a prop mounted on the
-  // shaft face (the call panel) is painted on top of it
-  drawLift(ctx, floor)
-  drawFurnitureLayer(ctx, floor)
+  canvas.width = Math.ceil(w * AVATAR_BUCKET)
+  canvas.height = Math.ceil(h * AVATAR_BUCKET)
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    ctx.scale(AVATAR_BUCKET, AVATAR_BUCKET)
+    drawAvatar(ctx, look, pose, frame, w / 2, h, h)
+  }
+  if (avatarCache.size >= AVATAR_LRU) {
+    const first = avatarCache.keys().next().value
+    if (first) avatarCache.delete(first)
+  }
+  avatarCache.set(key, canvas)
   return canvas
 }
 
-/** The static layer cache: one prerendered canvas per floor. */
-const staticCache = new Map<FloorId, HTMLCanvasElement>()
+export function clearAvatarCache(): void {
+  avatarCache.clear()
+}
 
-/** The prerendered static surface of one floor (built once, then cached). */
-export function staticLayerFor(floor: FloorId): HTMLCanvasElement {
-  let canvas = staticCache.get(floor)
+// -------------------------------------------------------------- static layer
+
+const staticCache = new Map<string, HTMLCanvasElement>()
+const CACHE_SCALE = 1.25
+const CACHE_MAX = 6
+
+export function clearStaticCache(): void {
+  staticCache.clear()
+}
+
+export function createStaticLayer(
+  floor: FloorId,
+  theme: ThemeName,
+  tzName = 'WIB',
+  compact = false,
+  boards: readonly SideBoard[] = SIDE_BOARDS,
+): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(SIDE_W * CACHE_SCALE)
+  canvas.height = Math.round(SIDE_H * CACHE_SCALE)
+  const ctx = canvas.getContext('2d')!
+  ctx.scale(CACHE_SCALE, CACHE_SCALE)
+  const t = THEME_TOKENS[theme]
+
+  // page behind the section
+  ctx.fillStyle = t.page
+  ctx.fillRect(0, 0, SIDE_W, SIDE_H)
+
+  drawRoof(ctx, theme)
+  drawSoffit(ctx, theme)
+  // the city lives INSIDE the window band, not in a band above the ceiling.
+  // Painted straight into the static sheet (no extra city canvas per cache).
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(0, SIDE_GLASS_TOP, SIDE_W, 485)
+  ctx.clip()
+  ctx.translate(0, SIDE_GLASS_TOP)
+  drawCity(ctx, theme, floor, SIDE_W, 485)
+  ctx.restore()
+  drawCurtainWall(ctx, theme)
+  drawSpandrel(ctx, theme)
+  drawFloorPlane(ctx, theme)
+
+  // boards hang in front of the glass on one rail
+  drawBoards(ctx, theme, floor, tzName, compact, boards)
+  // the lift core is part of the east wall
+  drawLiftShaft(ctx, theme, floor)
+
+  // floor props, standing on their row line (contact shadows included)
+  drawBookshelf(ctx, theme, 58, SIDE_FLOOR_BACK, 0.92)
+  if (floor === 3) drawServerRack(ctx, theme, 44, SIDE_FLOOR_FRONT, 0.92)
+  else drawPlant(ctx, theme, 44, SIDE_FLOOR_FRONT, 0.95)
+  drawPlant(ctx, theme, 90, SIDE_FLOOR_FRONT, 0.75)
+
+  return canvas
+}
+
+export function staticLayerFor(
+  floor: FloorId,
+  theme: ThemeName,
+  tzName = 'WIB',
+  compact = false,
+  boards: readonly SideBoard[] = SIDE_BOARDS,
+): HTMLCanvasElement {
+  // the phone wall depends on the viewport width, so the key carries its
+  // geometry — one cached sheet per phone width, six boards for desktop
+  const key = `${floor}:${theme}:${tzName}:${compact ? boards.map((b) => `${b.id}@${Math.round(b.x)}+${Math.round(b.w)}`).join(',') : 'wide'}`
+  let canvas = staticCache.get(key)
   if (!canvas) {
-    canvas = createStaticLayer(floor)
-    staticCache.set(floor, canvas)
+    canvas = createStaticLayer(floor, theme, tzName, compact, boards)
+    if (staticCache.size >= CACHE_MAX) {
+      const first = staticCache.keys().next().value
+      if (first) staticCache.delete(first)
+    }
+    staticCache.set(key, canvas)
   }
   return canvas
 }
 
-// ------------------------------------------------------------------- plates
+// ---------------------------------------------------------------- placement
+
+export interface PlacedAgent {
+  meta: AgentMeta
+  agent: Agent | undefined
+  pose: Pose
+  floor: FloorId
+  x: number
+  z: number
+  walking: boolean
+  inLift: boolean
+  liftTo: FloorId | null
+  seat: SideSeat | null
+  /** design-space draw position (feet) */
+  designX: number
+  designY: number
+  avatarH: number
+}
+
+/** Resolve every agent to one floor + one draw position for a frame. */
+export function placeAgents(
+  metas: AgentMeta[],
+  byId: Map<string, Agent>,
+  now: number,
+  comms: Comm[],
+  t: number,
+): PlacedAgent[] {
+  const seats = new Map<FloorId, SideSeat[]>()
+  for (const f of [1, 2, 3] as FloorId[]) {
+    seats.set(f, sideSeats(metas.filter((m) => m.desk.floor === f)))
+  }
+  return metas.map((meta) => {
+    const agent = byId.get(meta.id)
+    const pose = agent ? poseFor(agent, now, comms) : OFFLINE_POSE
+    const homeSeat = seats.get(meta.desk.floor)?.find((s) => s.meta.id === meta.id) ?? null
+    if (pose.kind !== 'walk' || !pose.walkTo || pose.offline) {
+      return {
+        meta,
+        agent,
+        pose,
+        floor: meta.desk.floor,
+        x: seatPoint(meta)[0],
+        z: seatPoint(meta)[1],
+        walking: false,
+        inLift: false,
+        liftTo: null,
+        seat: homeSeat,
+        designX: homeSeat?.cx ?? SIDE_W / 2,
+        designY: homeSeat?.floorY ?? SIDE_FLOOR_FRONT,
+        avatarH: homeSeat?.avatarH ?? 150,
+      }
+    }
+    const journey = journeyFor(meta, pose.walkTo)
+    const j = journeyAt(journey, journeyClock(meta, journey, t))
+    const h = j.inLift ? 148 : 150
+    return {
+      meta,
+      agent,
+      pose,
+      floor: j.floor,
+      x: j.x,
+      z: j.z,
+      walking: j.walking,
+      inLift: j.inLift,
+      liftTo: j.liftTo,
+      seat: null,
+      designX: worldXToDesign(j.x, FLOORS[j.floor].w),
+      designY: SIDE_FLOOR_FRONT,
+      avatarH: h,
+    }
+  })
+}
 
 const OFFLINE_POSE: Pose = {
   kind: 'offline',
@@ -365,466 +265,472 @@ const OFFLINE_POSE: Pose = {
   comming: false,
 }
 
-function monitorMode(pose: Pose): MonitorMode {
-  if (pose.offline || pose.blocked) return 'off'
-  if (pose.magnifier) return 'diff'
-  if (pose.kind === 'typing') return 'terminal'
-  if (pose.kind === 'reading') return pose.tool === 'web_extract' || pose.tool === 'web_search' ? 'browser' : 'doc'
-  return 'idle'
-}
-
-function statusColor(agent: Agent | undefined, pose: Pose): string {
-  const status = agent?.status ?? 'offline'
-  if (pose.blocked) return STATUS.blocked
-  if (pose.offline) return STATUS.offline
-  return (STATUS as Record<string, string>)[status] ?? STATUS.idle
-}
-
-interface PlateOpts {
-  bg: string
-  border: string
-  ink: string
-  /** filled status dot on the left edge */
-  dot?: string
-  /** idle: the dot is a ring, not a disc — a shape cue, not only a colour */
-  hollowDot?: boolean
-  /** offline: 1 px border, no fill — a hollow plate reads as "empty desk" */
-  hollow?: boolean
-}
-
-/** A nameplate/chip plate, drawn at the zoom's pixel-font scale (CSS px). */
-function pillPlate(text: string, opts: PlateOpts, scale = 1): Sprite {
-  const w = plateWidth(text, { dot: Boolean(opts.dot), scale })
-  const h = PLATE_H * scale
-  const dotW = opts.dot ? (DOT + 2) * scale : 0
-  const key = `pill:${text}:${opts.bg}:${opts.border}:${opts.ink}:${opts.dot ?? ''}:${opts.hollowDot ? 1 : 0}:${opts.hollow ? 1 : 0}:${scale}`
-  return getSprite(key, w, h, (ctx) => {
-    if (opts.hollow) {
-      ctx.fillStyle = opts.bg
-      ctx.fillRect(0, 0, w, h)
-      ctx.fillStyle = opts.border
-      ctx.fillRect(0, 0, w, scale)
-      ctx.fillRect(0, h - scale, w, scale)
-      ctx.fillRect(0, 0, scale, h)
-      ctx.fillRect(w - scale, 0, scale, h)
-    } else {
-      ctx.fillStyle = opts.border
-      ctx.fillRect(0, 0, w, h)
-      ctx.fillStyle = opts.bg
-      ctx.fillRect(scale, scale, w - 2 * scale, h - 2 * scale)
-    }
-    if (opts.dot) {
-      const ds = DOT * scale
-      const dy = Math.round((h - ds) / 2)
-      ctx.fillStyle = opts.dot
-      if (opts.hollowDot) {
-        ctx.fillRect(PLATE_PAD * scale, dy, ds, scale)
-        ctx.fillRect(PLATE_PAD * scale, dy + ds - scale, ds, scale)
-        ctx.fillRect(PLATE_PAD * scale, dy, scale, ds)
-        ctx.fillRect(PLATE_PAD * scale + ds - scale, dy, scale, ds)
-      } else {
-        ctx.fillRect(PLATE_PAD * scale, dy, ds, ds)
-      }
-    }
-    drawText(ctx, text, PLATE_PAD * scale + dotW, PLATE_PAD * scale, scale, opts.ink)
-  })
-}
-
-function bubblePlate(text: string, scale = 1): Sprite {
-  const w = plateWidth(text, { scale }) + 2 * scale
-  const h = (PLATE_H + 3) * scale
-  const key = `bubble:${text}:${scale}`
-  return getSprite(key, w, h, (ctx) => {
-    ctx.fillStyle = PALETTE.concrete100
-    ctx.fillRect(0, 0, w, h)
-    ctx.fillStyle = PALETTE.concrete600
-    ctx.fillRect(0, 0, w, scale)
-    ctx.fillRect(0, h - scale, w, scale)
-    ctx.fillRect(0, 0, scale, h)
-    ctx.fillRect(w - scale, 0, scale, h)
-    // tail, pointing down at the head
-    ctx.fillStyle = PALETTE.concrete100
-    ctx.fillRect(Math.floor(w / 2) - scale, h - scale, 3 * scale, 2 * scale)
-    ctx.fillStyle = PALETTE.concrete600
-    ctx.fillRect(Math.floor(w / 2) - scale, h, 3 * scale, scale)
-    drawText(ctx, text, PLATE_PAD * scale, (PLATE_PAD + 1) * scale, scale, SCREEN.bubbleInk)
-  })
-}
-
-/** The zone plaque: concrete plate with an amber floor number, accent-free body. */
-function plaquePlate(text: string): Sprite {
-  const w = plaqueRect(text, 0, 0).w
-  const h = plaqueRect(text, 0, 0).h
-  const key = `plaque:${text}`
-  return getSprite(key, w, h, (ctx) => {
-    ctx.fillStyle = PALETTE.concrete800
-    ctx.fillRect(0, 0, w, h)
-    ctx.fillStyle = PALETTE.concrete500
-    ctx.fillRect(0, 0, w, 1)
-    ctx.fillRect(0, h - 1, w, 1)
-    ctx.fillRect(0, 0, 1, h)
-    ctx.fillRect(w - 1, 0, 1, h)
-    drawText(ctx, text, PLATE_PAD, PLATE_PAD - 1, 1, PALETTE.muted)
-  })
-}
-
-// ---------------------------------------------------------------- geometry
-
-/**
- * One agent resolved to its current floor + position for a single frame. The
- * `floor` is the journey's current floor while walking — an agent in transit
- * belongs to exactly one floor at a time, never two.
- */
-export interface PlacedAgent {
-  meta: AgentMeta
-  agent: Agent | undefined
-  pose: Pose
-  /** the floor the agent is on right now (journey floor, else its desk floor) */
+export function pickTargets(placed: PlacedAgent[]): Array<{
+  id: string
   floor: FloorId
   x: number
   z: number
-  walking: boolean
-  /** dwelling in the lift on `floor`, riding towards `liftTo` */
-  inLift: boolean
-  liftTo: FloorId | null
-}
-
-/**
- * Resolve every agent's position for one frame. A delegate gets a
- * deterministic journey (scene2d/journey.ts) that may cross floors through
- * the lift; everyone else sits at their desk. Offline agents stay parked.
- */
-export function placeAgents(
-  metas: AgentMeta[],
-  byId: Map<string, Agent>,
-  now: number,
-  comms: Comm[],
-  t: number,
-): PlacedAgent[] {
-  return metas.map((meta) => {
-    const agent = byId.get(meta.id)
-    const pose = agent ? poseFor(agent, now, comms) : OFFLINE_POSE
-    const seat = seatPoint(meta)
-    if (pose.kind !== 'walk' || !pose.walkTo || pose.offline) {
-      return {
-        meta,
-        agent,
-        pose,
-        floor: meta.desk.floor,
-        x: seat[0],
-        z: seat[1],
-        walking: false,
-        inLift: false,
-        liftTo: null,
-      }
-    }
-    const journey = journeyFor(meta, pose.walkTo)
-    const j = journeyAt(journey, journeyClock(meta, journey, t))
-    return { meta, agent, pose, floor: j.floor, x: j.x, z: j.z, walking: j.walking, inLift: j.inLift, liftTo: j.liftTo }
-  })
-}
-
-/** Live world position of one agent (current floor) for picking & the proximity card. */
-export function pickTargets(placed: PlacedAgent[]): Array<{ id: string; floor: FloorId; x: number; z: number }> {
-  return placed.map((p) => ({ id: p.meta.id, floor: p.floor, x: p.x, z: p.z }))
+  designX: number
+  designY: number
+  h: number
+  w: number
+}> {
+  return placed.map((p) => ({
+    id: p.meta.id,
+    floor: p.floor,
+    x: p.x,
+    z: p.z,
+    designX: p.designX,
+    designY: p.designY,
+    h: p.avatarH,
+    w: p.avatarH * 0.5,
+  }))
 }
 
 // ---------------------------------------------------------------- the frame
 
 export interface RenderInput {
-  static: HTMLCanvasElement
+  theme: ThemeName
   metas: AgentMeta[]
   byId: Map<string, Agent>
   now: number
   comms: Comm[]
-  vp: Viewport
-  /** CSS size of the canvas element */
+  vp: SideViewport
   viewW: number
   viewH: number
   dpr: number
-  stale: boolean
   still: boolean
-  /** monotonic seconds (0 while still) */
   t: number
+  /** WIB hour/minute for the wall clock (from the server `now`) */
+  hour: number
+  minute: number
+  /**
+   * Phone wall: three boards, no decorative panels. Defaults to
+   * `viewW < COMPACT_MAX_W` so a narrow canvas can never paint the wide set.
+   */
+  compact?: boolean
+  /**
+   * Canvas px reserved at the bottom for the D-pad (0 on desktop). Comes from
+   * the layout, not from the canvas width: a desktop window narrowed by the
+   * roster rail keeps its 150 px/unit camera.
+   */
+  band?: number
+}
+
+function avatarPose(pose: Pose): AvatarPose {
+  switch (pose.kind) {
+    case 'typing':
+      return 'typing'
+    case 'reading':
+      return 'reading'
+    case 'working':
+      return 'working'
+    case 'walk':
+      return 'walk'
+    case 'relax':
+      return 'relax'
+    case 'blocked':
+      return 'blocked'
+    case 'idle':
+      return 'idle'
+    default:
+      return 'seated'
+  }
+}
+
+function poseFrame(pose: Pose, t: number, still: boolean): number {
+  if (still) return 0
+  switch (pose.kind) {
+    case 'typing':
+      return Math.floor(t * 4) % 2
+    case 'walk':
+      return Math.floor(t * 6) % 2
+    case 'idle':
+    case 'relax':
+      return Math.floor(t * 1.5) % 2
+    default:
+      return 0
+  }
+}
+
+/**
+ * The status key a station is painted with. `agent` is optional on purpose: a
+ * desk always exists, but its `/api/status` row may not (a status-only agent on
+ * another floor, a roster still loading, or an agent that is walking right now).
+ * Never dereference it without the guard — that crash killed the whole loop.
+ */
+function statusOf(agent: Agent | undefined, pose: Pose): keyof typeof THEME_STATUS.day {
+  if (pose.offline || !agent) return 'offline'
+  if (pose.blocked) return 'blocked'
+  return (agent?.status as keyof typeof THEME_STATUS.day) ?? 'offline'
+}
+
+function screenOf(pose: Pose): 'terminal' | 'doc' | 'diff' | 'off' {
+  if (pose.offline || pose.blocked) return 'off'
+  if (pose.magnifier) return 'diff'
+  if (pose.kind === 'typing') return 'terminal'
+  if (pose.kind === 'reading') return 'doc'
+  return 'terminal'
 }
 
 /** Paint one full frame into a canvas whose backing store is already sized. */
 export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void {
-  const s = blitScale(r.vp.zoom, r.dpr) // backing px per world px
-  const k = s / r.dpr // CSS px per world px
+  const band = r.band ?? 0
+  const t = sideTransform(r.viewW, r.viewH, r.vp, band)
+  const theme = r.theme
+  const pal = THEME_TOKENS[theme]
+  const status = THEME_STATUS[theme]
   const dpr = r.dpr
-  const cssW = ctx.canvas.width / dpr
-  const cssH = ctx.canvas.height / dpr
+  const compact = r.compact ?? r.viewW < COMPACT_MAX_W
+  // the phone wall lives inside the design window this viewport really shows,
+  // with 8 CSS px of clearance from the screen edge (converted to design px at
+  // the fit scale, so it is 21 at 390 px). The wall is laid out from the FIT
+  // window, never the current zoom: it is painted into the cached stage, so it
+  // must not move or re-key the cache while the user zooms.
+  const wallZoom = band > 0 ? fitZoomFor(r.viewW, r.viewH, band) : 1
+  const wallScale = sideScale(r.viewW, r.viewH, wallZoom, band)
+  const wallWindow = compact ? visibleDesignRect(r.viewW, r.viewH, wallZoom, SIDE_W / 2, band) : undefined
+  const boardMargin = compact && wallScale > 0 ? Math.ceil(PHONE_BOARD_MARGIN / wallScale) : undefined
+  const boards = boardsFor(compact, wallWindow, boardMargin)
 
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.imageSmoothingEnabled = false
-  ctx.fillStyle = EXTRAS.bg
-  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.fillStyle = pal.page
+  ctx.fillRect(0, 0, r.viewW, r.viewH)
 
-  const centre = worldToPixel(r.vp.x, r.vp.z, r.vp.floor)
-  const ox = cssW / 2 - centre.x * k
-  const oy = cssH / 2 - centre.y * k
-  /** world → CSS px */
-  const toCss = (x: number, z: number) => {
-    const p = worldToPixel(x, z, r.vp.floor)
-    return { x: ox + p.x * k, y: oy + p.y * k }
-  }
-  /** blit a zoom-1 world sprite at a CSS position */
-  const blitWorld = (spr: Sprite, cx: number, cy: number) => {
-    ctx.drawImage(
-      spr.canvas,
-      Math.round(cx * dpr),
-      Math.round(cy * dpr),
-      Math.round(spr.w * s),
-      Math.round(spr.h * s),
-    )
-  }
-  /** blit a 1× CSS sprite (a label plate) at a CSS position */
-  const blitLabel = (spr: Sprite, cx: number, cy: number) => {
-    ctx.drawImage(
-      spr.canvas,
-      Math.round(cx * dpr),
-      Math.round(cy * dpr),
-      Math.round(spr.w * dpr),
-      Math.round(spr.h * dpr),
-    )
-  }
+  // the cached stage, scaled by the camera
+  const stage = staticLayerFor(r.vp.floor, theme, tzLabel(), compact, boards)
+  ctx.drawImage(stage, t.left, t.top, SIDE_W * t.s, SIDE_H * t.s)
 
-  // concrete plinth framing the active floor — a quiet exterior hint
-  const { w: worldWpx, h: worldHpx } = worldSize(r.vp.floor)
-  const tl = toCss(-FLOORS[r.vp.floor].w / 2, -FLOORS[r.vp.floor].d / 2)
-  ctx.fillStyle = PALETTE.concrete800
-  ctx.fillRect(Math.round(tl.x - 4 * k) * dpr, Math.round(tl.y - 4 * k) * dpr, Math.round((worldWpx + 8) * k) * dpr, Math.round((worldHpx + 8) * k) * dpr)
-  ctx.fillStyle = PALETTE.concrete600
-  ctx.fillRect(Math.round(tl.x - 2 * k) * dpr, Math.round(tl.y - 2 * k) * dpr, Math.round((worldWpx + 4) * k) * dpr, Math.round((worldHpx + 4) * k) * dpr)
+  // The dynamic pass is painted in design px, so the camera has to be applied
+  // once here — otherwise the desks, avatars and nameplates are drawn 1:1 and
+  // a 390 px phone shows only 390/150 = 2.6 floor units of them, unscaled and
+  // off the stage the sheet was just fitted into (the "BAGA…" screenshot).
+  ctx.save()
+  ctx.translate(t.left, t.top)
+  ctx.scale(t.s, t.s)
 
-  blitWorld({ canvas: r.static, w: worldWpx, h: worldHpx }, tl.x, tl.y)
-
-  const mode = plateMode(r.vp.zoom)
-  const scale = plateScale(r.vp.zoom)
-
-  // Every agent resolved to its current floor + position: a delegate's journey
-  // may cross floors, so an in-transit agent belongs to exactly one floor —
-  // the journey's current floor — and is drawn only while that floor is active.
   const resolved = placeAgents(r.metas, r.byId, r.now, r.comms, r.t)
+  const onFloor = resolved.filter((p) => p.floor === r.vp.floor)
+  const seats = sideSeats(r.metas.filter((m) => m.desk.floor === r.vp.floor))
 
-  // lift doors stand open on any floor where an agent dwells
-  if (dwellFloors(resolved).has(r.vp.floor)) drawLiftDoorsOpen(ctx, r.vp.floor, toCss, k, dpr)
+  // ---- live board content + clock hands (the cached board is a blank shell)
+  // The board counts every agent *on this floor*, seated or walking: filtering
+  // to seats made an L1 frame read "0/0" the moment its only agent stepped into
+  // the lift. Presence is the floor's roster; the seat only decides the drawing.
+  drawStatusBoard(
+    ctx,
+    theme,
+    onFloor.map((p) => ({ id: p.meta.id, name: p.meta.name, status: p.agent?.status ?? 'offline' })),
+    compact,
+    boards,
+  )
+  drawClockHands(ctx, theme, r.hour, r.minute, compact, boards)
 
-  // The dynamic layer shows the active floor only: desks, chairs, agents,
-  // nameplates and comm envelopes all belong to the floor on screen.
-  const floorMetas = r.metas.filter((m) => m.desk.floor === r.vp.floor)
-
-  // desks + chairs, z-sorted (south last) so back rows sit behind front rows
-  const deskOrder = [...floorMetas].sort((a, b) => a.desk.z - b.desk.z)
-  for (const meta of deskOrder) {
-    const agent = r.byId.get(meta.id)
-    const pose = agent ? poseFor(agent, r.now, r.comms) : OFFLINE_POSE
-    const foot = deskObstacle(meta.desk, meta.id)
-    const dx = toCss(foot.x1, foot.z1)
-    const dw = Math.max(1, Math.round((foot.x2 - foot.x1) * TILE))
-    const dh = Math.max(1, Math.round((foot.z2 - foot.z1) * TILE))
-    const mon = monitorMode(pose)
-    const desk = getSprite(`desk:${dw}x${dh}:${mon}`, dw, dh, (c) => drawDesk(c, dw, dh, mon))
-    blitWorld(desk, dx.x, dx.y)
-    const seat = seatPoint(meta)
-    const sd = toCss(seat[0], seat[1])
-    const chair = getSprite(`chair:${CHAIR_PX}:${pose.offline ? 'empty' : 'taken'}`, CHAIR_PX, CHAIR_PX, (c) =>
-      drawChair(c, CHAIR_PX, !pose.offline),
-    )
-    blitWorld(chair, sd.x - (CHAIR_PX / 2) * k, sd.y - (CHAIR_PX / 2) * k)
-    if (pose.offline) {
-      // dim the abandoned station — the second, colour-free cue is the empty chair
-      ctx.fillStyle = 'rgba(10, 15, 22, 0.4)'
-      ctx.fillRect(
-        Math.round(dx.x * dpr),
-        Math.round(dx.y * dpr),
-        Math.round(dw * s),
-        Math.round(dh * s),
-      )
-    }
+  // ---- lift car: open while someone dwells, otherwise closed at this floor
+  const liftY = 540 - (r.vp.floor - 1) * 100
+  const dwelling = onFloor.find((p) => p.inLift)
+  if (dwelling) {
+    const target = dwelling.liftTo ?? r.vp.floor
+    const targetY = 540 - (target - 1) * 100
+    const progress = r.still ? 0.5 : (r.t % 2.6) / 2.6
+    const y = liftY + (targetY - liftY) * Math.sin(progress * Math.PI) * 0.32
+    drawLiftCar(ctx, theme, r.vp.floor, y, 0.35 + 0.65 * Math.sin(progress * Math.PI), target)
+  } else {
+    drawLiftCar(ctx, theme, r.vp.floor, liftY, 0, r.vp.floor)
   }
 
-  // agents on the active floor, painter's-algorithm sorted by current z
-  // (south drawn last); a cross-floor delegate appears only on the floor
-  // their journey is currently on
-  const order = resolved
-    .filter((p) => p.floor === r.vp.floor)
-    .map((p) => ({ ...p }))
-    .sort((a, b) => a.z - b.z)
-
-  for (const item of order) {
-    const { meta, pose, walking } = item
-    if (pose.offline) continue // the empty chair already tells the story
-    const head = toCss(item.x, item.z)
-    const frame =
-      walking
-        ? Math.floor(r.t * 6) % 4
-        : pose.kind === 'idle' || pose.kind === 'relax'
-          ? Math.floor(r.t * 1.5) % 2
-          : pose.kind === 'typing'
-            ? Math.floor(r.t * 4) % 2
-            : 0
-    const spr = agentSprite(meta.look, pose.kind, frame)
-    blitWorld(spr, head.x - (CHIBI_W / 2) * k, head.y - CHIBI_H * k)
+  // ---- stations: back row first, then front row. A walking agent leaves an
+  // empty desk behind (the chair stays, the monitor goes dark) — the desk must
+  // never vanish just because its agent is on a delegation.
+  for (const seat of seats) {
+    const p = onFloor.find((q) => q.meta.id === seat.meta.id && !q.walking) ?? null
+    drawStation(ctx, theme, seat, p, r)
   }
 
-  // ------------------------------------------------------------- labels
-  // Laid out in CSS px (never scaled by the zoom) so 13 nameplates stay
-  // readable and inside their desk slot at every zoom level.
-  const reserved: Rect[] = []
-  for (const zl of labelsOf(r.vp.floor)) {
-    const c = toCss(zl.x, zl.z)
-    const spr = plaquePlate(zl.text)
-    const rect = plaqueRect(zl.text, c.x, c.y)
-    const x = Math.min(Math.max(rect.x, 1), Math.max(1, cssW - rect.w - 1))
-    blitLabel(spr, x, rect.y)
-    reserved.push({ x, y: rect.y, w: rect.w, h: rect.h })
+  // ---- walking agents on this floor (no desk, no plate)
+  for (const p of onFloor) {
+    if (!p.walking) continue
+    drawWalkShadow(ctx, theme, p.designX, p.designY, p.avatarH)
+    const sprite = avatarSprite(p.meta.look, 'walk', poseFrame(p.pose, r.t, r.still), p.avatarH)
+    ctx.drawImage(sprite, p.designX - (p.avatarH * 0.72) / 2, p.designY - p.avatarH, p.avatarH * 0.72, p.avatarH)
   }
 
-  const stacks: Stack[] = []
-  const labelAgents: LabelAgent[] = []
-  const sprites = new Map<string, Sprite>()
-
-  for (const item of order) {
-    const { meta, agent, pose } = item
-    const head = toCss(item.x, item.z)
-    const offline = pose.offline
-    const dot = mode === 'compact' ? undefined : statusColor(agent, pose)
-    const bubble =
-      mode !== 'compact' && !offline && (pose.blocked || pose.kind === 'typing' || pose.kind === 'reading' || pose.kind === 'working')
-        ? pose.blocked
-          ? '!'
-          : dotsFrame(r.t)
-        : ''
-    const chip =
-      mode === 'compact'
-        ? ''
-        : item.inLift
-          ? liftChip(item.liftTo ?? r.vp.floor)
-          : statusChip(agent, pose)
-    const counters = mode === 'detail' && !offline ? countersLine(agent) : ''
-
-    // nameplate: team accent border, status dot, full first name
-    sprites.set(
-      `${meta.id}|name`,
-      pillPlate(
-        shortName(meta.name),
-        {
-          bg: offline ? PALETTE.concrete800 : PALETTE.concrete900,
-          border: offline ? PALETTE.concrete500 : teamAccent(meta.team),
-          ink: offline ? PALETTE.muted : PALETTE.ink,
-          dot,
-          hollowDot: agent?.status === 'idle' && !offline,
-          hollow: offline,
-        },
-        scale,
-      ),
-    )
-    if (chip) {
-      sprites.set(
-        `${meta.id}|chip`,
-        pillPlate(
-          chip,
-          {
-            bg: pose.blocked ? STATUS.blocked : PALETTE.concrete800,
-            border: pose.blocked ? PALETTE.concrete900 : pose.magnifier ? STATUS.reviewing : PALETTE.concrete500,
-            ink: pose.blocked ? EXTRAS.inkOnAmber : pose.magnifier ? STATUS.reviewing : PALETTE.inkDim,
-          },
-          scale,
-        ),
-      )
-    }
-    if (counters) {
-      sprites.set(
-        `${meta.id}|counters`,
-        pillPlate(counters, { bg: PALETTE.concrete900, border: PALETTE.concrete700, ink: PALETTE.inkDim }, scale),
-      )
-    }
-    if (offline && mode !== 'compact') {
-      sprites.set(
-        `${meta.id}|zzz`,
-        pillPlate('Z Z Z', { bg: PALETTE.concrete800, border: PALETTE.muted, ink: PALETTE.muted }, scale),
-      )
-    }
-    if (bubble) sprites.set(`${meta.id}|bubble`, bubblePlate(bubble, scale))
-
-    labelAgents.push({
-      id: meta.id,
-      name: meta.name,
-      cx: head.x,
-      topY: head.y - CHIBI_H * k,
-      head: { x: head.x - (HEAD_W / 2) * k, y: head.y - CHIBI_H * k, w: HEAD_W * k, h: HEAD_H * k },
-      offline,
-      chip,
-      bubble,
-      counters,
-      dot,
+  // ---- nameplates (seated agents only; walkers get no floating plate)
+  const statuses = new Map<string, { status: string; shape: 'circle' | 'ring' | 'diamond' | 'square' | 'triangle'; colour: string }>()
+  for (const seat of seats) {
+    const agent = r.byId.get(seat.meta.id)
+    const key = (agent?.status as keyof typeof THEME_STATUS.day) ?? 'offline'
+    statuses.set(seat.meta.id, {
+      status: agent?.status ?? 'offline',
+      shape: shapeOf(key),
+      colour: status[key] ?? status.offline,
     })
   }
-
-  stacks.push(...buildStacks(labelAgents, mode, scale))
-
-  const placed = placeStacks(stacks, { w: cssW, h: cssH }, reserved, scale)
-  for (const p of placed) {
-    const spr = sprites.get(`${p.id}|${p.key}`)
-    if (spr) blitLabel(spr, p.x, p.y)
+  const labelAgents = labelAgentsFor(seats, statuses)
+  const bounds = { w: SIDE_W, h: SIDE_H }
+  const reserved = boards.map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
+  // On the phone the sheet can be wider than the screen (zoomed in): clamp
+  // plates to the part of the stage the viewport really shows, with a 4 CSS px
+  // safety margin, or a plate near the edge is cut by the screen ("BAGA…"). At
+  // the fit zoom that window is the whole stage, so nothing moves. The window
+  // follows the camera, so panning never cuts a visible agent's plate; a plate
+  // whose head has left the window keeps the stage bounds and is cropped with
+  // its desk.
+  const labelScale = sideScale(r.viewW, r.viewH, r.vp.zoom, band)
+  const labelWindow =
+    band > 0 && labelScale > 0
+      ? {
+          ...visibleDesignRect(r.viewW, r.viewH, r.vp.zoom, r.vp.camX, band),
+          margin: Math.ceil(4 / labelScale),
+          visibleHeadsOnly: true,
+        }
+      : undefined
+  const { plates } = layoutSideLabels(labelAgents, bounds, reserved, labelWindow)
+  for (const plate of plates) {
+    const agent = labelAgents.find((a) => a.id === plate.id)
+    if (!agent) continue
+    drawPlate(ctx, theme, plate, agent)
   }
 
-  // comms envelopes: a quick paper-plane hop from sender to recipient, only
-  // when both ends are on the same active floor (cross-floor comms ride the lift)
+  // ---- lift chip (generic: floor only, never a message)
+  if (dwelling) {
+    const chip = liftChip(dwelling.liftTo ?? r.vp.floor)
+    drawChip(ctx, theme, 742, liftY - 26, chip, status.reviewing)
+  }
+
+  // ---- comms: a small paper plane between two agents on this floor
   for (const c of r.comms) {
     const age = r.now - c.ts
     if (age < 0 || age > 1.5) continue
-    const from = resolved.find((p) => p.meta.id === c.from)
-    const to = resolved.find((p) => p.meta.id === c.to)
+    const from = onFloor.find((p) => p.meta.id === c.from)
+    const to = onFloor.find((p) => p.meta.id === c.to)
     if (!from || !to) continue
-    if (from.floor !== r.vp.floor || to.floor !== r.vp.floor) continue
-    const fp: Pt = [from.x, from.z]
-    const tp: Pt = [to.x, to.z]
-    const kk = age / 1.5
-    const x = fp[0] + (tp[0] - fp[0]) * kk
-    const z = fp[1] + (tp[1] - fp[1]) * kk - Math.sin(kk * Math.PI) * 0.6
-    const p = toCss(x, z)
-    const env = getSprite('envelope', 10, 8, (c2) => drawEnvelope(c2))
-    blitWorld(env, p.x - (env.w / 2) * k, p.y - (env.h / 2) * k)
+    const k = age / 1.5
+    const x = from.designX + (to.designX - from.designX) * k
+    const y = (from.designY - from.avatarH * 0.6) + (to.designY - to.avatarH * 0.6 - (from.designY - from.avatarH * 0.6)) * k - Math.sin(k * Math.PI) * 24
+    drawEnvelope(ctx, theme, x, y)
+  }
+
+  // camera frame: nothing is drawn outside the stage, but the page is already
+  // filled, so the section reads as a slice of a building.
+  ctx.restore()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+}
+
+function drawStation(
+  ctx: CanvasRenderingContext2D,
+  theme: ThemeName,
+  seat: SideSeat,
+  p: PlacedAgent | null,
+  r: RenderInput,
+): void {
+  const agentAtDesk = r.byId.get(seat.meta.id)
+  const key = p ? statusOf(p.agent, p.pose) : ((agentAtDesk?.status as keyof typeof THEME_STATUS.day) ?? 'offline')
+  const offline = !agentAtDesk || key === 'offline'
+  const scale = seat.scale
+
+  // feet contact shadow
+  drawWalkShadow(ctx, theme, seat.cx, seat.floorY, seat.avatarH)
+
+  drawChair(ctx, theme, seat.cx, seat.floorY, scale, !offline)
+
+  if (!offline && p) {
+    const pose = avatarPose(p.pose)
+    const frame = poseFrame(p.pose, r.t, r.still)
+    const sprite = avatarSprite(p.meta.look, pose, frame, seat.avatarH)
+    ctx.drawImage(sprite, seat.cx - (seat.avatarH * 0.72) / 2, seat.floorY - seat.avatarH, seat.avatarH * 0.72, seat.avatarH)
+  }
+
+  const deskTop = drawDesk(ctx, theme, seat.cx, seat.floorY, scale)
+  drawKeyboardMouse(ctx, theme, seat.cx, deskTop, scale)
+  if (!offline && p) {
+    drawAvatarHands(ctx, p.meta.look, avatarPose(p.pose), poseFrame(p.pose, r.t, r.still), seat.cx, seat.floorY, seat.avatarH, deskTop)
+  }
+  drawMonitor(ctx, theme, seat.cx, seat.floorY, scale, key, p ? screenOf(p.pose) : 'off')
+
+  // an empty station says so without colour
+  if (offline) {
+    ctx.save()
+    ctx.globalAlpha = 0.75
+    ctx.font = `600 9px ${FONT}`
+    ctx.fillStyle = THEME_TOKENS[theme].muted
+    ctx.fillText('Z Z Z', seat.cx + seat.headW / 2 + 4, seat.headTop + 10)
+    ctx.restore()
   }
 }
 
-function teamAccent(team: string): string {
-  if (team === 'dev') return TEAM.dev
-  if (team === 'edu') return TEAM.edu
-  return TEAM.lobby
+function drawWalkShadow(ctx: CanvasRenderingContext2D, theme: ThemeName, cx: number, floorY: number, h: number): void {
+  ctx.save()
+  ctx.translate(cx, floorY)
+  ctx.scale(1, 0.18)
+  const g = ctx.createRadialGradient(0, 0, 1, 0, 0, h * 0.22)
+  g.addColorStop(0, `rgba(0,0,0,${theme === 'day' ? 0.25 : 0.35})`)
+  g.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = g
+  ctx.beginPath()
+  ctx.arc(0, 0, h * 0.22, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
 }
 
-function dotsFrame(t: number): string {
-  const f = Math.floor(t * 2) % 3
-  return f === 0 ? '.' : f === 1 ? '..' : '...'
+function shapeOf(key: keyof typeof THEME_STATUS.day): 'circle' | 'ring' | 'diamond' | 'square' | 'triangle' {
+  if (key === 'blocked') return 'diamond'
+  if (key === 'idle') return 'ring'
+  if (key === 'offline') return 'square'
+  if (key === 'danger') return 'triangle'
+  if (key === 'reviewing') return 'ring'
+  return 'circle'
 }
 
-function statusChip(agent: Agent | undefined, pose: Pose): string {
-  if (pose.offline) return 'offline'
-  if (pose.blocked) return agent ? blockedChipText(agent) : 'butuh izin'
-  if (pose.magnifier) return 'review'
-  if (pose.kind === 'typing' || pose.kind === 'reading' || pose.kind === 'working') return pose.tool || 'kerja'
-  if (pose.kind === 'walk') return 'delegasi'
-  if (pose.kind === 'idle' || pose.kind === 'relax') return 'idle'
-  return ''
+function drawPlate(
+  ctx: CanvasRenderingContext2D,
+  theme: ThemeName,
+  plate: PlacedPlate,
+  agent: { id: string; name: string; dot: string | null; shape?: string; offline: boolean; cx: number; headTop: number },
+): void {
+  const t = THEME_TOKENS[theme]
+  const text = shortName(agent.name)
+  const fill = theme === 'day' ? 'rgba(255,255,255,0.92)' : 'rgba(20,27,46,0.92)'
+  const border = theme === 'day' ? 'rgba(15,36,64,0.33)' : 'rgba(255,255,255,0.33)'
+
+  // connector first, under the plate
+  if (plate.connector) {
+    ctx.strokeStyle = border
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(plate.x + plate.w / 2, plate.y + plate.h)
+    ctx.lineTo(agent.cx, agent.headTop)
+    ctx.stroke()
+  }
+
+  ctx.save()
+  ctx.fillStyle = fill
+  ctx.strokeStyle = border
+  ctx.lineWidth = 1
+  rounded(ctx, plate.x, plate.y, plate.w, plate.h, 11)
+  ctx.fill()
+  ctx.stroke()
+
+  const cy = plate.y + plate.h / 2
+  if (agent.dot) {
+    drawShape(ctx, agent.shape ?? 'circle', plate.x + PLATE_PAD + PLATE_DOT / 2, cy, PLATE_DOT, agent.dot, theme)
+  }
+  const tx = plate.x + PLATE_PAD + (agent.dot ? PLATE_DOT + PLATE_DOT_GAP : 0)
+  const maxW = plate.w - (tx - plate.x) - PLATE_PAD
+  ctx.font = `700 ${PLATE_FONT}px ${FONT}`
+  ctx.fillStyle = agent.offline ? t.muted : t.ink
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, tx, cy + 0.5, Math.max(1, maxW))
+  ctx.restore()
 }
 
-/** Counters only at zoom ≥3, where a detail plate has room for them. */
-function countersLine(agent: Agent | undefined): string {
-  if (!agent) return ''
-  const m = agent.today?.messages ?? 0
-  const t = agent.today?.tool_calls ?? 0
-  const task = agent.task ? `#${agent.task.slice(0, 6)}` : ''
-  const cnt = `${m}M ${t}T`
-  return task ? `${cnt} ${task}` : cnt
+function drawChip(
+  ctx: CanvasRenderingContext2D,
+  theme: ThemeName,
+  x: number,
+  y: number,
+  text: string,
+  colour: string,
+): void {
+  ctx.save()
+  ctx.font = `700 10px ${FONT}`
+  const w = Math.ceil(ctx.measureText(text).width) + 16
+  const h = 22
+  ctx.fillStyle = theme === 'day' ? 'rgba(255,255,255,0.95)' : 'rgba(20,27,46,0.95)'
+  ctx.strokeStyle = colour
+  ctx.lineWidth = 1
+  rounded(ctx, x, y, w, h, 10)
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = colour
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, x + 8, y + h / 2 + 0.5)
+  ctx.restore()
 }
 
-// ------------------------------------------------------------------ helpers
+function drawEnvelope(ctx: CanvasRenderingContext2D, theme: ThemeName, x: number, y: number): void {
+  const t = THEME_TOKENS[theme]
+  ctx.save()
+  ctx.fillStyle = t.surfaceSolid
+  ctx.strokeStyle = THEME_STATUS[theme].reviewing
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(x - 7, y - 5)
+  ctx.lineTo(x + 7, y - 5)
+  ctx.lineTo(x + 7, y + 5)
+  ctx.lineTo(x - 7, y + 5)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(x - 7, y - 5)
+  ctx.lineTo(x, y + 1)
+  ctx.lineTo(x + 7, y - 5)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawShape(
+  ctx: CanvasRenderingContext2D,
+  shape: string,
+  x: number,
+  y: number,
+  size: number,
+  colour: string,
+  theme: ThemeName,
+): void {
+  const r = size / 2
+  ctx.save()
+  ctx.fillStyle = colour
+  ctx.strokeStyle = colour
+  ctx.lineWidth = 1.2
+  if (shape === 'diamond') {
+    ctx.beginPath()
+    ctx.moveTo(x, y - r)
+    ctx.lineTo(x + r, y)
+    ctx.lineTo(x, y + r)
+    ctx.lineTo(x - r, y)
+    ctx.closePath()
+    ctx.fill()
+  } else if (shape === 'square') {
+    ctx.strokeRect(x - r, y - r, size, size)
+  } else if (shape === 'triangle') {
+    ctx.beginPath()
+    ctx.moveTo(x, y - r)
+    ctx.lineTo(x + r, y + r)
+    ctx.lineTo(x - r, y + r)
+    ctx.closePath()
+    ctx.fill()
+  } else if (shape === 'ring') {
+    ctx.beginPath()
+    ctx.arc(x, y, r - 1, 0, Math.PI * 2)
+    ctx.stroke()
+  } else {
+    ctx.beginPath()
+    ctx.arc(x, y, r - 0.6, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  void theme
+  ctx.restore()
+}
+
+function rounded(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const k = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + k, y)
+  ctx.lineTo(x + w - k, y)
+  ctx.quadraticCurveTo(x + w, y, x + w, y + k)
+  ctx.lineTo(x + w, y + h - k)
+  ctx.quadraticCurveTo(x + w, y + h, x + w - k, y + h)
+  ctx.lineTo(x + k, y + h)
+  ctx.quadraticCurveTo(x, y + h, x, y + h - k)
+  ctx.lineTo(x, y + k)
+  ctx.quadraticCurveTo(x, y, x + k, y)
+  ctx.closePath()
+}
 
 /** The full roster (all desks), used when nothing else is available. */
 export function allMetas(): AgentMeta[] {
   return rosterAgents()
 }
+
