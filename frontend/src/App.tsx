@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Scene } from './components/Scene'
-import type { MoveIntent, RigCommand } from './lib/view'
+import type { MoveIntent, RigCommand, ViewMode } from './lib/view'
+import { defaultViewMode } from './lib/view'
 import { Hud } from './components/Hud'
 import { Roster } from './components/Roster'
 import { Feed, type FeedTab } from './components/Feed'
@@ -33,12 +34,41 @@ function queryFloor(): FloorId | null {
   return n === 1 || n === 2 || n === 3 ? (n as FloorId) : null
 }
 
-/** Persist the active floor in the URL so any view stays shareable. */
-function writeFloorToUrl(floor: FloorId): void {
+/** `?view=building|floor` — explicit view mode; absent/invalid → null. */
+function queryView(): ViewMode | null {
+  const raw = new URLSearchParams(window.location.search).get('view')
+  return raw === 'building' || raw === 'floor' ? raw : null
+}
+
+/** A face or hash deep link always lands on the agent's own floor. */
+function hasAgentLink(): boolean {
+  return Boolean(
+    new URLSearchParams(window.location.search).get('face') || window.location.hash.replace('#', ''),
+  )
+}
+
+/**
+ * Persist the view. The building is the default, so `?view=building` is only
+ * written when it is chosen explicitly (the URL stays clean on first load);
+ * a floor view writes `?floor=` and drops `?view=`, exactly as before.
+ */
+function writeViewToUrl(mode: ViewMode, floor: FloorId): void {
   if (typeof history === 'undefined') return
   const url = new URL(window.location.href)
-  url.searchParams.set('floor', String(floor))
+  url.hash = ''
+  if (mode === 'building') {
+    url.searchParams.set('view', 'building')
+    url.searchParams.delete('floor')
+  } else {
+    url.searchParams.delete('view')
+    url.searchParams.set('floor', String(floor))
+  }
   history.replaceState(null, '', url)
+}
+
+/** The mode a fresh load opens in: explicit links win, GEDUNG is the default. */
+function initialMode(floor: FloorId | null, spot: string | null): ViewMode {
+  return defaultViewMode({ floor, spot, view: queryView(), agentLink: hasAgentLink() })
 }
 
 export default function App() {
@@ -52,9 +82,14 @@ export default function App() {
   const [command, setCommand] = useState<RigCommand>(() => {
     const spot = new URLSearchParams(window.location.search).get('spot')
     const floor = queryFloor() ?? (spot ? SPOT_FLOOR[spot] : undefined)
-    // default: the whole floor ("tampak"), so every desk is on screen from the
-    // first frame — a cropped cluster is a bug, not a zoom
-    return { spot: floor !== undefined ? spot ?? 'tampak' : 'tampak', nonce: 0, floor: floor ?? 1 }
+    // default: GEDUNG (the 3-floor building in its city). ?floor / ?face /
+    // #id / legacy ?spot= all land on a floor instead.
+    return {
+      spot: floor !== undefined ? spot ?? 'tampak' : 'tampak',
+      nonce: 0,
+      floor: floor ?? 1,
+      mode: initialMode(queryFloor(), spot),
+    }
   })
   const [rosterOpen, setRosterOpen] = useState(!mobile)
   const [feedOpen, setFeedOpen] = useState(!mobile)
@@ -98,10 +133,17 @@ export default function App() {
 
   /** Switch floors: re-fit the floor (desktop fit, mobile zoom 1 + pan) and keep the URL shareable. */
   const goFloor = useCallback((floor: FloorId) => {
-    setCommand((c) => ({ spot: 'tampak', nonce: c.nonce + 1, floor }))
+    setCommand((c) => ({ spot: 'tampak', nonce: c.nonce + 1, floor, mode: 'floor' }))
     setPickedId(null)
-    writeFloorToUrl(floor)
+    writeViewToUrl('floor', floor)
   }, [])
+
+  /** GEDUNG: all three floors at once. `floor` stays as the last floor visited. */
+  const goBuilding = useCallback(() => {
+    setCommand((c) => ({ spot: 'tampak', nonce: c.nonce + 1, floor: c.floor ?? 1, mode: 'building' }))
+    setPickedId(null)
+    writeViewToUrl('building', command.floor ?? 1)
+  }, [command.floor])
 
   const flyToAgent = useCallback((id: string, tight = false) => {
     if (!id) {
@@ -115,11 +157,18 @@ export default function App() {
       focus: focus ?? undefined,
       tight,
       floor: focus?.floor ?? c.floor,
+      mode: 'floor',
     }))
     setPickedId(id)
     setChipVisible(true)
-    if (typeof history !== 'undefined') history.replaceState(null, '', `#${id}`)
-  }, [])
+    if (typeof history !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.hash = id
+      url.searchParams.delete('view')
+      url.searchParams.set('floor', String(focus?.floor ?? command.floor ?? 1))
+      history.replaceState(null, '', url)
+    }
+  }, [command.floor])
 
   const onPick = useCallback(
     (id: string) => {
@@ -141,6 +190,8 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const explicit = queryFloor()
+    // an explicit building link must not be stolen by ?face=/#id
+    if (!explicit && queryView() === 'building') return
     const face = resolveAgentId(params.get('face') ?? '')
     const hash = resolveAgentId(decodeURIComponent(window.location.hash.replace('#', '')))
     const id = face ?? hash
@@ -183,6 +234,7 @@ export default function App() {
           onNear={setNearId}
           onMove={onMove}
           onPick={onPick}
+          onFloor={goFloor}
           onPan={setCanPan}
           theme={theme.mode}
           dpr={mobile ? [1, 1.5] : [1, 1.8]}
@@ -207,6 +259,8 @@ export default function App() {
         stale={stale}
         floor={command.floor ?? 1}
         onFloor={goFloor}
+        mode={command.mode ?? 'floor'}
+        onBuilding={goBuilding}
         theme={theme.mode}
         themeOverride={themeOverride}
         themeSource={theme.source}

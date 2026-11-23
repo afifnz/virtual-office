@@ -435,7 +435,7 @@ cd frontend && npx tsc --noEmit && npm run build      # dist/ (JS 216 kB, 71 kB 
 Pemeriksaan murni, tanpa browser (esbuild + node):
 
 ```bash
-for c in roster_check layout_check anim_check visual_check; do
+for c in roster_check layout_check anim_check visual_check theme_check render_check building_check; do
   frontend/node_modules/.bin/esbuild verify/$c.ts --bundle --format=esm \
     --platform=node --outfile=/tmp/$c.mjs && node /tmp/$c.mjs
 done
@@ -446,12 +446,17 @@ done
   agen baru dapat meja di lattice, penempatan deterministik, `look` stabil per id.
 - `anim_check` — pemetaan pose dari `/api/status`, transform world↔pixel, clamp
   zoom, dan chip blocked tidak membocorkan `reason` mentah.
-- `visual_check` — gate legibilitas/geometri: 13 meja terlihat pada 1280×800 dan
-  390×844; nama depan penuh (bukan stub 3 huruf) di zoom 1 dengan font 2×;
-  tidak ada nameplate/chip yang bertumpuk atau menutupi plakat zona; tidak ada
-  plat keluar kanvas (clamp ≥1 px); zoom default HP = 1 (integer, clamp 1..4);
-  lebar nama ≤ slot meja pada skala 1×; dan `offline` beda dari `idle` tanpa
-  mengandalkan warna.
+- `visual_check` — gate legibilitas/geometri per lantai: 13 meja terlihat pada
+  1280×800 dan 390×844; tidak ada nameplate/chip yang bertumpuk; tidak ada plat
+  keluar kanvas.
+- `theme_check` — jendela terang 06:00–18:00 WIB, override/`?theme=`, dan tabel
+  kontras 4.5:1 untuk kedua tema.
+- `render_check` — setiap lantai × tema benar-benar digambar lewat `renderFrame`
+  (tanpa browser), termasuk roster kosong, semua agen berjalan, dan seed offline.
+- `building_check` — mode GEDUNG: 3 band lantai + 13 meja + 13 nameplate di dalam
+  1000×688 **dan** 390×692, 0 label overlap, gedung tepat di tengah (selisih 0 px
+  dari batas 2 %), lift terlihat di antara lantai saat delegasi, dan 0 rect kota
+  menutupi fasad; frame siang/malam × desktop/HP × online/offline diaudit.
 
 Pemeriksaan yang butuh layout engine (`verify/office2d_probe.js`) dijalankan di
 browser: buka build preview, tempel isi file itu di Console (atau
@@ -467,13 +472,27 @@ bash verify/e2e_review.sh      # 51 pemeriksaan, butuh binary di /workspace/.got
 ```
 
 Hasil terakhir: `go vet` bersih, `go test` ok di api/derive/store, `tsc --noEmit`
-tanpa error, `vite build` sukses, `roster/layout/anim/visual` semuanya OK, dan
-`verify/office2d_probe.js` melaporkan `ok: true` (kanvas tergambar, tidak ada
-panel menutupi kanvas, roster scroll, lantai muat).
+tanpa error, `vite build` sukses, `roster/layout/anim/visual/theme/render/building`
+semuanya OK, dan `verify/office2d_probe.js` melaporkan `ok: true` (kanvas
+tergambar, tidak ada panel menutupi kanvas, roster scroll, GEDUNG default,
+lantai muat).
 
-Screenshot (1280×800 dan 390×844) memakai `?still=1` agar frame deterministik;
-`?spot=tampak` (default) memperlihatkan seluruh lantai, `?face=<id>` zoom ke satu
-meja, `?spot=lobby|dev|edu|luar` ke satu zona.
+Screenshot (1280×800 dan 390×844) memakai `?still=1` agar frame deterministik.
+Default sekarang **GEDUNG**: potongan tiga lantai di tengah kota, ketiganya
+terlihat sekaligus. Tab HUD: **GEDUNG | L1 | L2 | L3**; keyboard `0`/`B` untuk
+gedung dan `1..3` untuk lantai.
+
+```
+/?still=1&theme=day                      # GEDUNG, siang (default)
+/?still=1&theme=night&view=building      # GEDUNG, malam
+/?still=1&theme=day&floor=3              # L3 seperti sebelumnya
+/?face=dev                               # lantai agen + zoom ke mejanya
+```
+
+Di GEDUNG: klik agen → pindah ke lantai agen itu + fokus meja; klik band lantai
+kosong → buka lantai itu; zoom masuk (tombol `+`/pinch) mengaktifkan pan vertikal
+dan horizontal (desktop sampai 3×). Nameplate diringkas (nama depan + dot
+status), skala overview: avatar 42 px, meja 48,6 px, band 150 px/lantai.
 
 ## Catatan desain (kantor 2D)
 
