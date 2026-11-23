@@ -19,6 +19,8 @@ import { THEME_STATUS, THEME_TOKENS, type ThemeName } from './palette'
 import { shortName } from './labels'
 import { drawChair, drawDesk, drawKeyboardMouse, drawMonitor } from './props-side'
 import { SIDE_H, SIDE_W, sideTransform, type SideViewport } from './side'
+import { drawSkyLife, drawStreetLife } from './render-traffic'
+import { cityWindowCells, trafficAt } from './traffic'
 import {
   BLD,
   BLD_AVATAR_H,
@@ -94,18 +96,13 @@ export function clearBuildingCache(): void {
 }
 
 /** Deterministic skyline window texture (no Math.random anywhere). */
-function windows(ctx: Ctx, theme: ThemeName, x: number, y: number, w: number, h: number, seed: number): void {
+function windows(ctx: Ctx, theme: ThemeName, rect: { x: number; y: number; w: number; h: number }): void {
   const t = THEME_TOKENS[theme].city
-  const cols = Math.max(2, Math.floor((w - 6) / 8))
-  const rows = Math.max(2, Math.floor((h - 8) / 10))
-  for (let c = 0; c < cols; c++) {
-    for (let r = 0; r < rows; r++) {
-      const v = ((c * 73 + r * 41 + seed * 97) % 100) / 100
-      if (theme === 'night' && v < 0.42) continue
-      ctx.fillStyle = v > 0.6 ? t.windowWarm : t.windowCool
-      ctx.globalAlpha = theme === 'day' ? 0.16 + v * 0.22 : 0.26 + v * 0.3
-      ctx.fillRect(x + 3 + c * ((w - 6) / cols), y + 4 + r * ((h - 8) / rows), 2, 2.6)
-    }
+  for (const cell of cityWindowCells(rect)) {
+    if (theme === 'night' && cell.v < 0.42) continue
+    ctx.fillStyle = cell.v > 0.6 ? t.windowWarm : t.windowCool
+    ctx.globalAlpha = theme === 'day' ? 0.16 + cell.v * 0.22 : 0.26 + cell.v * 0.3
+    ctx.fillRect(cell.x, cell.y, 2, 2.6)
   }
   ctx.globalAlpha = 1
 }
@@ -190,7 +187,7 @@ function drawSkyline(ctx: Ctx, theme: ThemeName): void {
           ctx.fillStyle = theme === 'day' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.1)'
           ctx.fillRect(r.x, r.y, r.w, 1)
         }
-        windows(ctx, theme, r.x, r.y, r.w, r.h, (r.x * 13 + r.h) | 0)
+        windows(ctx, theme, r)
       }
     }
     // atmospheric haze: the skyline fades at its feet, never at its top
@@ -611,6 +608,11 @@ export function renderBuildingFrame(ctx: CanvasRenderingContext2D, r: BuildingRe
   ctx.save()
   ctx.translate(tr.left, tr.top)
   ctx.scale(tr.s, tr.s)
+
+  // street life sits between the cached sheet and the desks: clouds/birds in
+  // the sky (clipped to the bays), then the two lanes, the signal and walkers.
+  drawSkyLife(ctx, theme, r.t)
+  drawStreetLife(ctx, theme, trafficAt(r.t))
 
   const metas = r.metas
   const placed = placeAgents(metas, r.byId, r.now, r.comms, r.t)

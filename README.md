@@ -435,7 +435,7 @@ cd frontend && npx tsc --noEmit && npm run build      # dist/ (JS 216 kB, 71 kB 
 Pemeriksaan murni, tanpa browser (esbuild + node):
 
 ```bash
-for c in roster_check layout_check anim_check visual_check theme_check render_check building_check; do
+for c in roster_check layout_check anim_check visual_check theme_check render_check building_check traffic_check; do
   frontend/node_modules/.bin/esbuild verify/$c.ts --bundle --format=esm \
     --platform=node --outfile=/tmp/$c.mjs && node /tmp/$c.mjs
 done
@@ -457,6 +457,15 @@ done
   1000×688 **dan** 390×692, 0 label overlap, gedung tepat di tengah (selisih 0 px
   dari batas 2 %), lift terlihat di antara lantai saat delegasi, dan 0 rect kota
   menutupi fasad; frame siang/malam × desktop/HP × online/offline diaudit.
+- `traffic_check` — keramaian jalan di mode GEDUNG: 10 kendaraan (2 lajur, arah
+  berlawanan, bus/van/motor) + 5 pejalan kaki (3 trotoar, 2 penyeberang), semuanya
+  di dalam band jalan/trotoar/zebra dan **tidak pernah** menutupi fasad; 0 bbox
+  kendaraan bertumpuk dalam 120 dtk pada 30 Hz; lampu merah benar-benar
+  menghentikan kendaraan (0 yang menembus zebra, antrean diam di garis); posisi
+  identik untuk `t` yang sama (`?still=1`); headlight hanya malam; siklus 6/2/6;
+  awan/burung/kedip jendela deterministik. Skrip juga melaporkan biaya painter
+  (ms/frame dengan mock ctx — angka browser dari front desk lewat
+  `__office2dPerf()` / `__office2dTraffic()`).
 
 Pemeriksaan yang butuh layout engine (`verify/office2d_probe.js`) dijalankan di
 browser: buka build preview, tempel isi file itu di Console (atau
@@ -472,7 +481,7 @@ bash verify/e2e_review.sh      # 51 pemeriksaan, butuh binary di /workspace/.got
 ```
 
 Hasil terakhir: `go vet` bersih, `go test` ok di api/derive/store, `tsc --noEmit`
-tanpa error, `vite build` sukses, `roster/layout/anim/visual/theme/render/building`
+tanpa error, `vite build` sukses, `roster/layout/anim/visual/theme/render/building/traffic`
 semuanya OK, dan `verify/office2d_probe.js` melaporkan `ok: true` (kanvas
 tergambar, tidak ada panel menutupi kanvas, roster scroll, GEDUNG default,
 lantai muat).
