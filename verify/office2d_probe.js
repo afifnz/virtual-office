@@ -1,16 +1,20 @@
 /**
  * Browser probe for the 2D office — the DOM half of the T1.9 gate.
  *
- * The pure geometry lives in verify/visual_check.ts (esbuild+node). This file
- * only answers the questions that need a real layout engine: does a panel cover
- * the canvas, does the roster really scroll, is the canvas painted. It is not
- * part of the build and takes no dependencies.
+ * The pure geometry lives in verify/visual_check.ts + verify/building_check.ts
+ * (esbuild+node). This file only answers the questions that need a real layout
+ * engine: does a panel cover the canvas, does the roster really scroll, is the
+ * canvas painted, and does GEDUNG behave like the default view. It is not part
+ * of the build and takes no dependencies.
  *
  * How to run it (front desk, on the built app — no Playwright needed):
  *   1. serve a build:  cd frontend && npm run build && npm run preview
  *      (preview proxies /api to the Go API on 127.0.0.1:8131; or use
  *       `npm run dev` on 127.0.0.1:5173)
- *   2. open  http://127.0.0.1:4173/?still=1&theme=day&floor=3  (desktop 1280x800)
+ *   2. open  http://127.0.0.1:4173/?still=1&theme=day  (desktop 1280x800)
+ *      no ?floor/?view → GEDUNG (all three floors in the city)
+ *      ?view=building  → GEDUNG explicitly
+ *      ?floor=1|2|3    → that floor, as before
  *   3. DevTools → Console → paste this whole file → Enter.
  *      Or from CI/CDP:
  *        Runtime.evaluate({ expression: <this file>, awaitPromise: true, returnByValue: true })
@@ -19,11 +23,11 @@
  * Exit criteria: `ok: true`. Anything in `problems` is a regression.
  *
  * MANUAL STEP (offline seed): stop the Go API (or block /api/*) and reload.
- * The seed roster must still render all 13 desks across L1/L2/L3, every agent
- * OFFLINE, with the "data lama" banner in the HUD. When the probe sees an
- * all-offline roster it asserts exactly that (floorsInfo.allOffline +
- * floorsInfo.staleShown); the visual check of the dimmed desks is the manual
- * screenshot review.
+ * The seed roster must still render all 13 desks across L1/L2/L3 (in GEDUNG
+ * and per floor), every agent OFFLINE, with the "data lama" banner in the HUD.
+ * When the probe sees an all-offline roster it asserts exactly that
+ * (floorsInfo.allOffline + floorsInfo.staleShown); the visual check of the
+ * dimmed desks is the manual screenshot review.
  */
 (async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -125,23 +129,76 @@
     problems.push(`<html data-theme> is ${themeAttr}, want day|night`)
   }
 
-  // 3b. the floor tabs: three of them, and clicking one switches vp.floor
+  // 3b. the view tabs: GEDUNG + L1..L3, and the mode matches the deep link
   let tabs = null
+  let modeSeen = null
   const tabEls = [...document.querySelectorAll('.floor-tabs .floor-tab')]
-  if (tabEls.length !== 3) {
-    problems.push(`expected 3 floor tabs, found ${tabEls.length}`)
-  } else if (typeof window.__office2dVp === 'function') {
-    const before = window.__office2dVp().floor
-    // click L2 (index 1), or L3 when already on L2, so the floor must change
-    const idx = before === 2 ? 2 : 1
-    tabEls[idx].click()
-    await sleep(200)
-    const after = window.__office2dVp().floor
-    tabs = { clicked: idx + 1, before, after }
-    if (after === before) problems.push(`clicking floor tab L${idx + 1} did not change vp.floor (${before} → ${after})`)
-    if (!new URLSearchParams(window.location.search).get('floor')) {
-      problems.push('switching floors did not write ?floor= to the URL')
+  const modeOf = () => (typeof window.__office2dMode === 'function' ? window.__office2dMode() : null)
+  const search = () => new URLSearchParams(window.location.search)
+  const expectedMode = search().get('floor') ? 'floor' : search().get('view') === 'building' ? 'building' : null
+  if (tabEls.length !== 4) {
+    problems.push(`expected 4 view tabs (GEDUNG + L1..L3), found ${tabEls.length}`)
+  } else {
+    const ids = tabEls.map((el) => el.querySelector('.floor-tab-id')?.textContent ?? '')
+    if (ids.join(',') !== 'GEDUNG,L1,L2,L3') problems.push(`tab labels ${ids.join(',')}, want GEDUNG,L1,L2,L3`)
+    modeSeen = modeOf()
+    if (modeSeen !== 'building' && modeSeen !== 'floor') problems.push(`window.__office2dMode() is ${modeSeen}`)
+    // no ?floor/?view → GEDUNG is the default; a floor link must open that floor
+    if (!expectedMode && modeSeen !== 'building') {
+      problems.push(`opened in ${modeSeen} mode without ?floor/?view — GEDUNG must be the default`)
     }
+    if (expectedMode && modeSeen !== expectedMode) {
+      problems.push(`deep link expects ${expectedMode}, scene opened in ${modeSeen}`)
+    }
+    const active = tabEls.findIndex((el) => el.classList.contains('is-active'))
+    if (modeSeen === 'building' && active !== 0) problems.push(`GEDUNG is the active view but tab ${active} is highlighted`)
+    if (modeSeen === 'floor' && active === 0) problems.push('a floor is active but no floor tab is highlighted')
+
+    // click GEDUNG: mode + ?view=building
+    tabEls[0].click()
+    await sleep(300)
+    if (modeOf() !== 'building') problems.push(`clicking GEDUNG left mode ${modeOf()}`)
+    if (search().get('view') !== 'building') problems.push('clicking GEDUNG did not write ?view=building')
+    if (search().get('floor')) problems.push('clicking GEDUNG kept ?floor= in the URL')
+
+    // click L2 (index 2): back to the floor camera, ?floor=2, no ?view=
+    tabEls[2].click()
+    await sleep(300)
+    const beforeFloor = window.__office2dVp().floor
+    tabs = { clicked: 'L2', before: modeSeen, after: modeOf(), floor: beforeFloor }
+    if (modeOf() !== 'floor') problems.push(`clicking L2 left mode ${modeOf()}`)
+    if (beforeFloor !== 2) problems.push(`clicking L2 left vp.floor=${beforeFloor}`)
+    if (search().get('floor') !== '2') problems.push('switching floors did not write ?floor=2 to the URL')
+    if (search().get('view')) problems.push('switching to a floor kept ?view= in the URL')
+  }
+
+  // 3b2. GEDUNG facts: three bands, 13 desks, 13 plates, centred, city clear
+  let building = null
+  if (typeof window.__office2dBuilding === 'function' && tabEls.length === 4) {
+    tabEls[0].click()
+    await sleep(300)
+    building = window.__office2dBuilding()
+    if (building.stage.w !== 1000 || building.stage.h !== 688) {
+      problems.push(`building stage ${JSON.stringify(building.stage)}, want 1000×688`)
+    }
+    if (building.bands.length !== 3) problems.push(`building has ${building.bands.length} bands, want 3`)
+    if (building.desks.length !== 13) problems.push(`building paints ${building.desks.length} desks, want 13`)
+    if (building.plates.length !== 13) problems.push(`building has ${building.plates.length} nameplates, want 13`)
+    if ((building.plateViolations ?? []).length) problems.push(`building plates: ${building.plateViolations.join('; ')}`)
+    if (building.centreOffset > 1000 * 0.02) problems.push(`building centre is ${building.centreOffset} px off (limit 20)`)
+    if (building.city < 20) problems.push(`skyline only ${building.city} buildings`)
+    const outside = [...building.desks, ...building.plates].filter(
+      (r) => r.x < 0 || r.y < 0 || r.x + r.w > 1000 || r.y + r.h > 688,
+    )
+    if (outside.length) problems.push(`${outside.length} building rect(s) leave the 1000×688 sheet`)
+    // the lift is parked at L1 when nobody rides; the vertikal ride is gated
+    // headless in verify/building_check.ts (time-dependent)
+    if (!building.lift || !Number.isFinite(building.lift.y)) problems.push('building lift geometry is missing')
+    notes.push(
+      `GEDUNG: ${building.desks.length} desks · ${building.plates.length} plates · centre offset ${building.centreOffset} px · ${building.city} city buildings · lift y ${Math.round(building.lift.y)}`,
+    )
+  } else if (tabEls.length === 4) {
+    problems.push('window.__office2dBuilding() is missing')
   }
 
   // 3c. the canvas is painted on EVERY floor (blank-floor regression)
@@ -153,9 +210,9 @@
     return Math.round((opaque / (data.length / 4)) * 100) / 100
   }
   const paintedByFloor = {}
-  if (tabEls.length === 3 && canvas) {
+  if (tabEls.length === 4 && canvas) {
     for (let f = 1; f <= 3; f++) {
-      tabEls[f - 1].click()
+      tabEls[f].click()
       await sleep(250)
       const vpNow = typeof window.__office2dVp === 'function' ? window.__office2dVp() : null
       try {
@@ -228,6 +285,8 @@
     ready: window.__office2dReady === true,
     vp,
     zoomText,
+    mode: modeSeen,
+    building,
     canvas: canvasRect,
     panels,
     tabs,
