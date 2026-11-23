@@ -10,7 +10,19 @@
 import { drawText } from './pixelfont'
 import { THEME_STATUS, THEME_TOKENS, type ThemeName } from './palette'
 import { shade } from './avatar'
-import { SIDE_BOARDS, SIDE_BOARD_TOP, SIDE_GLASS_BOTTOM, SIDE_GLASS_TOP, SIDE_LIFT, SIDE_RAIL_H, SIDE_RAIL_TOP, type SideBoard } from './side'
+import type { FloorId } from '../lib/rooms'
+import { liftCall, liftIndicatorLabel, type LiftFrame } from './lift'
+import {
+  SIDE_BOARDS,
+  SIDE_BOARD_TOP,
+  SIDE_GLASS_BOTTOM,
+  SIDE_GLASS_TOP,
+  SIDE_LIFT,
+  SIDE_RAIL_H,
+  SIDE_RAIL_TOP,
+  sideLiftYAt,
+  type SideBoard,
+} from './side'
 
 type Ctx = CanvasRenderingContext2D
 
@@ -868,41 +880,169 @@ export function drawGlassPanel(
   ctx.restore()
 }
 
-/** The moving car: y is the door centre; `open` slides the panels apart. */
-export function drawLiftCar(ctx: Ctx, theme: ThemeName, floor: 1 | 2 | 3, y: number, open: number, target: number): void {
+/**
+ * One car body with two centre-opening leaves. `open` 0 = shut, 1 = fully
+ * open; the leaves slide INTO the jambs so nothing is ever painted outside the
+ * box (the GEDUNG shaft is only 29 px wide). The interior is lit per theme.
+ */
+function drawLiftBox(
+  ctx: Ctx,
+  theme: ThemeName,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  open: number,
+  plate: number | null,
+): void {
   const t = THEME_TOKENS[theme]
-  void floor
-  const { x, w } = SIDE_LIFT
-  const carW = w - 24
-  const carH = 76
-  const cx = x + 12
-  const cy = y - carH / 2
-  // car interior: dark enough to read inside the light shaft
+  // shell + lit interior (a lit car at night, daylight-warm by day)
   ctx.fillStyle = theme === 'day' ? '#2A3446' : '#0E1522'
-  rr(ctx, cx, cy, carW, carH, 6)
+  rr(ctx, x, y, w, h, 5)
   ctx.fill()
-  ctx.fillStyle = t.lamp
-  ctx.globalAlpha = 0.9
-  ctx.fillRect(cx + 4, cy + 3, carW - 8, 2)
+  ctx.fillStyle = theme === 'day' ? '#FBF1D8' : '#3A4C66'
+  ctx.globalAlpha = theme === 'day' ? 0.7 : 0.55
+  ctx.fillRect(x + 4, y + 9, w - 8, h - 13)
   ctx.globalAlpha = 1
-  // door panels slide apart by `open` (0 closed → 1 open)
-  const half = carW / 2
-  const slide = Math.max(0, Math.min(1, open)) * (half - 2)
+  // ceiling lamp strip
+  ctx.fillStyle = t.lamp
+  ctx.globalAlpha = theme === 'day' ? 0.5 : 0.95
+  ctx.fillRect(x + 6, y + 5, w - 12, 2)
+  ctx.globalAlpha = 1
+  // leaves, centre-opening, always inside the box
+  const half = w / 2
+  const k = Math.max(0, Math.min(1, open))
+  const slide = k * (half - 1)
   ctx.fillStyle = theme === 'day' ? '#CBD6E3' : '#2A3446'
-  ctx.fillRect(cx - slide, cy, half - slide, carH)
-  ctx.fillRect(cx + half + slide, cy, half - slide, carH)
+  ctx.fillRect(x, y, half - slide, h)
+  ctx.fillRect(x + half + slide, y, half - slide, h)
   ctx.strokeStyle = theme === 'day' ? 'rgba(15,36,64,0.24)' : 'rgba(255,255,255,0.2)'
   ctx.lineWidth = 1
-  ctx.strokeRect(cx - slide, cy, half - slide, carH)
-  ctx.strokeRect(cx + half + slide, cy, half - slide, carH)
+  ctx.strokeRect(x + 0.5, y + 0.5, half - slide - 1, h - 1)
+  ctx.strokeRect(x + half + slide + 0.5, y + 0.5, half - slide - 1, h - 1)
+  if (plate === null) return
   // destination plate (amber on dark, never floating white text): the car says
   // where it is going — `▸ L1` while the header still says `L3`.
   const plateW = 40
-  const plateX = cx + carW / 2 - plateW / 2
+  const plateX = x + w / 2 - plateW / 2
   ctx.fillStyle = theme === 'day' ? 'rgba(10,16,26,0.82)' : 'rgba(0,0,0,0.55)'
-  rr(ctx, plateX, cy + 6, plateW, 18, 4)
+  rr(ctx, plateX, y + 6, plateW, 18, 4)
   ctx.fill()
-  label(ctx, liftCarLabel(target as 1 | 2 | 3), plateX + 7, cy + 9, 8.5, t.accent, 700, 0)
+  label(ctx, liftCarLabel(plate as 1 | 2 | 3), plateX + 7, y + 9, 8.5, t.accent, 700, 0)
+}
+
+/**
+ * The dynamic half of the floor-view core — driven by the SAME `LiftFrame` the
+ * GEDUNG shaft draws (`scene2d/lift.ts`), so the two views can never disagree:
+ *
+ *  - the car rides between floor levels (the core carries all three markers),
+ *  - the landing door of THIS floor stays shut unless the car is serving it,
+ *  - cable + counterweight run opposite the car,
+ *  - the indicator above the door names the car's floor with its arrow,
+ *  - the arrival flash ("ding") and the call-panel lamp follow the frame.
+ */
+export function drawLiftCar(ctx: Ctx, theme: ThemeName, f: LiftFrame, viewFloor: FloorId): void {
+  const t = THEME_TOKENS[theme]
+  const { x, w, top, bottom } = SIDE_LIFT
+  const carW = w - 24
+  const carH = 76
+  const cx = x + 12
+  const carCy = sideLiftYAt(f.level)
+  const atHere = f.floor === viewFloor && !f.moving
+  const landY = sideLiftYAt(viewFloor)
+  const mid = (top + bottom) / 2
+  const cwCy = Math.max(top + 22, Math.min(bottom - 22, 2 * mid - carCy))
+
+  // cables: shaft head → car roof, and the counterweight's own rope
+  const roof = carCy - carH / 2
+  const rope = theme === 'day' ? 'rgba(15,36,64,0.5)' : 'rgba(190,205,225,0.42)'
+  ctx.fillStyle = rope
+  ctx.fillRect(cx + 7, top + 8, 1, Math.max(0, roof - top - 8))
+  ctx.fillRect(cx + carW - 8, top + 8, 1, Math.max(0, roof - top - 8))
+  ctx.fillRect(cx + carW - 5, top + 8, 1, Math.max(0, cwCy - 11 - top - 8))
+  // counterweight, painted before the car so it slides behind it
+  ctx.fillStyle = theme === 'day' ? '#8E9BAB' : '#39465A'
+  rr(ctx, cx + carW - 9, cwCy - 11, 8, 22, 2)
+  ctx.fill()
+  ctx.fillStyle = theme === 'day' ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.12)'
+  ctx.fillRect(cx + carW - 8, cwCy - 9, 6, 2)
+
+  // the landing of this floor: shut whenever the car is elsewhere
+  if (!atHere) drawLiftBox(ctx, theme, cx, landY - carH / 2, carW, carH, 0, null)
+  // the car, wherever it is in the core, with the destination on its plate
+  drawLiftBox(ctx, theme, cx, carCy - carH / 2, carW, carH, atHere ? f.door : 0, f.to ?? f.floor)
+
+  // warm light spilling on the landing while the doors are open
+  if (atHere && f.door > 0.02) {
+    ctx.globalAlpha = 0.35 * f.door
+    ctx.fillStyle = t.lamp
+    ctx.fillRect(cx - 2, landY + carH / 2 - 4, carW + 4, 4)
+    ctx.globalAlpha = 1
+  }
+
+  // ---- landing indicator above the door: the floor the car is on plus the
+  // way it is going. Under the header (L3) there is no room above the door, so
+  // the plaque drops into the gap below it instead of over the header.
+  const indW = 34
+  const indX = cx + carW / 2 - indW / 2
+  const above = sideLiftYAt(viewFloor) - carH / 2 - 15
+  const indY = above < top + 24 ? sideLiftYAt(viewFloor) + carH / 2 + 2 : above
+  ctx.fillStyle = theme === 'day' ? 'rgba(10,16,26,0.86)' : 'rgba(0,0,0,0.62)'
+  rr(ctx, indX, indY, indW, 12, 3)
+  ctx.fill()
+  label(ctx, liftIndicatorLabel(f), indX + 5, indY + 2, 7, atHere ? t.lamp : t.accent, 800, 0)
+
+  // ---- arrival flash: 2–3 frames of white on the indicator
+  const flash = atHere ? f.ding : 0
+  if (flash > 0) {
+    const grow = (1 - flash) * 4
+    ctx.globalAlpha = 0.25 + 0.75 * flash
+    ctx.fillStyle = '#FFFFFF'
+    rr(ctx, indX - grow, indY - grow, indW + grow * 2, 12 + grow * 2, 3 + grow)
+    ctx.fill()
+    ctx.fillStyle = '#0A101A'
+    label(ctx, liftIndicatorLabel(f), indX + 5, indY + 2, 7, '#0A101A', 800, 0)
+    // two rays, the "ding"
+    ctx.strokeStyle = '#FFFFFF'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.moveTo(indX - 6 - grow, indY - 2)
+    ctx.lineTo(indX - 12 - grow, indY - 6)
+    ctx.moveTo(indX + indW + 6 + grow, indY - 2)
+    ctx.lineTo(indX + indW + 12 + grow, indY - 6)
+    ctx.stroke()
+    ctx.globalAlpha = 1
+  }
+
+  // ---- call panel: lamp lit while the car is coming here or standing here
+  const call = liftCall(f, viewFloor)
+  ctx.globalAlpha = 0.22 + 0.78 * call
+  ctx.fillStyle = t.accent
+  ctx.beginPath()
+  ctx.arc(x - 3.5, 492, 2.4, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.globalAlpha = 1
+  if (call > 0.5) {
+    // the lit arrow points the way the car is going (both while its doors are
+    // open: it can leave in either direction)
+    ctx.fillStyle = t.accent
+    if (f.dir >= 0) {
+      ctx.beginPath()
+      ctx.moveTo(x - 5, 501)
+      ctx.lineTo(x - 3.5, 499)
+      ctx.lineTo(x - 2, 501)
+      ctx.closePath()
+      ctx.fill()
+    }
+    if (f.dir <= 0) {
+      ctx.beginPath()
+      ctx.moveTo(x - 5, 509)
+      ctx.lineTo(x - 3.5, 511)
+      ctx.lineTo(x - 2, 509)
+      ctx.closePath()
+      ctx.fill()
+    }
+  }
 }
 
 // ------------------------------------------------------------------- floor

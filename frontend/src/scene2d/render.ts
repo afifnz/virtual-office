@@ -15,6 +15,7 @@ import { seatPoint } from '../lib/routes'
 import { rosterAgents, tzLabel } from '../lib/roster'
 import { poseFor, type Pose } from './anim'
 import { journeyAt, journeyClock, journeyFor, liftChip } from './journey'
+import { liftFrame, type LiftFrame, type LiftRider } from './lift'
 import { THEME_STATUS, THEME_TOKENS, type ThemeName } from './palette'
 import { drawAvatar, drawAvatarHands, avatarKey, type AvatarPose } from './avatar'
 import { drawCity } from './city'
@@ -59,6 +60,7 @@ import {
   SIDE_W,
   boardsFor,
   fitZoomFor,
+  sideLiftYAt,
   sideScale,
   sideTransform,
   sideSeats,
@@ -193,11 +195,25 @@ export interface PlacedAgent {
   walking: boolean
   inLift: boolean
   liftTo: FloorId | null
+  /** progress through the lift leg (0…1), the car's own phase while riding */
+  liftPhase: number
   seat: SideSeat | null
   /** design-space draw position (feet) */
   designX: number
   designY: number
   avatarH: number
+}
+
+/** The first in-lift agent of a frame (the car's rider), or null. */
+function riderOf(placed: readonly PlacedAgent[]): LiftRider | null {
+  let best: LiftRider | null = null
+  for (const p of placed) {
+    if (!p.inLift) continue
+    if (!best || p.meta.id < best.id) {
+      best = { id: p.meta.id, floor: p.floor, inLift: true, liftTo: p.liftTo, phase: p.liftPhase }
+    }
+  }
+  return best
 }
 
 /** Resolve every agent to one floor + one draw position for a frame. */
@@ -227,6 +243,7 @@ export function placeAgents(
         walking: false,
         inLift: false,
         liftTo: null,
+        liftPhase: 0,
         seat: homeSeat,
         designX: homeSeat?.cx ?? SIDE_W / 2,
         designY: homeSeat?.floorY ?? SIDE_FLOOR_FRONT,
@@ -246,6 +263,7 @@ export function placeAgents(
       walking: j.walking,
       inLift: j.inLift,
       liftTo: j.liftTo,
+      liftPhase: j.liftPhase,
       seat: null,
       designX: worldXToDesign(j.x, FLOORS[j.floor].w),
       designY: SIDE_FLOOR_FRONT,
@@ -301,6 +319,12 @@ export interface RenderInput {
   dpr: number
   still: boolean
   t: number
+  /**
+   * The lift frame for this instant (`scene2d/lift.ts`). The app passes the one
+   * the GEDUNG view uses — same service, same phase. Omitted (gates, probes)
+   * it is recomputed from `t` and the riders of this frame.
+   */
+  lift?: LiftFrame
   /** WIB hour/minute for the wall clock (from the server `now`) */
   hour: number
   minute: number
@@ -438,18 +462,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   )
   drawClockHands(ctx, theme, r.hour, r.minute, compact, boards)
 
-  // ---- lift car: open while someone dwells, otherwise closed at this floor
-  const liftY = 540 - (r.vp.floor - 1) * 100
+  // ---- the lift: the SAME frame the GEDUNG shaft paints (scene2d/lift.ts),
+  // so the idle service, the doors, the arrow and the flash are one truth
+  const lift = r.lift ?? liftFrame(r.t, riderOf(resolved))
+  const liftY = sideLiftYAt(r.vp.floor)
+  drawLiftCar(ctx, theme, lift, r.vp.floor)
   const dwelling = onFloor.find((p) => p.inLift)
-  if (dwelling) {
-    const target = dwelling.liftTo ?? r.vp.floor
-    const targetY = 540 - (target - 1) * 100
-    const progress = r.still ? 0.5 : (r.t % 2.6) / 2.6
-    const y = liftY + (targetY - liftY) * Math.sin(progress * Math.PI) * 0.32
-    drawLiftCar(ctx, theme, r.vp.floor, y, 0.35 + 0.65 * Math.sin(progress * Math.PI), target)
-  } else {
-    drawLiftCar(ctx, theme, r.vp.floor, liftY, 0, r.vp.floor)
-  }
 
   // ---- stations: back row first, then front row. A walking agent leaves an
   // empty desk behind (the chair stays, the monitor goes dark) — the desk must

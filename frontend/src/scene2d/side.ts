@@ -405,3 +405,15 @@ export function visibleDesignRect(
 
 /** The lift core in the east wall, shared by the painter and the probe. */
 export const SIDE_LIFT = { x: 900, w: 86, top: 280, bottom: SIDE_ROOM_BOTTOM }
+
+/**
+ * Car centre y at floor level 1 in the floor view. The core draws the three
+ * floor markers 100 px apart (L1 540, L2 440, L3 340), so the car travels the
+ * same way it does in the GEDUNG shaft — one `level` in, one y out.
+ */
+export const SIDE_LIFT_Y0 = 540
+export const SIDE_LIFT_LEVEL_H = 100
+
+export function sideLiftYAt(level: number): number {
+  return SIDE_LIFT_Y0 - (level - 1) * SIDE_LIFT_LEVEL_H
+}

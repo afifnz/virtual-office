@@ -18,12 +18,14 @@ import { placeAgents, avatarPose, avatarSprite, poseFrame, type PlacedAgent } fr
 import { THEME_STATUS, THEME_TOKENS, type ThemeName } from './palette'
 import { shortName } from './labels'
 import { drawChair, drawDesk, drawKeyboardMouse, drawMonitor } from './props-side'
+import { liftCall, liftIndicatorLabel, type LiftFrame, type LiftRider } from './lift'
 import { sideTransform, type SideViewport } from './side'
 import { drawSkyLife, drawStreetLife } from './render-traffic'
 import { cityWindowCells, trafficAt } from './traffic'
 import {
   BLD,
   BLD_AVATAR_H,
+  BLD_CAR_H,
   BLD_DOOR_H,
   BLD_FURNITURE,
   BLD_BAND_ORDER,
@@ -47,6 +49,8 @@ import {
   buildingCityRects,
   buildingDeskRect,
   buildingLift,
+  buildingLiftFrom,
+  buildingLiftYAt,
   buildingPlateWidth,
   buildingSeats,
   buildingWorldX,
@@ -499,6 +503,12 @@ export interface BuildingRenderInput {
   dpr: number
   still: boolean
   t: number
+  /**
+   * The lift frame for this instant (`scene2d/lift.ts`). The app passes the one
+   * service clock the floor view uses too; omitted (gates, probes) it is
+   * recomputed from `t` and the riders of this frame.
+   */
+  lift?: LiftFrame
   /** reserved bottom band for the phone pad */
   band?: number
 }
@@ -627,31 +637,101 @@ function drawPlate(
   ctx.restore()
 }
 
-function drawLiftCar(ctx: Ctx, theme: ThemeName, car: ReturnType<typeof buildingLift>): void {
+/**
+ * The one moving car plus everything that moves with it, driven by the shared
+ * `LiftFrame` of `scene2d/lift.ts`:
+ *
+ *   - the car (level → y), doors opening only while it stands at a floor,
+ *   - two hoist ropes from the shaft head and a counterweight running opposite,
+ *   - the landing indicator above the door it serves (floor + up/down arrow),
+ *   - the arrival flash ("ding"), and the call-panel lamps beside the shaft,
+ *   - a lit interior that follows the theme (warm by day, lamp-lit at night).
+ */
+function drawLiftCar(ctx: Ctx, theme: ThemeName, f: LiftFrame): void {
   const t = THEME_TOKENS[theme]
-  const x = car.x + 2
-  const w = car.w - 4
-  const y = car.y - car.h / 2
-  ctx.fillStyle = theme === 'day' ? '#2A3446' : '#0E1522'
-  rr(ctx, x, y, w, car.h, 4)
+  const { x: sx, w: sw, top, bottom } = BLD_LIFT
+  const x = sx + 2
+  const w = sw - 4
+  const cx = buildingLiftYAt(f.level)
+  const y = cx - BLD_CAR_H / 2
+  const mid = (top + bottom) / 2
+
+  // ---- hoist ropes + counterweight (counterweight first: it runs behind)
+  const cwCy = Math.max(top + 16, Math.min(bottom - 16, 2 * mid - cx))
+  ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.55)' : 'rgba(190,205,225,0.45)'
+  ctx.fillRect(sx + 7, top + 8, 1, Math.max(0, y - top - 8))
+  ctx.fillRect(sx + sw - 8, top + 8, 1, Math.max(0, y - top - 8))
+  ctx.fillRect(sx + 4, top + 8, 1, Math.max(0, cwCy - 9 - top - 8))
+  ctx.fillStyle = theme === 'day' ? '#8E9BAB' : '#39465A'
+  rr(ctx, sx + 3, cwCy - 9, 7, 18, 2)
   ctx.fill()
-  ctx.fillStyle = t.lamp
-  ctx.globalAlpha = 0.9
-  ctx.fillRect(x + 3, y + 3, w - 6, 2)
+  ctx.fillStyle = theme === 'day' ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.12)'
+  ctx.fillRect(sx + 4, cwCy - 7, 5, 1)
+
+  // ---- car shell + lit interior
+  ctx.fillStyle = theme === 'day' ? '#2A3446' : '#0E1522'
+  rr(ctx, x, y, w, BLD_CAR_H, 4)
+  ctx.fill()
+  ctx.fillStyle = theme === 'day' ? '#FBF1D8' : '#3A4C66'
+  ctx.globalAlpha = theme === 'day' ? 0.7 : 0.55
+  ctx.fillRect(x + 3, y + 11, w - 6, BLD_CAR_H - 14)
   ctx.globalAlpha = 1
+  ctx.fillStyle = t.lamp
+  ctx.globalAlpha = theme === 'day' ? 0.5 : 0.95
+  ctx.fillRect(x + 4, y + 7, w - 8, 2)
+  ctx.globalAlpha = 1
+
+  // ---- two centre-opening leaves, always inside the car
+  const half = w / 2
+  const slide = Math.max(0, Math.min(1, f.door)) * (half - 1)
   ctx.fillStyle = theme === 'day' ? '#CBD6E3' : '#2A3446'
-  ctx.fillRect(x, y + 8, w, car.h - 8)
+  ctx.fillRect(x, y + 8, half - slide, BLD_CAR_H - 8)
+  ctx.fillRect(x + half + slide, y + 8, half - slide, BLD_CAR_H - 8)
   ctx.strokeStyle = theme === 'day' ? 'rgba(15,36,64,0.28)' : 'rgba(255,255,255,0.22)'
   ctx.lineWidth = 1
-  ctx.strokeRect(x, y + 8, w, car.h - 8)
-  ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.35)' : 'rgba(0,0,0,0.5)'
-  ctx.fillRect(x + w / 2 - 0.5, y + 8, 1, car.h - 8)
-  // destination plate: two arrows up/down + the target floor
-  const label = car.to ? `▸ L${car.to}` : '▸ L1'
+  ctx.strokeRect(x + 0.5, y + 8.5, half - slide - 1, BLD_CAR_H - 9)
+  ctx.strokeRect(x + half + slide + 0.5, y + 8.5, half - slide - 1, BLD_CAR_H - 9)
+
+  // ---- destination plate inside the car (amber on dark, the same string the
+  // floor view paints): `▸ L1` while the rider is on the way to the lobby
+  const plate = `▸ L${f.to ?? f.floor}`
   ctx.fillStyle = theme === 'day' ? 'rgba(10,16,26,0.85)' : 'rgba(0,0,0,0.55)'
-  rr(ctx, x + w / 2 - 11, y + 3, 22, 9, 2)
+  rr(ctx, x + w / 2 - 11, y + 2, 22, 9, 2)
   ctx.fill()
-  text(ctx, label, x + w / 2 - 8.5, y + 4, 6, t.accent, 800)
+  text(ctx, plate, x + w / 2 - 8.5, y + 3, 6, t.accent, 800)
+
+  // ---- landing indicator above the door the car serves: floor + arrow
+  const band = BLD_BANDS[f.floor]
+  const indX = sx + sw / 2 - 9
+  const indY = band.floorY - BLD_DOOR_H - 13
+  const label = liftIndicatorLabel(f)
+  ctx.fillStyle = t.accent
+  rr(ctx, indX, indY, 18, 12, 2)
+  ctx.fill()
+  text(ctx, label, indX + 2.5, indY + 1.5, 6, theme === 'day' ? '#0A101A' : '#0B1220', 800)
+
+  // ---- arrival flash: two or three frames of white over the indicator
+  if (f.ding > 0) {
+    const grow = (1 - f.ding) * 3
+    ctx.globalAlpha = 0.25 + 0.75 * f.ding
+    ctx.fillStyle = '#FFFFFF'
+    rr(ctx, indX - grow, indY - grow, 18 + grow * 2, 12 + grow * 2, 2 + grow)
+    ctx.fill()
+    ctx.globalAlpha = 1
+  }
+
+  // ---- call panel: three lamps between the shaft and the desks, lit for the
+  // floor the car is standing at or heading to
+  for (const fl of BLD_BAND_ORDER) {
+    const lampOn = liftCall(f, fl)
+    const ly = BLD_BANDS[fl].floorY - BLD_DOOR_H / 2
+    ctx.globalAlpha = 0.18 + 0.82 * lampOn
+    ctx.fillStyle = lampOn > 0.5 ? t.accent : theme === 'day' ? '#8E9BAB' : '#2C374A'
+    ctx.beginPath()
+    ctx.arc(sx - 4, ly, 1.8, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.globalAlpha = 1
+  }
 }
 
 /** Paint one whole-building frame into a canvas whose backing store is sized. */
@@ -708,11 +788,14 @@ export function renderBuildingFrame(ctx: CanvasRenderingContext2D, r: BuildingRe
     }
   }
 
-  // one car, vertical between the bands while somebody rides
-  const car = buildingLift(
-    placed.map((p) => ({ id: p.meta.id, floor: p.floor, inLift: p.inLift, liftTo: p.liftTo })),
-    r.t,
-  )
+  // one car: the shared service clock — idle it serves the building on its own
+  // (L1 → L2 → L3 → L2), with a rider aboard it follows that journey instead
+  const car =
+    r.lift ??
+    buildingLift(
+      placed.map((p) => ({ id: p.meta.id, floor: p.floor, inLift: p.inLift, liftTo: p.liftTo, phase: p.liftPhase })),
+      r.t,
+    )
   drawLiftCar(ctx, theme, car)
 
   // compact plates, laid out by the same pure function the gate replays
@@ -757,8 +840,9 @@ export function buildingHit(
 /** The whole-building layout + gates, exposed for the browser probe. */
 export function buildingReport(
   metas: AgentMeta[],
-  riders: ReadonlyArray<{ id: string; floor: FloorId; inLift: boolean; liftTo: FloorId | null }> = [],
+  riders: ReadonlyArray<LiftRider> = [],
   t = 0,
+  live?: LiftFrame,
 ) {
   const seats = buildingSeats(metas)
   const { plates, violations } = layoutBuildingPlates(seats)
@@ -778,7 +862,7 @@ export function buildingReport(
     plates,
     plateViolations: violations,
     plateWidthMax: Math.max(...seats.map((s) => buildingPlateWidth(s.meta.name))),
-    lift: buildingLift(riders, t),
+    lift: live ? buildingLiftFrom(live) : buildingLift(riders, t),
     city: buildingCityRects().length,
   }
 }

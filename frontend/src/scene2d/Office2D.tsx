@@ -20,6 +20,15 @@ import type { ThemeName } from './palette'
 import { pickTargets, placeAgents, renderFrame } from './render'
 import { buildingHit, buildingReport, renderBuildingFrame } from './render-building'
 import { buildingSeats, SCENE_ZOOM } from './building'
+import {
+  LIFT_OPEN_CLOCK,
+  LIFT_STILL_CLOCK,
+  createLiftRuntime,
+  liftParams,
+  liftStep,
+  type LiftFrame,
+  type LiftRider,
+} from './lift'
 import { trafficReport, trafficAt } from './traffic'
 import { labelAgentsFor, layoutSideLabels, sideGate } from './labels'
 import {
@@ -117,6 +126,19 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
     () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches,
     [],
   )
+  // ?lift=open freezes the lift with the lobby doors open (screenshots);
+  // ?lift=<seconds> freezes the idle clock at that offset. Both imply a frozen
+  // car even without ?still=1, and neither can ever make the car creep.
+  const liftQuery = useMemo(() => {
+    const q = new URLSearchParams(window.location.search)
+    const v = q.get('lift')
+    const n = v === null ? NaN : Number(v)
+    const clock =
+      v === 'open' ? LIFT_OPEN_CLOCK : Number.isFinite(n) ? Math.min(3600, Math.max(0, n)) : LIFT_STILL_CLOCK
+    return { clock, frozen: v !== null }
+  }, [])
+  /** one service clock + the frame it writes into (never allocated per frame) */
+  const liftRef = useRef(createLiftRuntime(liftQuery.clock))
 
   const metas = useMemo(() => agentsFor((status?.agents ?? []).map((a) => a.id)), [status])
   const byId = useMemo(() => {
@@ -282,6 +304,33 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         // keep the street clock in step even while a floor is on screen, so
         // opening GEDUNG after an hour never replays the whole session
         if (!building) trafficAt(tRef.current)
+
+        // The ONE lift: both cameras paint this frame. A rider takes the
+        // service over (and freezes the idle clock); otherwise the idle
+        // pattern advances by dt. `still`/`?lift=` pass dt = 0, reduced motion
+        // parks the car at the lobby with the doors shut.
+        const placed = placeAgents(f.metas, f.byId, f.now, f.comms, tRef.current)
+        // first rider by id — the same rule `lift.pickRider` uses; built only
+        // when somebody is actually aboard, so the loop stays allocation-free
+        let rider: LiftRider | null = null
+        for (const p of placed) {
+          if (!p.inLift) continue
+          if (!rider || p.meta.id < rider.id) {
+            rider = { id: p.meta.id, floor: p.floor, inLift: true, liftTo: p.liftTo, phase: p.liftPhase }
+          }
+        }
+        const liftRt = liftRef.current
+        let lift: LiftFrame
+        if (reducedMotion || liftQuery.frozen) {
+          // frozen by the user (`?lift=`) or by the OS: the car holds the phase
+          // and no rider can move it — that is what a frozen frame promises
+          liftRt.held = false
+          liftRt.clock = liftQuery.clock
+          lift = liftStep(liftRt, 0, null, tRef.current)
+        } else {
+          lift = liftStep(liftRt, still ? 0 : dt, rider, tRef.current)
+        }
+
         if (building) {
           renderBuildingFrame(ctx, {
             theme: themeRef.current,
@@ -296,6 +345,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
             dpr,
             still: still || reducedMotion,
             t: tRef.current,
+            lift,
           })
         } else {
           renderFrame(ctx, {
@@ -311,6 +361,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
             dpr,
             still: still || reducedMotion,
             t: tRef.current,
+            lift,
             hour: clock.hour,
             minute: clock.minute,
           })
@@ -324,7 +375,6 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
 
         // proximity: nearest agent to the viewport centre. In the building view
         // that is the nearest of all 13 seats; on a floor, only that floor's.
-        const placed = placeAgents(f.metas, f.byId, f.now, f.comms, tRef.current)
         const tr = sideTransform(w, h, vpRef.current, bandRef.current)
         // the D-pad only earns its place once there is something to pan to:
         // at the fit zoom the whole building/floor is on screen and it is hidden
@@ -379,13 +429,27 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         w2.__office2dMode = () => (buildingRef.current ? 'building' : 'floor')
         // street life (traffic + light + crowd), no privacy data
         w2.__office2dTraffic = () => trafficReport(tRef.current)
+        // the lift service: the live frame + the parameter table (no privacy data)
+        w2.__office2dLift = () => ({
+          ...liftRef.current.frame,
+          held: liftRef.current.held,
+          frozen: liftQuery.frozen || still || reducedMotion,
+          params: liftParams(),
+        })
         // building geometry + gates for the browser probe (no privacy data)
         w2.__office2dBuilding = () => {
           const placedNow = placeAgents(frame.current.metas, frame.current.byId, frame.current.now, frame.current.comms, tRef.current)
           return buildingReport(
             frame.current.metas,
-            placedNow.map((p) => ({ id: p.meta.id, floor: p.floor, inLift: p.inLift, liftTo: p.liftTo })),
+            placedNow.map((p) => ({
+              id: p.meta.id,
+              floor: p.floor,
+              inLift: p.inLift,
+              liftTo: p.liftTo,
+              phase: p.liftPhase,
+            })),
             tRef.current,
+            liftRef.current.frame,
           )
         }
         // verify-office probe hook: per-floor facts, no privacy data
