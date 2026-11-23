@@ -443,7 +443,8 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
     }),
   )
   const staleAgents = metasOf().map((m) =>
-    agent({ id: m.id, status: 'working', current: { kind: 'tool', tools: ['terminal'] }, stale: true, last_kind: 'tool' }),
+    // the real backend shape: already demoted to idle, flagged stale
+    agent({ id: m.id, status: 'idle', current: { kind: 'tool', tools: ['terminal'] }, stale: true, last_kind: 'tool' }),
   )
   const paint = (theme: ThemeName, agents: Agent[]) => {
     const rec = newRecorder()

@@ -371,7 +371,9 @@ function statusOf(agent: Agent | undefined, pose: Pose): keyof typeof THEME_STAT
  * has its own amber + square so it never reads as one more working desk.
  */
 export function statusKey(agent: Agent): keyof typeof THEME_STATUS.day {
-  if (agent.stale === true && (agent.status === 'working' || agent.status === 'reviewing')) return 'idle'
+  // The backend already demoted a stale verdict to idle; paint it that way even
+  // if a client sends `stale` next to a working/reviewing status.
+  if (agent.stale === true) return 'idle'
   return (agent.status as keyof typeof THEME_STATUS.day) ?? 'offline'
 }
 

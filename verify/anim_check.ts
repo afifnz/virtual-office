@@ -188,6 +188,15 @@ if (staleWorking.kind !== 'idle' || staleWorking.typing) {
   fail(`stale working → ${JSON.stringify(staleWorking)}, want idle`)
 } else ok('stale working verdict → idle pose (never typing, never a delegate walk)')
 
+// The real backend row is already demoted to idle + stale:true — same pose.
+const staleReal = poseFor(
+  agent({ id: 'dev', status: 'idle', stale: true, last_kind: 'tool_result', current: { kind: 'tool_result', tools: ['terminal'] } }),
+  NOW,
+  [],
+)
+if (staleReal.kind !== 'idle') fail(`real stale row → ${staleReal.kind}, want idle`)
+else ok('real stale row (idle + stale) → idle pose')
+
 // -------------------------------------------------------------- 3. idle/reply
 
 const reply = poseFor(

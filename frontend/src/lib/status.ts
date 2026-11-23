@@ -14,9 +14,11 @@
 import type { Agent, AgentStatus } from './types'
 import { kindLabel, statusLabel } from './format'
 
-/** True when the working/reviewing verdict outlived the stale threshold. */
+/** True when the backend flagged this verdict as stale (it already demoted it). */
 export function isStaleAgent(a: Agent): boolean {
-  return a.stale === true && (a.status === 'working' || a.status === 'reviewing')
+  // The backend emits `{status:"idle", stale:true}` — the status is *already*
+  // demoted, so the flag alone decides. (Older rows have no flag at all.)
+  return a.stale === true
 }
 
 /** The status a counter should use: a stale verdict reads as idle. */

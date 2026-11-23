@@ -487,8 +487,10 @@ func buildAgent(id string, ws []*sessionWork, childrenOf map[string][]*sessionWo
 	// A delegate_task call at the end of the turn means the agent is waiting on
 	// its children, not working. The distinction is the whole point: a parent
 	// that spawned a running subagent looks identical to one that hung.
-	if a.Status == "working" || a.Status == "reviewing" {
-		if cc := waitingChildren(live, childrenOf); cc != nil {
+	// It survives the parent's own mid-turn window: a subagent may legitimately
+	// run longer than 15 minutes, and the parent is still waiting for it.
+	if a.Status != "blocked" && a.Status != "offline" && live != nil && !live.sess.HasEnded {
+		if cc := waitingChildren(live, childrenOf, now); cc != nil {
 			a.Status = "waiting"
 			a.Children = cc
 		}
@@ -527,7 +529,10 @@ func buildAgent(id string, ws []*sessionWork, childrenOf map[string][]*sessionWo
 // of a session that are still running, or nil when the agent is not waiting.
 // A child counts when its parent is this session and it started at or after the
 // call — a child that predates the call is an earlier round, already answered.
-func waitingChildren(live *sessionWork, childrenOf map[string][]*sessionWork) *ChildCount {
+// "Running" also means alive: a child row that never got an ended_at but has
+// been silent for longer than MidTurnWindow must not pin its parent as waiting
+// forever.
+func waitingChildren(live *sessionWork, childrenOf map[string][]*sessionWork, now float64) *ChildCount {
 	if live == nil || !live.hasMsg || !hasTool(live.last.Tools, "delegate_task") {
 		return nil
 	}
@@ -538,7 +543,7 @@ func waitingChildren(live *sessionWork, childrenOf map[string][]*sessionWork) *C
 			continue
 		}
 		cc.Total++
-		if !kid.sess.HasEnded {
+		if !kid.sess.HasEnded && now-sessionLast(kid) < MidTurnWindow {
 			cc.Running++
 		}
 	}
@@ -603,6 +608,11 @@ func sessionLast(w *sessionWork) float64 {
 
 // isActive implements: last message < 20 s, or mid-turn < 15 min.
 func isActive(w *sessionWork, now float64) bool {
+	// A closed session is never active: its end_reason already closed the turn,
+	// and a tool message inside it must not keep the desk "working" for 15 min.
+	if w.sess.HasEnded {
+		return false
+	}
 	if !w.hasMsg {
 		return false
 	}

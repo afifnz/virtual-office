@@ -86,16 +86,28 @@ expect('no children → no badge', childBadge(agent({ id: 'x', status: 'working'
 
 // ------------------------------------------------------------- 2. stale truth
 
-const staleWork = agent({ id: 'planner', status: 'working', current: { kind: 'tool', tools: [] }, stale: true, last_kind: 'tool' })
-const staleReview = agent({ id: 'reviewer', status: 'reviewing', stale: true, last_kind: 'tool_result' })
+// The real backend row: the verdict is ALREADY demoted to idle, with stale:true
+// and the last event kind. The UI must still recognise it (dim + "tidak aktif"),
+// which was the bug the reviewer caught: gating on status==='working' made the
+// whole stale presentation dead code against real data.
+const realStale = agent({ id: 'planner', status: 'idle', stale: true, last_kind: 'tool_result', current: { kind: 'tool_result', tools: ['terminal'] } })
+const staleWork = agent({ id: 'planner2', status: 'working', current: { kind: 'tool', tools: [] }, stale: true, last_kind: 'tool' })
 
+expect('real stale row (status idle + stale) is recognised', isStaleAgent(realStale), true)
+expect('real stale row shows the stale label', statusText(realStale), 'tidak aktif')
+expect('real stale row counts as idle', effectiveStatus(realStale), 'idle')
+expect('real stale row is not working', isWorkingNow(realStale), false)
+expect('real stale note names the last event', staleNote(realStale), 'tidak aktif · hasil alat terakhir')
+expect('stale canvas key is idle', statusKey(realStale), 'idle')
+
+// Defensive: a client that sends stale next to working must also read stale.
 expect('stale working is not working', isWorkingNow(staleWork), false)
 expect('stale working counts as idle', effectiveStatus(staleWork), 'idle')
-expect('stale reviewing counts as idle', effectiveStatus(staleReview), 'idle')
+expect('stale reviewing counts as idle', effectiveStatus(agent({ id: 'reviewer', status: 'reviewing', stale: true })), 'idle')
 expect('stale card label', statusText(staleWork), 'tidak aktif')
-expect('stale note names the last event', staleNote(staleWork), 'tidak aktif · pakai alat terakhir')
-expect('stale note without kind', staleNote(agent({ id: 'y', status: 'working', stale: true })), 'tidak aktif')
-expect('stale canvas key is idle', statusKey(staleWork), 'idle')
+expect('stale note names the last event (tool)', staleNote(staleWork), 'tidak aktif · pakai alat terakhir')
+expect('stale note without kind', staleNote(agent({ id: 'y', status: 'idle', stale: true })), 'tidak aktif')
+expect('stale working canvas key is idle', statusKey(staleWork), 'idle')
 
 // A missing `stale` field (older backend) must change nothing.
 const legacy = agent({ id: 'coder', status: 'working', current: { kind: 'tool', tools: ['terminal'] } })
@@ -106,7 +118,7 @@ expect('legacy row status text', statusText(legacy), 'bekerja')
 
 const roster: Agent[] = [
   agent({ id: 'dev', status: 'waiting', current: { kind: 'tool', tools: ['delegate_task'] }, children: { total: 1, running: 1 } }),
-  agent({ id: 'planner', status: 'working', stale: true, last_kind: 'tool' }),
+  agent({ id: 'planner', status: 'idle', stale: true, last_kind: 'tool' }),
   agent({ id: 'coder', status: 'working', current: { kind: 'tool', tools: ['terminal'] } }),
   agent({ id: 'reviewer', status: 'reviewing' }),
   agent({ id: 'tester', status: 'idle' }),

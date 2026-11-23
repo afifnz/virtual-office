@@ -449,7 +449,7 @@ export interface BuildingRenderInput {
 function statusOf(agent: Agent | undefined, offline: boolean): keyof typeof THEME_STATUS.day {
   if (offline || !agent) return 'offline'
   // A stale verdict is painted as idle: the desk is not working.
-  if (agent.stale === true && (agent.status === 'working' || agent.status === 'reviewing')) return 'idle'
+  if (agent.stale === true) return 'idle'
   return (agent.status as keyof typeof THEME_STATUS.day) ?? 'offline'
 }
 

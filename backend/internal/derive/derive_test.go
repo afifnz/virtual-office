@@ -650,6 +650,61 @@ func TestAgentWithoutSessionsStaysOffline(t *testing.T) {
 	}
 }
 
+// A session that closed is not "working", even when its last row is a tool call
+// inside the 15-minute mid-turn window.
+func TestEndedSessionIsNotWorking(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("dev")
+	w.Session(fixture.Session{ID: "s1", Profile: "dev", Source: "cli", Started: nowF - 900, Updated: nowF - 390,
+		Ended: nowF - 390, EndReason: "ok"})
+	w.Msg(fixture.Msg{Session: "s1", Role: "user", Content: "mulai", TS: nowF - 900})
+	w.Msg(fixture.Msg{Session: "s1", Role: "tool", Tool: "terminal", Content: "ok", TS: nowF - 400})
+	w.Close()
+
+	a := agent(t, snapshot(t, home, "dev"), "dev")
+	if a.Status != "idle" || a.Stale {
+		t.Fatalf("status=%q stale=%v for a closed session, want idle and not stale", a.Status, a.Stale)
+	}
+}
+
+// A subagent may run longer than the parent's own mid-turn window; the parent is
+// still waiting for it.
+func TestWaitingSurvivesMidTurnWindow(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("dev")
+	delegateTask(w, "dev", "parent1", nowF-1200)
+	w.Session(fixture.Session{ID: "child1", Profile: "dev", Source: "subagent", ParentID: "parent1",
+		ModelConfig: `{"_subagent_id":"sa-0-parent1"}`, Started: nowF - 1190, Updated: nowF - 30})
+	w.Msg(fixture.Msg{Session: "child1", Role: "user", Content: "build", TS: nowF - 1190})
+	w.Msg(fixture.Msg{Session: "child1", Role: "tool", Tool: "terminal", Content: "ok", TS: nowF - 30})
+	w.Close()
+
+	dev := agent(t, snapshot(t, home, "dev", "planner"), "dev")
+	if dev.Status != "waiting" {
+		t.Fatalf("dev status = %q after 20 min, want waiting while the child still works", dev.Status)
+	}
+	if dev.Children == nil || dev.Children.Running != 1 {
+		t.Fatalf("children = %+v, want one running child", dev.Children)
+	}
+}
+
+// A leaked child row (no ended_at, silent for longer than the mid-turn window)
+// must not pin the parent as waiting forever.
+func TestDeadChildDoesNotPinWaiting(t *testing.T) {
+	home := fixture.New(t)
+	w := home.Profile("dev")
+	delegateTask(w, "dev", "parent1", nowF-1200)
+	w.Session(fixture.Session{ID: "child1", Profile: "dev", Source: "subagent", ParentID: "parent1",
+		ModelConfig: `{"_subagent_id":"sa-0-parent1"}`, Started: nowF - 1190, Updated: nowF - 1000})
+	w.Msg(fixture.Msg{Session: "child1", Role: "tool", Tool: "terminal", Content: "ok", TS: nowF - 1000})
+	w.Close()
+
+	dev := agent(t, snapshot(t, home, "dev", "planner"), "dev")
+	if dev.Status != "idle" || dev.Children != nil {
+		t.Fatalf("status=%q children=%+v, want idle with no children for a silent child", dev.Status, dev.Children)
+	}
+}
+
 func contains(list []string, want string) bool {
 	for _, v := range list {
 		if v == want {
