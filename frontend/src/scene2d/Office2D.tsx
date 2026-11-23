@@ -20,6 +20,7 @@ import type { ThemeName } from './palette'
 import { pickTargets, placeAgents, renderFrame } from './render'
 import { buildingHit, buildingReport, renderBuildingFrame } from './render-building'
 import { buildingSeats } from './building'
+import { trafficReport, trafficAt } from './traffic'
 import { labelAgentsFor, layoutSideLabels, sideGate } from './labels'
 import {
   PHONE_CTRL_BAND,
@@ -278,6 +279,9 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         const clock = clockInTimeZone(f.now || 0, officeTZ()) ?? { hour: 12, minute: 0 }
         const t0 = performance.now()
         const building = buildingRef.current
+        // keep the street clock in step even while a floor is on screen, so
+        // opening GEDUNG after an hour never replays the whole session
+        if (!building) trafficAt(tRef.current)
         if (building) {
           renderBuildingFrame(ctx, {
             theme: themeRef.current,
@@ -369,6 +373,8 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         w2.__office2dTheme = () => themeRef.current
         w2.__office2dPerf = () => perfReport(perfRef.current)
         w2.__office2dMode = () => (buildingRef.current ? 'building' : 'floor')
+        // street life (traffic + light + crowd), no privacy data
+        w2.__office2dTraffic = () => trafficReport(tRef.current)
         // building geometry + gates for the browser probe (no privacy data)
         w2.__office2dBuilding = () => {
           const placedNow = placeAgents(frame.current.metas, frame.current.byId, frame.current.now, frame.current.comms, tRef.current)
