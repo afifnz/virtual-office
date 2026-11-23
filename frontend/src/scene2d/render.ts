@@ -77,7 +77,7 @@ const avatarCache = new Map<string, HTMLCanvasElement>()
 const AVATAR_BUCKET = 2
 const AVATAR_LRU = 64
 
-function avatarSprite(look: AgentMeta['look'], pose: AvatarPose, frame: number, h: number): HTMLCanvasElement {
+export function avatarSprite(look: AgentMeta['look'], pose: AvatarPose, frame: number, h: number): HTMLCanvasElement {
   const key = avatarKey(look, pose, frame, AVATAR_BUCKET) + `:${Math.round(h)}`
   const hit = avatarCache.get(key)
   if (hit) return hit
@@ -317,7 +317,7 @@ export interface RenderInput {
   band?: number
 }
 
-function avatarPose(pose: Pose): AvatarPose {
+export function avatarPose(pose: Pose): AvatarPose {
   switch (pose.kind) {
     case 'typing':
       return 'typing'
@@ -338,7 +338,7 @@ function avatarPose(pose: Pose): AvatarPose {
   }
 }
 
-function poseFrame(pose: Pose, t: number, still: boolean): number {
+export function poseFrame(pose: Pose, t: number, still: boolean): number {
   if (still) return 0
   switch (pose.kind) {
     case 'typing':

@@ -32,9 +32,9 @@ export { MAX_ZOOM, MIN_ZOOM, SIDE_W, SIDE_H, sideTransform, sideScale, clampSide
  * zoom as `min` (< 1) and keeps the fractional value: the fit is 0.78, and
  * rounding it would re-crop the floor.
  */
-export function clampZoom(zoom: number, min = MIN_ZOOM): number {
-  if (min < MIN_ZOOM) return Math.min(MAX_ZOOM, Math.max(min, Math.round(zoom * 100) / 100))
-  return Math.min(MAX_ZOOM, Math.max(min, Math.round(zoom)))
+export function clampZoom(zoom: number, min = MIN_ZOOM, max = MAX_ZOOM): number {
+  if (min < MIN_ZOOM) return Math.min(max, Math.max(min, Math.round(zoom * 100) / 100))
+  return Math.min(max, Math.max(min, Math.round(zoom)))
 }
 
 /**
