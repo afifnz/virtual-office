@@ -1,0 +1,677 @@
+# Spec Visual — Kantor 2D Glass + Kota (dua tema, view samping)
+
+> Turunan dari `docs/rnd/office-glass-city.md` §6, §11, dan §12. Dokumen ini adalah
+> **spesifikasi yang bisa diimplementasikan**, bukan rencana kerja (fase & gate ada
+> di §8 dokumen R&D).
+>
+> Keputusan bos yang mengikat dokumen ini:
+> 1. **Dua tema first-class** — *Terang* (Daylight Atrium) untuk siang, *Gelap*
+>    (Sky Lobby) untuk malam — berganti **otomatis mengikuti waktu lokal** dari
+>    `tz` di `/api/config` (sekarang `Asia/Jakarta`, WIB). Neon Metro = alternatif.
+> 2. **Scene = view samping** (elevasi/potongan gedung), bukan denah top-down.
+> 3. Avatar **bukan** pixel-art lagi (clean vector), dan **status = warna + bentuk + teks**.
+>
+> Menggantikan aturan "tanpa gradien, tanpa blur" di `docs/design/office-3-floors.md`
+> hanya untuk permukaan kaca, band kota, dan furnitur yang sekarang digambar dalam
+> profil. Aturan lama tetap berlaku untuk plakat zona dan indikator lift.
+
+## 1. Prinsip
+
+1. **Kaca itu peran, bukan dekorasi.** Empat permukaan kaca di chrome (HUD, tab
+   lantai, roster, kontrol zoom) + **curtain wall** yang menjadi dinding belakang
+   ruangan (satu lembar, kota di baliknya). Sisanya solid.
+2. **Teks tidak pernah bergantung pada kaca.** Semua label (nameplate, chip status,
+   nama di roster) duduk di atas permukaan alpha ≥ 0,90.
+3. **Kota memberi kedalaman, bukan perhatian.** Jendela kota alpha ≤ 0,65 dan selalu
+   di bawah veil (22 % malam, 8 % siang).
+4. **Satu aksen per tema.** Terang: biru `#1D4ED8`. Gelap: amber `#F0B45A`.
+5. **Tidak ada blur di dalam loop render.** Blur = sekali per (lantai × tema ×
+   ukuran) ke offscreen; per frame hanya `drawImage`.
+6. **Tema ditentukan data, bukan jam perangkat.** `tz` dari API + `now` dari
+   `/api/status`; override manual dan `?theme=` selalu menang.
+
+## 2. Tema & token
+
+### 2.1 Aturan penentu tema (mengikat)
+
+| Hal | Nilai |
+|---|---|
+| Sumber zona waktu | `/api/config` → `tz` (fallback `Asia/Jakarta`) |
+| Sumber waktu | `now` dari `/api/status` (bukan jam perangkat) |
+| Jendela siang | `DAY_START_HOUR = 6` ≤ jam lokal < `DAY_END_HOUR = 18` |
+| Hasil | di dalam jendela → `day` (Terang); di luar → `night` (Gelap) |
+| Urutan keputusan | override HUD (`localStorage`) → `?theme=day\|night\|auto` → otomatis dari `tz` → `prefers-color-scheme` (hanya bila `tz` tidak ada & tanpa override) |
+| Modul | `frontend/src/lib/theme.ts` (murni) · uji: `verify/theme_check.ts` |
+| Tidak boleh berkedip | tema diterapkan saat static layer berikutnya di-render, bukan di tengah frame |
+| Deep link | `?theme=day`, `?theme=night`, `?theme=auto` — dipakai gate visual agar screenshot deterministik |
+
+### 2.2 CSS — dua mode (`frontend/src/styles/global.css`)
+
+```css
+:root {                          /* mode GELAP (default bila tanpa tz) */
+  --surface-glass: rgba(20, 27, 46, 0.62);
+  --surface-solid: #141b2e;
+  --surface-raised: #1b2334;
+  --page: #080c16;  --floor: #1a2230;  --wall: #121a29;
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-highlight: rgba(255, 255, 255, 0.30);
+  --glass-noise: 0.04;
+  --glass-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  --ink: #f2f5fa;  --ink-dim: #c6d0e0;  --muted: #93a0b6;
+  --accent: #f0b45a;  --accent-deep: #a9741f;  --accent-ink: #1a1206;
+  --working: #f2b434; --reviewing: #a98ce0; --idle: #6fb1e8;
+  --blocked: #ffc93b; --offline: #8b93a5; --ok: #7fc08c; --danger: #e2705f;
+  --glass-radius-sm: 12px; --glass-radius-md: 14px; --glass-radius-lg: 18px;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --label-size: 11px; --label-weight: 600; --label-track: 0.08em;
+  --meta-size: 9.5px; --body-size: 12.5px; --title-size: 15px; --display-size: 22px;
+}
+
+:root[data-theme="day"] {        /* mode TERANG */
+  --surface-glass: rgba(255, 255, 255, 0.66);
+  --surface-solid: #f7fafd;
+  --surface-raised: #ffffff;
+  --page: #eef3f8;  --floor: #e3eaf2;  --wall: #dde6f0;
+  --glass-border: rgba(15, 36, 64, 0.20);
+  --glass-highlight: rgba(255, 255, 255, 0.85);
+  --glass-noise: 0.04;
+  --glass-shadow: 0 18px 40px rgba(15, 36, 64, 0.10);
+  --ink: #16202e;  --ink-dim: #41506a;  --muted: #556377;
+  --accent: #1d4ed8;  --accent-deep: #1d4ed8;  --accent-ink: #ffffff;
+  --working: #8a5406; --reviewing: #6d28d9; --idle: #1d4ed8;
+  --blocked: #b33a12; --offline: #556073; --ok: #116b33; --danger: #b91c1c;
+  --body-size: 13px; --label-weight: 500;
+}
+```
+
+Nilai status tema Terang **bukan** tebakan: `working`, `blocked`, `ok`, dan
+`offline` digelapkan dari versi tailwind-700 karena gagal ambang 4,5:1 saat
+dipakai sebagai *teks* (lihat §3.3). Jangan mengembalikannya tanpa menghitung ulang.
+
+### 2.3 Kanvas (`scene2d/palette.ts`)
+
+```ts
+export const THEME_TOKENS = {
+  day:   { glass: { surface: '#FFFFFF', alpha: 0.66, border: '#0F2440', borderAlpha: 0.20,
+                    highlight: '#FFFFFF', highlightAlpha: 0.85 },
+           city:  { skyTop: '#3E8FD6', skyMid: '#7CBCEC', skyLow: '#C4E1F6', horizon: '#F0F9FF',
+                    layers: ['#A9C6DD', '#8FB0CC', '#7699B8', '#5E82A3'],
+                    windowWarm: '#EAF7FF', windowCool: '#BFE2F7' } },
+  night: { glass: { surface: '#141B2E', alpha: 0.62, border: '#FFFFFF', borderAlpha: 0.16,
+                    highlight: '#FFFFFF', highlightAlpha: 0.30 },
+           city:  { skyTop: '#0C1222', skyMid: '#2B3350', skyLow: '#8A5560', horizon: '#E0A06A',
+                    layers: ['#0E1626', '#16203A', '#1D2A47', '#26344F'],
+                    windowWarm: '#F3C57B', windowCool: '#9FD8E8' } },
+} as const
+```
+
+## 3. Status: warna + bentuk + teks
+
+### 3.1 Bentuk penanda (wajib, WCAG 1.4.1)
+
+| Status | Bentuk | Ukuran |
+|---|---|---|
+| `working` | bulatan penuh | 6 px |
+| `reviewing` | bulatan + cincin dalam lebih terang | 6 px |
+| `idle` | cincin kosong | 6 px |
+| `blocked` | belah ketupat (kotak diputar 45°) | 6 px |
+| `offline` | kotak kosong | 6 px |
+| `ok` | bulatan + centang | 6 px |
+| `danger` | segitiga penuh | 7 px |
+
+Bentuk dipakai di roster, nameplate, sheet mobile, dan chip HUD. Warna saja tidak
+pernah menjadi satu-satunya pembeda.
+
+### 3.2 Kontras — hasil ukur, bukan perkiraan
+
+Sumber: `docs/design/mockups/tokens.py` → `tokens.json` (78 pasangan, 0 gagal).
+Ambang: **teks 4,5:1** (karena kata status dicetak di roster), **dot/garis 3:1**,
+**chip 4,5:1**.
+
+| Status | Terang: teks / chip | Gelap: teks / chip |
+|---|---|---|
+| `working` | 5,31 / 6,27 | 8,55 / 10,02 |
+| `reviewing` | 6,02 / 7,10 | 5,66 / 6,88 |
+| `idle` | 5,68 / 6,70 | 6,87 / 8,08 |
+| `blocked` | 5,04 / 5,95 | 10,29 / 12,06 |
+| `offline` | 5,38 / 6,35 | 5,13 / 6,13 |
+| `ok` | 5,60 / 6,61 | 7,39 / 8,76 |
+| `danger` | 5,48 / 6,47 | 5,06 / 6,22 |
+
+### 3.3 Riwayat perbaikan (jangan diulang)
+
+| Warna | Nilai lama | Gagal di | Diganti |
+|---|---|---|---|
+| `working` | `#A16207` | teks 4,17:1 | `#8A5406` (5,31) |
+| `blocked` | `#B45309` | teks 4,25:1, hue terlalu dekat `working` | `#B33A12` (5,04, hue 15° vs 35°) |
+| `ok` | `#15803D` | teks 4,25:1 | `#116B33` (5,60) |
+| `offline` | `#5F6A7D` | margin tipis 4,63:1 | `#556073` (5,38) |
+
+## 4. Geometri view samping
+
+Kanvas 1000×688 (HUD 56 px di atas, toolbar 56 px di bawah, sidebar 280 px).
+
+**Definisi tinggi ruangan — ini yang dua kali salah.** Angka pertama (54 px di
+ruangan 286 px) salah karena kamera memakai fit-to-width. Angka kedua (88 px di
+"ruangan" 308 px) benar secara aritmetika tapi **salah ukur**: yang diukur hanya
+lantai→soffit, sementara band skyline 252 px digambar **di atas plafon**, sehingga
+mata membaca lantai→puncak jendela ≈430–450 px dan rasionya ≈1:5,5–1:6, dengan
+separuh atas kanvas dikuasai langit. Verdict bos: *"avatar terlihat kecil, ruangnya
+tampak tinggi."*
+
+Aturan yang berlaku sekarang, dan tidak boleh ditafsirkan lain:
+
+> **Tinggi ruangan = lantai → plafon, TERMASUK band jendela.** Kota tidak lagi
+> punya band sendiri di atas plafon; ia terlihat **lewat curtain wall yang menjadi
+> dinding belakang ruangan**. Di atas plafon hanya ada slab + tepi atap ≤ 40 px.
+
+**Skala kamera adalah angka desain, bukan hasil bagi lebar.** `SIDE_PPU = 150
+px/unit` dipakai untuk **kedua sumbu** (tidak ada pemampatan anisotropik), dan
+seluruh angka di bawah turun dari situ:
+
+| Target | Angka | Terukur |
+|---|---|---|
+| Skala kamera | 140–160 px/unit | **150 px/unit** |
+| Tinggi avatar @ zoom 2 | 135–180 px | **150 px** (baris depan), **141 px** (belakang ×0,94) |
+| Tinggi ruangan (lantai→plafon, termasuk jendela) | 520–560 px | **548 px** = 3,65 unit |
+| Rasio ruangan:avatar | 1:3–1:4 | **1:3,65** |
+| Band di atas plafon | ≤ 40 px | **40 px** (slab + coping + fascia) |
+
+| Band | y | Tinggi | Isi |
+|---|---|---|---|
+| **Atap** | 0–40 | **40 px** | coping 8 px + tepi slab 18 px (hatch) + fascia 14 px. **Tidak ada langit di sini.** |
+| **Soffit** | 40–58 | 18 px | **satu** cove cahaya menerus + **7 downlight** recessed |
+| **Kaca (curtain wall)** | 58–543 | **485 px** | skyline kota: 1 lembar kaca alpha 0,18 + 3 mullion + 1 transom; mulai **0,30 unit di atas lantai** |
+| **Spandrel** | 543–588 | 45 px | dinding opak di bawah sill; plinth/shadow gap 566–588 |
+| **Ruangan** | 40–588 | **548 px** | **angka yang dipakai rasio**: lantai→plafon, jendela ikut dihitung |
+| **Floor plane** | 588–648 | 60 px | dua garis baris (596 / 640), meja, kaki kursi |
+| **Slab** | 648–688 | 40 px | garis atas 1 px highlight |
+
+40 + 548 + 60 + 40 = **688 px** (pas kanvas). Garis lantai per baris:
+**596 px** (belakang) / **640 px** (depan).
+
+| Elemen | Ukuran | Catatan |
+|---|---|---|
+| Avatar | **150 px** tinggi (baris depan), **141 px** (belakang, ×0,94) | lihat §7 |
+| Meja (profil) | top **58 px** di atas garis lantai (0,39 × avatar), slab **6 px**, lebar 128 px, 2 panel samping 5 px + apron | bibir atas 1 tone terang, tepi depan 1 tone gelap; monitor **38×23 px** di cx+16,4 unit dengan stand 3 px + foot — lihat §7.7 |
+| Kursi | sandaran **±37 px** (sayap terlihat di samping bahu), dudukan 31–36 px, kolom gas, kaki bintang 5 + caster | di belakang agen; baris belakang satu tone lebih gelap — lihat §7.9 |
+| Curtain wall | **1 lembar kaca menerus** 1000×485 px + **3 mullion** 3 px (4 teluk × 250 px) + 1 transom di 62 % | jangan digambar per-pane: 10 pane ber-shadow = gambar ter-tile |
+| Enam papan | tinggi **148 px** (≈1,0 × avatar), band y 132–280 | digantung di **rail** 124–132, **di depan kaca** |
+| Nameplate | tinggi **24 px**, radius 11, font 11,5 | lihat §7.4 |
+| Slot agen | **200 px** antar pusat agen sebaris; baris belakang digeser **100 px** | §4.1 |
+| Kamera | **150 px/unit tetap**, x dan y satu skala | bukan fit-to-width |
+
+**Kamera adalah potongan, bukan seluruh lantai.** L3 selebar 24 unit; kalau dipaksa
+masuk, hasilnya 41 px/unit dan agen bertabrakan. UI harus menyebut "potongan L3".
+
+### 4.1 Dua baris 4+4 (bukan satu baris delapan)
+
+Delapan agen dalam satu baris tidak bisa mempertahankan slot yang terbaca pada
+ukuran avatar yang diterima bos: delapan slot × 200 px = 1400 px, lebih lebar dari
+kanvas. Karena itu agen dibagi **dua baris** menurut `z` asli `rooms.ts` — separuh
+terdekat menjadi baris depan, separuh terjauh menjadi baris belakang:
+
+| Baris | Skala | Garis lantai | Tinggi avatar | Agen (L3) |
+|---|---|---|---|---|
+| **Belakang** (jauh) | 0,94 | 596 px | 141 px | DIMAS, YOGA, SARI, WAHYU (z ≤ −0,78) |
+| **Depan** (dekat) | 1,00 | 640 px | 150 px | BIMA, BAGAS, RAKA, LARAS (z ≥ −0,39) |
+
+Aturan, dijalankan `side_rows()` + `side_slots()`:
+
+1. urutkan agen menurut `z` menurun; separuh pertama = baris depan;
+2. di dalam satu baris, urutan kiri→kanan tetap urutan `x` dunia `rooms.ts`
+   (jadi baris tidak pernah berbohong soal posisi ruangan);
+3. tiap baris memakai grid **200 px** per slot (4 slot = 600 px), baris belakang
+   digeser **setengah pitch (100 px)** sehingga kedua baris saling mengunci —
+   badan baris belakang terlihat di sela baris depan, bukan tertutup;
+4. grid digeser 30 px ke kiri dari tengah supaya rak server masih punya tempat;
+5. `z` **tidak** lagi menjadi koordinat layar; ia hanya memilih baris + urutan.
+
+Hasil terukur di L3 (8 agen):
+
+| Baris | Slot x |
+|---|---|
+| Depan | BIMA **170** · BAGAS **370** · RAKA **570** · LARAS **770** |
+| Belakang | DIMAS **270** · YOGA **470** · SARI **670** · WAHYU **870** |
+
+Jarak pusat minimum **200,0 px** sebaris dan **100,0 px** antar baris (aman: label
+terlebar 70 px, jadi dua label butuh ≥ 70 px; 100 px lolos dengan 30 px napas).
+
+### 4.2 Dinding = kaca, papan digantung di depannya
+
+Dinding belakang sekarang **curtain wall**, jadi kota adalah isi dinding itu
+sendiri. Enam papan info tidak memenuhi dinding; mereka digantung pada satu rail di
+depan kaca, di zona atas, dan menyisakan kaca bersih tepat di belakang meja:
+
+| Band (y) | Isi | Tinggi |
+|---|---|---|
+| 40–58 | soffit: satu cove cahaya + **7 downlight** recessed | 18 px |
+| 58–124 | kaca bersih: langit + puncak menara | 66 px |
+| 124–132 | **rail** tempat papan digantung + 6 bracket | 8 px |
+| 132–280 | **enam papan** yang saling menempel: plakat zona (L3 · TIM DEV), papan status (6/8 + 8 titik + 4 chip), pinboard 9 catatan + burndown A4, whiteboard arsitektur (L1/L2/L3/API, WIP 3), jam dinding (jarum ikut WIB tema), rak buku berangka | **148 px ≈ 1,0 × avatar** |
+| 280–543 | **kaca bersih: kota tepat di belakang meja** | 263 px |
+| 543–588 | spandrel + plinth / shadow gap | 45 px |
+
+**Gate `side_wall_gate()`** (keras, dijalankan untuk L1/L2/L3):
+
+| Aturan | Hasil terukur L3 |
+|---|---|
+| area dinding kosong (bidang tanpa permukaan terancang) | **0,0 %** (batas 30 %) |
+| run kosong vertikal tertinggi (kolom 20 px) | **0 px = 0,0 %** tinggi ruangan (batas 30 %) |
+| kolom yang melewati batas | **0** |
+| kaca + kota (bagian dinding yang memperlihatkan skyline) | **88,5 %** |
+| panel terpasang | **27,0 %** |
+
+Cara membaca angka "0,0 % kosong": **kaca dihitung sebagai permukaan terancang** —
+ia membawa kota, dan itulah inti perbaikan ini. Yang diukur gate adalah sisa bidang
+yang benar-benar telanjang (tidak ada kaca, tidak ada papan, tidak ada plinth,
+tidak ada furnitur). Angka pendampingnya yang lebih jujur untuk "apakah dinding
+terisi": **88,5 % dinding adalah jendela berisi kota, 27,0 % tertutup papan** —
+tidak ada satu pun strip vertikal setinggi ruangan yang dibiarkan kosong.
+
+Kenapa papan 148 px (≈1,0 × avatar) dan bukan papan 300 px: papan setinggi itu
+terbaca sebagai kartu UI raksasa dan menutup kota. 148 px = 0,27 × tinggi ruangan;
+kota tetap jadi latar utama di belakang meja.
+
+## 5. Perlakuan kaca
+
+### 5.1 Resep per permukaan
+
+| Permukaan | Isian | Blur | Border | Highlight | Noise |
+|---|---|---|---|---|---|
+| HUD | `--surface-solid` | — | 1 px 0,10 | — | — |
+| Tab lantai | `--surface-glass` | 12 px (aktif: tanpa blur) | 1 px (0,16 / 0,20) | atas 1 px (0,30 / 0,85) | 4 % |
+| Roster | `--surface-glass` @ 0,78 | 18 px | 1 px | atas 1 px | 4 % |
+| Zoom control | `--surface-glass` @ 0,80 | 12 px | 1 px | atas 1 px | 4 % |
+| Curtain wall (kanvas) | **satu** lembar alpha **0,18** | pre-render | mullion 3 px (×3) + 1 transom | 1 px atas | 3 % |
+| Partisi kaca (kanvas) | alpha **0,42** | — (alpha bertingkat) | lihat §5.2 | sheen | 3 % |
+
+### 5.2 Resep kaca di kanvas — parameter pasti
+
+Partisi kaca dan pintu lift **wajib** memakai urutan ini (kalau tidak, ia terbaca
+sebagai pintu/whiteboard, bukan kaca):
+
+| Langkah | Parameter |
+|---|---|
+| 1. Bayangan di bawah | Gaussian **blur 8 px**, hitam **alpha 15 %**, offset **+6 px** di y |
+| 2. Isian | warna `surface` tema pada **alpha 0,42** di atas lantai |
+| 3. Tepi dalam | **1 px** putih pada **alpha 0,55**, inset 1 px |
+| 4. Tepi luar (mode Terang saja) | **1 px** `--glass-border` pada **alpha 0,18** — memisahkan kaca putih dari lantai putih |
+| 5. Sheen diagonal | **2 px** putih pada **alpha 0,18**, dari **18 %** ke **62 %** lebar panel, kemiringan **~35°** (`dy = 0,70·dx`), di-clip ke panel |
+| 6. Refleksi lantai | strip **6 px** putih **alpha 0,30** yang memudar ke 0 |
+
+Pane curtain wall memakai isian **0,18** (bukan 0,42): pada 0,42 skyline malam
+padam dan jendela yang menyala hilang. Sheen diagonalnya memakai kemiringan
+**0,16** (bukan 0,70): pada kaca setinggi 485 px, `dy = 0,70·dx` menghasilkan goresan
+300 px melintang seluruh jendela — terbaca sebagai cacat, bukan refleksi.
+
+### 5.3 Larangan
+
+- Maksimum **2 permukaan ber-blur terlihat sekaligus**.
+- Tidak ada kaca di atas kaca (Acrylic: "hindari melapisi beberapa permukaan acrylic").
+- Tidak ada kaca untuk kartu konten (KPI, taskboard) — kartu tetap solid.
+- Tidak ada `backdrop-filter` pada elemen yang menutupi kanvas beranimasi bila
+  luasnya > 120×120 px.
+- Tidak ada sheen lebih dari satu per panel (dua sheen = plastik, bukan kaca).
+
+## 6. Band jendela kota (ikut tema)
+
+Kota **tidak lagi** punya band sendiri di atas plafon. Ia digambar di dalam
+bidang jendela (y 58–543) dan dibaca sebagai pemandangan di balik curtain wall:
+
+```
+┌──────────────────────────────────────────────┐  ← 40 px  atap: coping + slab + fascia
+│▁▁▁▁▁▁▁▁▁ soffit 18 px · 7 downlight ▁▁▁▁▁▁▁▁▁│  ← 58 px  kepala jendela
+│ langit (gradien 4 stop, palet tema)          │
+│  ▁▂▃ bangunan jauh   (layer 0)               │  ← 124 px rail tempat papan
+│ [plakat][status][pinboard][arsitektur][jam]  │  ← 132–280 px enam papan
+│  ▂▄▆ bangunan tengah (layer 1)               │
+│  ▃▅▇ bangunan dekat  (layer 2)  ← mata agen  │
+│ veil (22 % malam / 8 % siang) + jendela      │
+│ haze jalan 30 px                             │  ← 543 px sill (0,30 unit di atas lantai)
+└──────────────────────────────────────────────┘
+   satu lembar kaca alpha 0,18 · mullion 3 px ×3 (4 teluk × 250 px) · 1 transom di 62 %
+```
+
+| Aspek | Siang (Terang) | Malam (Gelap) |
+|---|---|---|
+| Langit | `#3E8FD6 → #7CBCEC → #C4E1F6 → #F0F9FF` | `#0C1222 → #2B3350 → #8A5560 → #E0A06A` |
+| Matahari | cakram putih tinggi + halo | — |
+| Gedung | kaca memantul, muka terang di sisi matahari | siluet |
+| Jendela | refleksi, alpha 40–95 | menyala, alpha 80–165 |
+| Haze | 8 % | 22 % |
+| Bayangan furnitur | tajam (blur 3 px, alpha 55/255) | lembut (blur 7 px, alpha 70/255) |
+
+- **3 lapisan** di produksi (mockup memakai 4 untuk melihat batas).
+- **Tidak ikut zoom/pan**; parallax maksimum 6 px per 100 px pan, hanya layer 1–2.
+- **Cache per (lantai × tema)** — 3 × 2 = **6 cache** (Neon jadi 9). Satu layer
+  768×576 @ DPR 2 ≈ 3,5 MB → total ≈ 21 MB; LRU 6, invalidasi saat tema berganti,
+  resize/DPR berubah, atau bentuk roster berubah.
+- Transisi 06:00 / 18:00: **crossfade 400 ms** antara dua cache; tidak ada state
+  subuh/senja (lihat alasan di R&D §11).
+
+## 7. Avatar clean vector
+
+### 7.0 Resep raster (yang membuatnya benar-benar vector, bukan pixel)
+
+Tiga aturan yang tidak boleh dilanggar, karena inilah yang dulu gagal:
+
+1. **Digambar pada ukuran akhir, bukan di-upscale.** Sprite dilukis pada permukaan
+   **4× tinggi tampil** (`AV_SUPER = 4`), lalu diperkecil **satu kali** dengan
+   `LANCZOS`. Tidak pernah ada `resize(..., NEAREST)` dan tidak pernah ada
+   pembesaran dari kanvas kecil. Di 150 px tampil, path dilukis di permukaan 600 px —
+   jadi outline 1 unit benar-benar stroke ±1 px, bukan tangga.
+2. **Satu satuan = 1/44 tinggi avatar**, jadi angka proporsi di §7.1 tidak
+   bergantung pada ukuran tampil.
+3. **Setiap material dua tone + outline**, dan tidak ada bagian yang hanya
+   `fillRect`/blok. Kulit, rambut, kemeja, celana, sepatu semuanya gradien dua stop
+   dengan stroke `shade(warna, 0,5)` selebar 1 unit.
+4. **Mask harus opaque di kanal alpha.** Di Pillow, `fill=255` pada gambar `RGBA`
+   menghasilkan `(255, 0, 0, 0)` — alpha **0** — sehingga gradien tidak pernah
+   ter-paste dan avatar hanya tergambar sebagai outline. Yang benar:
+   `fill=(255, 255, 255, 255)`. Gejalanya khas: bentuk kecil (kaki, tangan, lensa)
+   terbaca sebagai "loop" kosong dan rambut terbaca sebagai ikat kepala putih.
+   Gate: `avatar proof` harus melaporkan > 1.500 warna unik di dalam siluet.
+
+### 7.1 Proporsi (1 unit = 1/44 tinggi avatar)
+
+| Bagian | Rentang Y | Lebar | Catatan |
+|---|---|---|---|
+| Kepala | 1,6 – 18,4 | 15,6 (elips, rx 7,8 / ry 8,4) | chibi: kepala ≈ 38 % tinggi |
+| Telinga | 10,2 – 13,4 | 2,4 | digambar **sebelum** kepala (di belakang) |
+| Leher | 16,4 – 21,6 | 5,2 | tertutup dagu sebagian |
+| Torso | 20,2 – 33,8 | 15,2 × `build` | poligon tapered + shoulder cap |
+| Lengan | 21,8 – 29,8 | 4,6 | rounded-rect + tangan 3,6 |
+| Kaki | ±32,4 – 41,4 | 5,4 | dua rounded-rect |
+| Sepatu | 40,5 – 43,7 | 6,8 | blok + sol terang, tidak menyatu |
+| Tinggi total | 44 | | kaki `tall` menggeser pinggul ±1 unit |
+
+Wajah (semua relatif ke pusat kepala `hcy = 10`):
+
+| Fitur | Posisi | Ukuran | Terbaca di 150 px |
+|---|---|---|---|
+| Alis | `hcy − 0,4` | 3,4 × 0,9 unit | ±3,1 px, **digambar di semua look** |
+| Mata | `hcy + 1,9`, x ±2,9 | sclera 2,7 × 3,0 + iris 1,7 + glint | ±9,2 px, jelas |
+| Hidung | `hcy + 2,9 … 4,6` | segitiga `shade(skin, 0,74)` | bayangan, bukan garis |
+| Mulut | `hcy + 3,9 … 6,9` | arc 12°–168°, stroke 1,1 unit | ±12 px, jelas |
+
+Di layar: **150 px @ zoom 2** (sprite digambar pada permukaan 4× = 600 px, lalu
+diperkecil sekali dengan LANCZOS). Di view samping tinggi efektif = `150 px × skala
+baris` = **150 px** (depan) / **141 px** (belakang).
+
+Kenapa 150 dan bukan 88 atau 54: dengan kamera 150 px/unit dan **ruangan 548 px
+lantai→plafon (termasuk jendela)**, avatar 150 px memberi rasio **1:3,65**. Yang
+ditolak bos bukan angkanya di atas kertas, melainkan rasio yang **dirasakan** —
+karena itu band langit di atas plafon dihapus dan ruangan dibuat mengisi kanvas.
+Ukuran nameplate, meja, kursi dan monitor ikut naik (`SIDE_K = 150/54 = 2,78`), jadi
+proporsi antar-elemen tidak berubah — yang berubah skala relatif terhadap ruangan.
+
+### 7.2 Dua tone + outline per material
+
+```ts
+const shade = (hex: string, k: number) => /* k<1 gelap, k>1 terang */
+// kulit:  shade(skin, 1.10) → shade(skin, 0.84)   + outline shade(skin, 0.50)
+// rambut: shade(hair, 1.95) → shade(hair, 0.95)   + outline shade(hair, 0.50)
+// kemeja: shade(shirt, 1.14) → shade(shirt, 0.84) + outline shade(shirt, 0.56)
+// celana: shade(pants, 1.10) → shade(pants, 0.84) + outline shade(pants, 0.46)
+```
+
+Selain gradien, tiap material punya **satu bidang tone kedua yang keras** supaya
+beda tone terbaca di 150 px (gradien halus saja tidak cukup): panel samping kemeja
+`shade(shirt, 0.78)` alpha 150, pipi `shade(skin, 0.80)` alpha 105 yang di-clip ke
+mask kepala (tidak pernah meluber keluar siluet).
+
+Tidak ada drop shadow di avatar. **Jumlah operasi terukur: 53–63 path/isi + 28–32
+gradien per avatar** (WAHYU/RAKA/DIMAS paling banyak: kacamata + stubble +
+headphone), dihitung saat render oleh `render_mockups.py`.
+
+### 7.3 Pemetaan `Look` → gambar
+
+| Field | Perlakuan |
+|---|---|
+| `skin` | gradien kepala/leher/tangan + pipi dua tone |
+| `hair` + `style` | cap elips + **fringe yang berbeda per gaya**: `crop`/`short` (garis hampir lurus), `side` (sapuan ke kanan), `long` (dua panel sampai bahu), `bun` (sanggul bulat di atas-belakang), `curly` (4 bulge), `messy` (3 spike) |
+| `shirt` | torso + lengan; kerah V `shade(shirt, 0.62)` |
+| `pants` | kaki + sepatu `shade(pants, 0.55)` + sol `#E7EAEE` |
+| `accent` | strip dada 1 path (identitas tim) |
+| `glasses` | 2 rounded-rect + bridge + lensa `rgba(206,228,244,0.24)` |
+| `headphones` | band + 2 ear cup |
+| `peci` | rounded-rect `#20202A` di atas kepala |
+| `mustache` | rounded-rect tipis di atas mulut |
+| `stubble` | oval rahang alpha 68 — bukan oval penuh |
+| `build` / `tall` | lebar torso / panjang kaki |
+| `female` | mematikan stubble & mustache |
+
+Catatan penting: **jangan** menambahkan pita highlight ellips di atas tengkorak —
+ia terbaca sebagai headband/helm, bukan rambut. Tone kedua rambut harus dari gradien
+massa rambut itu sendiri.
+
+### 7.4 Nameplate (aturan baru — selalu di atas kepala)
+
+- Tinggi **24 px**, radius 11, font 11,5 bold, isian `rgba(surface,0.92)`, border
+  1 px alpha 0,33.
+- Isi: penanda status (bentuk + warna, §3.1) + nama depan kapital.
+- **Selalu di atas kepala** dengan jarak tetap **8 px** dari atas kotak avatar
+  (terukur 8,0 px minimum di mockup).
+- Bila slot ideal sudah terpakai: naik **27 px** (tinggi + 3) per langkah, tetap di
+  dalam bidang, dan **garis penghubung 1 px** digambar dari bawah plate ke kepala
+  (border tema, alpha 55 %) supaya label tidak pernah terlihat "melayang".
+- **Gate keras** (`side_gate()`, dijalankan untuk L1/L2/L3 sebelum render), tiga
+  aturan, semuanya dicetak sebagai angka:
+  1. **0** label yang menimpa label lain;
+  2. **0** label yang menimpa kotak kepala agen **lain**;
+  3. overlap bbox avatar vs avatar **≤ 20 %** dari yang lebih kecil (aturan yang
+     menangkap dua agen di baris + `x` yang sama).
+  Ditambah syarat jarak pusat dua agen **sebaris ≥ 180 px** (terukur 200 px). Gate
+  ini sudah berjalan di renderer mockup; implementasi harus memakai gate yang sama.
+- Tinggi kepala di view samping: `floor_y − avatar_h × skala_baris`, bukan angka
+  top-down.
+
+### 7.5 Cache & ancor
+
+```ts
+const key = `avatar:${hashLook(look)}:${pose}:${frame}:${dprBucket}`
+// gambar sekali ke offscreen 90×150 × dprBucket, lalu drawImage
+```
+
+- Ancor kaki: `(cx, floorY_baris)`; `pickTargets` tetap memakai koordinat dunia.
+- Cache maksimum 312 entri; LRU 64.
+- Bangun 8 avatar @150 px belum diukur ulang di browser; biayanya naik ±2,9× luas
+  88 px (skala kuadratik terhadap tinggi). Blit 8 sprite tetap ≈ 0,06 ms/frame —
+  biaya build tidak per frame, dan itulah alasan sprite harus di-cache, bukan
+  digambar di dalam loop render.
+
+### 7.6 Bukti terukur (dari `render_mockups.py`, bukan klaim)
+
+`avatar_proof()` mencetak angka untuk satu agen di mockup yang benar-benar dirender,
+dan menulis `docs/design/mockups/avatar-zoom-check.png` (crop 4×):
+
+| Metrik | Nilai terukur | Ambang | Arti |
+|---|---|---|---|
+| Tinggi avatar di mockup | **150 px** (baris depan), **141 px** (belakang ×0,94) | 135–180 px | ukuran tampil akhir |
+| Tinggi ruangan (lantai→plafon, termasuk jendela) | **548 px** | 520–560 px | angka yang dipakai rasio |
+| Rasio ruangan:avatar | **1:3,65** (548 : 150) | 1:3–1:4 | verdict bos, diukur |
+| Band di atas plafon | **40 px** | ≤ 40 px | slab + coping + fascia |
+| Warna unik dalam siluet (sprite) | **2147** | pixel-art ≤ 12, vector ≥ 40 | gradien + anti-aliasing |
+| Warna unik di crop mockup | **4408** | — | termasuk latar (gradien ikut bergeser) |
+| Piksel tepi siluet yang **blending** | **479 / 479 = 100 %** | pixel-art 0 % | tidak ada upscale nearest |
+| Piksel alpha parsial | **1773** | > 0 | tepi sub-piksel nyata |
+| Operasi gambar | **63–75 path/isi + 33–37 gradien** | — | dihitung saat render (body + overlay tangan) |
+
+Cara memeriksa ulang: `python3 docs/design/mockups/render_mockups.py` — baris
+`avatar proof BAGAS: ...` dan `side gate L3: ...` tercetak di stdout.
+
+### 7.7 Resep meja (profil) — objek, bukan balok
+
+Meja digambar sebagai **tiga lapis + dua kaki**, dengan urutan gambar yang tetap:
+`bayangan lantai → kursi → badan agen → meja → keyboard/mouse → tangan → monitor`.
+Meja **opaque di depan pangkuan**, karena itu ia digambar sesudah badan.
+
+| Bagian | Ukuran | Warna |
+|---|---|---|
+| Top (garis lantai) | **58 px** di atas garis lantai = **0,39 × tinggi avatar** | `shade(desk, 0,90)` baris belakang, `1,0` baris depan |
+| Slab | tebal **6 px**, lebar **128 px**, radius 1,6 unit | `desk` |
+| Bibir atas (top surface, terlihat menyamping) | **2,1 px** di tepi atas slab | `over(desk_top, 0,16, muted)` — **tint**, bukan `shade(k>1)`: meja tema terang putih murni, versi lebih terang akan hilang |
+| Tepi depan (front edge) | **2,2 px** di tepi bawah slab | `shade(desk, 0,84)` = **1 tone lebih gelap** |
+| Apron (modesty panel) | tinggi **9 px**, inset **5 px** dari kedua ujung | `shade(desk, 0,76)` + garis AO 1,4 px di bawah slab |
+| Panel samping (kaki) | **5 px** lebar, di `±(64 − 6)` px, dari bawah apron ke lantai | `shade(desk, 0,70)` + outline 0,3 unit + tepi dalam terang + foot pad |
+| Bayangan jatuh | elips `rx = 0,46 × lebar`, alpha 44 (terang) / 58 (gelap), blur 3 px | hitam |
+| AO kaki | elips 8×3 px di tiap foot pad, alpha 96 / 110, blur 1 px | hitam |
+
+**Kenapa 58 px dan bukan 94 px.** Dengan kepala chibi 38 % tinggi, meja setinggi
+0,44 × avatar jatuh tepat di **dagu** (94 px pada avatar 150 px): yang terlihat hanya
+kepala di atas balok, tangan tidak mungkin menyentuh meja, dan pangkuan menggantung
+di lubang lutut. 58 px membuat garis meja memotong dada bawah — tangan bisa di tuts,
+lutut dan kaki terlihat di bawah meja, dan proporsi meja:agen tetap masuk akal untuk
+gaya chibi. Komposisi (rasio ruangan, dua baris, slot) **tidak berubah**.
+
+### 7.8 Resep monitor — kaki → leher → panel, menghadap agen
+
+| Bagian | Ukuran | Catatan |
+|---|---|---|
+| Foot | **27 × 3,3 px** | `metal_dk` + tepi atas 0,9 px lebih terang, di atas meja |
+| Leher | **6 px** lebar, **8,3 px** tinggi | `metal_dk` + highlight 0,8 px di sisi kiri |
+| Panel | **38 × 23 px** | bezel `shade(desk, 0,46)`, layar `over(status, 0,30, #0B1119)` |
+| Arah | paralelogram, tepi atas digeser **0,9 unit** ke arah agen + **sisi jauh 1,5 px** | inilah "menghadap agen" yang bisa digambar di elevasi |
+| Posisi | `cx + 16,4 unit` = **+46 px** dari pusat agen | membersihkan torso (±26 px) dan kepala (±13 px); 42 px pernah menimpa pipi |
+| Isi layar | 3 baris "kode" warna status + LED 1,2 px di pojok | layar = status, sama dengan papan status |
+| Bayangan kontak | elips 10×1,9 px di bawah foot, alpha 86 / 96, blur 1,1 px | tanpa ini monitor terbaca melayang |
+
+### 7.9 Resep kursi — sandaran + dudukan + kaki bintang
+
+Kursi digambar **sebelum** agen, jadi yang terlihat adalah sayap sandaran di samping
+leher, bukan badan kursi yang menempel di punggung.
+
+| Bagian | Ukuran | Catatan |
+|---|---|---|
+| Sandaran | **40–84 px** di atas lantai, lebar **±37 px**, radius 3,8 unit | `over(desk_top, 0,34, muted)` — **abu-abu dingin**, bukan turunan meja: celana tim hampir hitam, satu-satunya tone yang memisahkan kursi dari kaki dan dari meja putih |
+| Panel dalam sandaran | inset 2,2 unit | `over(desk_top, 0,22, muted)` + garis rim light di tepi atas |
+| Dudukan | **31–36 px** di atas lantai, lebar ±22 px | tepat di bawah pangkuan (lap 33–46 px) |
+| Kolom gas | 4 px lebar, 31 → 9 px | `metal_dk` + highlight |
+| Kaki bintang | 4 kaki terlihat di elevasi (`x = ±0,96R`, `±0,58R`), **R = 26 px** | `metal_dk`, lebar 1,1 unit |
+| Caster | Ø 8 px | `metal` + outline, menyentuh lantai |
+| Bayangan | elips `rx 10,6 unit`, alpha 72 / 86, blur 2 px | kontak kursi + caster |
+
+### 7.10 Pose agen: duduk + mengetik (overlay dua lapis)
+
+`avatar(..., pose="seated")` mengubah tiga hal, tanpa mengubah tinggi 150 px:
+
+| Bagian | Rentang (unit) | Catatan |
+|---|---|---|
+| Pangkuan (lap) | 30,4–34,0, lebar ±8,2 | digambar **sesudah** torso, jadi tidak ada perut terbuka di lubang lutut |
+| Lutut | 31,6–36,4, lebar 5,8 | `kh=1,62` → lebih terang dari outline; dua kaki dipisah 12,6 unit |
+| Betis | 35,2–42,0, lebar 4,2 | + garis highlight 0,9 unit di depan (kaki terbaca sebagai silinder, bukan batang) |
+| Sepatu | 41,2–43,7 | sol `#E7EAEE` |
+| Lengan | bahu 21,8 → siku 26,6 | berhenti di garis meja; tangan **tidak** digambar di lapisan ini |
+
+Tangan adalah **overlay terpisah** (`layer="hands"`) yang digambar setelah keyboard:
+
+- dua tangan di `x = ±3,4 unit`, kotak 4,4 × 2,6 unit, tangan kiri **0,4 unit lebih
+  rendah** dari kanan (pose mengetik, bukan boneka);
+- dua notch jari + bayangan tangan di atas tuts (alpha 0,42) — inilah yang membuat
+  "tangan di keyboard" terbaca, bukan dua blob yang melayang;
+- manset lengan 0,7 unit tepat di bawah tangan, berakhir di garis meja.
+
+### 7.11 Bayangan kontak (wajib untuk setiap prop)
+
+Tidak ada prop yang boleh "menempel" tanpa kontak. Semua memakai satu helper
+(`_soft_shadow`): elips hitam + Gaussian blur, alpha dan blur per objek.
+
+| Objek | Bayangan | Alpha (terang/gelap) |
+|---|---|---|
+| Meja | elips `0,46 × lebar` di lantai | 44 / 58, blur 3 |
+| Kaki meja | elips 8 × 3 px per foot pad | 96 / 110, blur 1 |
+| Kursi + caster | elips `rx 10,6 unit` | 72 / 86, blur 2 |
+| Kaki agen | elips `rx 12,4 unit` | 64 / 78, blur 2,2 |
+| Monitor (foot di meja) | elips 10 × 1,9 px | 86 / 96, blur 1,1 |
+| Keyboard | elips 40 × 2,4 px | 78 / 88, blur 1,2 |
+| Mouse | elips 4,4 × 1,8 px | 48 / 66, blur 0,9 |
+| Tanaman / rak / rak server | elips di garis lantai barisnya | 34–50 |
+
+### 7.12 Variasi look: 6 dari 8 harus terbaca tanpa label
+
+Yang membedakan **bukan** warna kemeja saja (empat agen memakai biru tua yang
+berdekatan di `agents.ts`), melainkan **siluet**:
+
+| Agen | Siluet | Warna | Aksesori |
+|---|---|---|---|
+| BIMA | crop **kotak** (crown persegi, ±1,5 unit lebih lebar) + kepala lebar (build 1,12) | slate blue | stubble |
+| RAKA | **side sweep**, kepala sempit (build 0,90) | navy | kacamata |
+| LARAS | **long** (dua panel sampai bahu) | rose | female |
+| DIMAS | **messy** (3 spike) + headphone over-ear | charcoal | headphone, stubble |
+| BAGAS | crop **membulat** (fade) | steel blue | stubble |
+| YOGA | **short + quiff** | khaki | kacamata |
+| SARI | **bun** (sanggul di atas-belakang) | sage | female |
+| WAHYU | **short crew-cut** (build 1,04) | pine | kacamata, stubble |
+
+Aturan turunan data (bukan field baru): `hrx = 7,8 × (1 + (build − 1) × 0,7)` —
+kepala ikut lebar/sempit sesuai `build`; `crop` dengan `build ≥ 1,08` mendapat crown
+persegi + sideburn; `short` dengan `build ≥ 1,02` mendapat crew-cut, sisanya quiff.
+Gate terukur: `avatar_distinctness()` mencetak jarak terdekat tiap agen
+(**8/8 ≥ ambang 1,0**, pasangan terlemah YOGA↔WAHYU 1,18; BIMA↔BAGAS 1,38) dan
+**berhenti** kalau hasilnya < 6/8. Bukti visual: `avatar-zoom-check.png` (8 look @2×)
+dan `desk-detail-check.png` (2 meja @2× + 5 inset @4×).
+
+## 8. Tipografi
+
+| Peran | Ukuran | Bobot | Tracking | Warna |
+|---|---|---|---|---|
+| Nama agen (roster) | 11 px | 700 | 0 | `--ink` |
+| Status (roster) | 9 px | 500 | 0 | warna status |
+| Task id | 9 px mono | 500 | 0 | `--muted` |
+| Label panel | 11 px | 500 (Terang) / 600 (Gelap) | +0,08em, uppercase | `--ink` |
+| Meta panel | 9,5 px | 500 | 0 | `--muted` |
+| Angka KPI | 22 px | 700 | −0,01em | `--ink` |
+
+Font label di kanvas: font UI (bukan 5×7). Font 5×7 hanya untuk plakat zona dan
+indikator lantai lift.
+
+## 9. Gerak
+
+| Elemen | Durasi | Easing | Catatan |
+|---|---|---|---|
+| Ganti lantai (band + scene) | 180 ms | `cubic-bezier(.2,.7,.2,1)` | opacity + translateY 6 px |
+| Ganti tema (crossfade cache) | 400 ms | linear | hanya tepat di 06:00 / 18:00 |
+| Lift naik/turun | 400 ms | ease-in-out | pintu 160 ms; sekarang vertikal, jadi natural |
+| Agen pindah baris | 120 ms | ease-out | interpolasi offset y |
+| Tab aktif | 120 ms | ease-out | warna, tanpa blur |
+| Parallax kota | kontinu 0,02× pan | linear | mati saat `prefers-reduced-motion` |
+| Denyut dot `working` | 2,4 s | ease-in-out | opacity 0,75–1 |
+
+## 10. Fallback & aksesibilitas
+
+| Kondisi | Perilaku |
+|---|---|
+| `prefers-reduced-transparency: reduce` | `--surface-glass` → `--surface-solid`; blur & noise dimatikan |
+| `prefers-reduced-motion: reduce` | parallax, crossfade tema, denyut dimatikan |
+| `prefers-contrast: more` | border kaca 0,16/0,20 → 0,40; muted → ink-dim |
+| `data-contrast="high"` (tombol toolbar) | sama seperti di atas, dipaksa |
+| Browser tanpa `backdrop-filter` | `--surface-glass` @ 0,90 (hampir solid), tanpa blur |
+| `tz` tidak ada / tidak valid | `Asia/Jakarta`, `source: 'fallback-tz'` |
+| `prefers-color-scheme` | hanya dipakai bila `tz` tidak ada dan tanpa override |
+| `document.hidden` | loop berhenti (sudah ada) |
+
+Ambang gate: teks ≥ 4,5:1, dot/garis ≥ 3:1, chip status ≥ 4,5:1 — dihitung
+terhadap komposit kaca, bukan terhadap putih/hitam.
+
+## 11. Yang tidak berubah
+
+- `frontend/src/lib/rooms.ts`: meja, `LIFT`, `POIS`, `NAV`, `SPOTS` — nol perubahan;
+  baris (depan/belakang) dihitung di renderer dari `z`.
+- `LIFT`: shaft 2,6×3,2, pintu barat, indikator `L1/L2/L3` di header (sekarang
+  animasinya vertikal).
+- Tab lantai: 3 tab, `?floor=`, keyboard access, `aria-pressed`.
+- Kontrak `/api/status`, `/api/config` (termasuk `tz`), hook `__office2dFloors()`.
+- Privasi: tidak ada isi pesan/judul tugas di kanvas maupun panel.
+- `layout_check`: walkability, aisle, edge nav, kaki POI (tetap graf 2D).
+
+## 12. Gate yang harus diperbarui
+
+| Gate | Perubahan |
+|---|---|
+| `verify/theme_check.ts` (baru) | 23 pemeriksaan: 05:59/06:00/17:59/18:00, tengah malam, override menang, `?theme=`, fallback tz, DST Amsterdam |
+| `verify/anim_check.ts` | `THEME_TOKENS` baru; `avatarKey` unik 13 look; row resolver deterministik |
+| `verify/visual_check.ts` | `plateWidth` dari `measureText`; plate 24 px; gate plate 0 overlap/0 kepala tertutup; kota **di dalam** bidang jendela (58–543), tidak ada band langit di atas plafon (≤ 40 px) |
+| `verify/office2d_probe.js` | selektor tab di `.hud-tabs .floor-tab`; tambah `?theme=` pada screenshot |
+| `verify/e2e_review.sh` | screenshot 3 lantai × 2 tema + mobile, semuanya dengan `?theme=` eksplisit |
+| Audit kontras | skrip baru: baca `tokens.json`, gagal bila ada pasangan < ambang (78 pasangan) |
