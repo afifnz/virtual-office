@@ -362,7 +362,17 @@ export function poseFrame(pose: Pose, t: number, still: boolean): number {
 function statusOf(agent: Agent | undefined, pose: Pose): keyof typeof THEME_STATUS.day {
   if (pose.offline || !agent) return 'offline'
   if (pose.blocked) return 'blocked'
-  return (agent?.status as keyof typeof THEME_STATUS.day) ?? 'offline'
+  return statusKey(agent)
+}
+
+/**
+ * The colour/shape key for one row. A stale working/reviewing verdict is drawn
+ * as idle (the backend already demoted it; the canvas must agree), and waiting
+ * has its own amber + square so it never reads as one more working desk.
+ */
+export function statusKey(agent: Agent): keyof typeof THEME_STATUS.day {
+  if (agent.stale === true && (agent.status === 'working' || agent.status === 'reviewing')) return 'idle'
+  return (agent.status as keyof typeof THEME_STATUS.day) ?? 'offline'
 }
 
 function screenOf(pose: Pose): 'terminal' | 'doc' | 'diff' | 'off' {
@@ -420,7 +430,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   drawStatusBoard(
     ctx,
     theme,
-    onFloor.map((p) => ({ id: p.meta.id, name: p.meta.name, status: p.agent?.status ?? 'offline' })),
+    onFloor.map((p) => ({ id: p.meta.id, name: p.meta.name, status: p.agent ? statusKey(p.agent) : 'offline' })),
     compact,
     boards,
   )
@@ -459,7 +469,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   const statuses = new Map<string, { status: string; shape: 'circle' | 'ring' | 'diamond' | 'square' | 'triangle'; colour: string }>()
   for (const seat of seats) {
     const agent = r.byId.get(seat.meta.id)
-    const key = (agent?.status as keyof typeof THEME_STATUS.day) ?? 'offline'
+    const key = agent ? statusKey(agent) : 'offline'
     statuses.set(seat.meta.id, {
       status: agent?.status ?? 'offline',
       shape: shapeOf(key),
@@ -579,6 +589,9 @@ function shapeOf(key: keyof typeof THEME_STATUS.day): 'circle' | 'ring' | 'diamo
   if (key === 'offline') return 'square'
   if (key === 'danger') return 'triangle'
   if (key === 'reviewing') return 'ring'
+  // waiting is a hollow square: not a working dot, not an offline square either
+  // (offline rows are grey and carry no live status).
+  if (key === 'waiting') return 'square'
   return 'circle'
 }
 

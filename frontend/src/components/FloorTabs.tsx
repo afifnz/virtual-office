@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
 import { FLOORS, FLOOR_IDS, type FloorId } from '../lib/rooms'
 import { rosterAgents } from '../lib/roster'
-import type { StatusPayload } from '../lib/types'
+import { countStatuses } from '../lib/status'
+import type { AgentStatus, StatusPayload } from '../lib/types'
 import type { ViewMode } from '../lib/view'
 
 /**
@@ -26,10 +27,11 @@ interface FloorTabsProps {
   variant?: 'overlay' | 'hud'
 }
 
-/** The three statuses worth scanning on a foreign floor (same dots as the HUD legend). */
-const SUMMARY: Array<{ key: string; label: string }> = [
+/** The statuses worth scanning on a foreign floor (same dots as the HUD legend). */
+const SUMMARY: Array<{ key: AgentStatus; label: string }> = [
   { key: 'working', label: 'bekerja' },
   { key: 'reviewing', label: 'mereview' },
+  { key: 'waiting', label: 'menunggu anak' },
   { key: 'blocked', label: 'terblokir' },
 ]
 
@@ -41,8 +43,7 @@ export function FloorTabs({ floor, status, mode, onFloor, onBuilding, variant = 
     if (f) agentsByFloor[f].push(a)
   }
   const all = [...agentsByFloor[1], ...agentsByFloor[2], ...agentsByFloor[3]]
-  const allCounts = new Map<string, number>()
-  for (const a of all) allCounts.set(a.status, (allCounts.get(a.status) ?? 0) + 1)
+  const allCounts = countStatuses(all)
   const totalDesks = rosterAgents().length
 
   useEffect(() => {
@@ -86,8 +87,7 @@ export function FloorTabs({ floor, status, mode, onFloor, onBuilding, variant = 
       </button>
       {FLOOR_IDS.map((f) => {
         const agents = agentsByFloor[f]
-        const counts = new Map<string, number>()
-        for (const a of agents) counts.set(a.status, (counts.get(a.status) ?? 0) + 1)
+        const counts = countStatuses(agents)
         return (
           <button
             key={f}
