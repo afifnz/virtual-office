@@ -75,6 +75,12 @@ export interface SideViewport {
   /** 1 (half scale, phone) or 2 (the reference 150 px/unit camera) */
   zoom: number
   floor: FloorId
+  /**
+   * design-space y at the centre of the view. Optional and defaulting to the
+   * stage centre, so every per-floor camera and every old gate keeps its old
+   * numbers; the whole-building overview is the only view that pans vertically.
+   */
+  camY?: number
 }
 
 export interface SideTransform {
@@ -150,7 +156,10 @@ export function sideTransform(
   const stageH = SIDE_H * s
   // centred, but never past the control band: on a short phone the stage is
   // pushed up (cropping the roof) rather than sliding under the pad
-  const top = band > 0 ? Math.min((canvasH - stageH) / 2, canvasH - band - stageH) : (canvasH - stageH) / 2
+  const baseTop = band > 0 ? Math.min((canvasH - stageH) / 2, canvasH - band - stageH) : (canvasH - stageH) / 2
+  // camY defaults to the stage centre: a per-floor camera never moves
+  const camY = vp.camY ?? SIDE_H / 2
+  const top = baseTop - (camY - SIDE_H / 2) * s
   return {
     s,
     top,
@@ -174,6 +183,19 @@ export function clampSideCam(camX: number, canvasW: number, canvasH: number, zoo
   if (stage <= canvasW) return SIDE_W / 2
   const half = (stage - canvasW) / (2 * s)
   return Math.min(SIDE_W / 2 + half, Math.max(SIDE_W / 2 - half, camX))
+}
+
+/**
+ * The same clamp on the vertical axis. Only the whole-building view passes a
+ * `camY`; the per-floor camera leaves it undefined and stays fixed.
+ */
+export function clampSideCamY(camY: number, canvasW: number, canvasH: number, zoom: number, band = 0): number {
+  const s = sideScale(canvasW, canvasH, zoom, band)
+  const stage = SIDE_H * s
+  const usableH = Math.max(0, canvasH - band)
+  if (stage <= usableH) return SIDE_H / 2
+  const half = (stage - usableH) / (2 * s)
+  return Math.min(SIDE_H / 2 + half, Math.max(SIDE_H / 2 - half, camY))
 }
 
 // ------------------------------------------------------------------- rows
