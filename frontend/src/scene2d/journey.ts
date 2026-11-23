@@ -29,9 +29,10 @@ import { navPath, type Pt } from '../lib/nav'
 import { hashId, rosterAgents } from '../lib/roster'
 import { seatPoint } from '../lib/routes'
 import type { WalkTarget } from './anim'
+import { LIFT_RIDER_LEG } from './lift'
 
 /** How long the lift waits at a floor with its doors open. */
-export const LIFT_DWELL = 2.6
+export const LIFT_DWELL = LIFT_RIDER_LEG
 /** Walking speed, world units per second (unchanged from the old walkState). */
 export const JOURNEY_SPEED = 1.8
 
@@ -57,6 +58,13 @@ export interface JourneyState {
   inLift: boolean
   /** destination floor during a dwell; null on every walk/stand/sit segment */
   liftTo: FloorId | null
+  /**
+   * Progress through the lift leg, 0…1 (0 = standing at the source with the
+   * doors open, 1 = arrived at the destination). 0 on every walk/stand/sit
+   * segment. `scene2d/lift.ts` drives the car from exactly this number, so the
+   * one lift moves with the one journey instead of keeping its own time.
+   */
+  liftPhase: number
 }
 
 function pathLen(path: Pt[]): number {
@@ -187,7 +195,15 @@ export function journeyAt(journey: Journey, phase: number): JourneyState {
   for (const step of journey.steps) {
     if (step.kind === 'lift') {
       if (t < step.dur) {
-        return { floor: step.floor, x: step.x, z: step.z, walking: false, inLift: true, liftTo: step.to }
+        return {
+          floor: step.floor,
+          x: step.x,
+          z: step.z,
+          walking: false,
+          inLift: true,
+          liftTo: step.to,
+          liftPhase: Math.max(0, Math.min(1, t / step.dur)),
+        }
       }
       t -= step.dur
       continue
@@ -195,25 +211,25 @@ export function journeyAt(journey: Journey, phase: number): JourneyState {
     const walkDur = pathLen(step.path) / JOURNEY_SPEED
     if (t < walkDur) {
       const p = pointAt(step.path, t * JOURNEY_SPEED)
-      return { floor: step.floor, x: p[0], z: p[1], walking: true, inLift: false, liftTo: null }
+      return { floor: step.floor, x: p[0], z: p[1], walking: true, inLift: false, liftTo: null, liftPhase: 0 }
     }
     t -= walkDur
     const standDur = step.stand ?? 0
     if (t < standDur) {
       const end = step.path[step.path.length - 1] ?? [0, 0]
-      return { floor: step.floor, x: end[0], z: end[1], walking: false, inLift: false, liftTo: null }
+      return { floor: step.floor, x: end[0], z: end[1], walking: false, inLift: false, liftTo: null, liftPhase: 0 }
     }
     t -= standDur
   }
   const last = journey.steps[journey.steps.length - 1]
   if (last?.kind === 'walk') {
     const end = last.path[last.path.length - 1] ?? [0, 0]
-    return { floor: last.floor, x: end[0], z: end[1], walking: false, inLift: false, liftTo: null }
+    return { floor: last.floor, x: end[0], z: end[1], walking: false, inLift: false, liftTo: null, liftPhase: 0 }
   }
   if (last?.kind === 'lift') {
-    return { floor: last.floor, x: last.x, z: last.z, walking: false, inLift: false, liftTo: null }
+    return { floor: last.floor, x: last.x, z: last.z, walking: false, inLift: false, liftTo: null, liftPhase: 0 }
   }
-  return { floor: 1, x: 0, z: 0, walking: false, inLift: false, liftTo: null }
+  return { floor: 1, x: 0, z: 0, walking: false, inLift: false, liftTo: null, liftPhase: 0 }
 }
 
 /**

@@ -446,12 +446,27 @@ cd frontend && npx tsc --noEmit && npm run build      # dist/ (JS 216 kB, 71 kB 
 Pemeriksaan murni, tanpa browser (esbuild + node):
 
 ```bash
-for c in roster_check layout_check anim_check visual_check theme_check render_check building_check status_check traffic_check; do
+for c in roster_check layout_check anim_check visual_check theme_check render_check building_check status_check traffic_check lift_check; do
   frontend/node_modules/.bin/esbuild verify/$c.ts --bundle --format=esm \
     --platform=node --outfile=/tmp/$c.mjs && node /tmp/$c.mjs
 done
 ```
 
+- `lift_check` — **lift hidup**: layanan idle deterministik dari satu jam murni
+  (`scene2d/lift.ts`), pola L1 → L2 → L3 → L2, dwell 3,8–4,3 dtk (pintu buka
+  0,6 / tahan 1,2–1,8 / tutup 0,6 dtk), siklus 34,7 dtk, gerak ber-easing
+  (slope 0,06 di lantai, 1,5 di tengah). 180 dtk @ 30 Hz: pintu **tidak pernah**
+  terbuka saat kereta bergerak (0 pelanggaran, juga saat ada rider), indikator
+  lantai (`·L1`/`▲L2`/`▼L3`) selalu sama dengan lantai kereta (0 mismatch),
+  kereta tidak pernah keluar shaft di kedua geometri (GEDUNG 74…331, core
+  280…588), 21 perpindahan lantai (hidup, ≤ 25), 21 flash "ding" ≤ 0,05 dtk di
+  kereta yang berhenti, lampu panggil menyala hanya untuk lantai yang dilayani,
+  counterweight berlawanan arah. Rider menang: kereta mengikuti `liftPhase`
+  journey, jam idle beku, dan saat rider turun layanan lanjut dari lantai itu
+  tanpa lompatan (0,000). `?still=1` deterministik (dua runtime identik) dan
+  `liftAt` menulis ke frame pemanggil (1000 panggilan, 0 alokasi). Painter ikut
+  diperiksa: kereta benar-benar digambar di dua ketinggian, indikator + plate
+  `▸ L1` masing-masing sekali.
 - `status_check` — `waiting` vs `stale` truth: chip/label, header & tab
   arithmetic (waiting and stale are never counted as bekerja), palette.
 - `layout_check` — grid 4.5 × 4.0, sirkulasi ≥ 1.6, nav graph bebas furnitur.
@@ -511,7 +526,7 @@ bash verify/e2e_review.sh      # 51 pemeriksaan, butuh binary di /workspace/.got
 ```
 
 Hasil terakhir: `go vet` bersih, `go test` ok di api/derive/store, `tsc --noEmit`
-tanpa error, `vite build` sukses, `roster/layout/anim/visual/theme/render/building/traffic`
+tanpa error, `vite build` sukses, `roster/layout/anim/visual/theme/render/building/traffic/lift`
 semuanya OK, dan `verify/office2d_probe.js` melaporkan `ok: true` (kanvas
 tergambar, tidak ada panel menutupi kanvas, roster scroll, GEDUNG default,
 lantai muat).
@@ -525,8 +540,16 @@ gedung dan `1..3` untuk lantai.
 /?still=1&theme=day                      # GEDUNG, siang (default)
 /?still=1&theme=night&view=building      # GEDUNG, malam
 /?still=1&theme=day&floor=3              # L3 seperti sebelumnya
+/?still=1&lift=open                      # lift di L1 dengan pintu terbuka (foto "ding")
+/?still=1&lift=12.6&theme=night          # fase siklus beku pada detik ke-12,6
 /?face=dev                               # lantai agen + zoom ke mejanya
 ```
+
+`?lift=` membekukan jam layanan lift (tanpa itu, `?still=1` saja sudah membekukan
+di fase bawaan `t = 0,5` — kereta di L1, pintu tertutup). `?lift=open` = fase
+pintu terbuka penuh di L1; sebuah angka = detik di dalam siklus 34,7 dtk
+(`?lift=0` tepat saat kereta tiba di L1 — flash "ding" menyala, `?lift=4,6`
+tepat saat kereta mulai naik ke L2).
 
 Di GEDUNG: klik agen → pindah ke lantai agen itu + fokus meja; klik band lantai
 kosong → buka lantai itu; zoom masuk (tombol `+`/pinch) mengaktifkan pan vertikal

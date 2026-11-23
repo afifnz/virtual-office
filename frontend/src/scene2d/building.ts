@@ -34,6 +34,7 @@
 import type { AgentMeta } from '../lib/agents'
 import { FLOORS, type FloorId } from '../lib/rooms'
 import { measureSans, shortName } from './labels'
+import { emptyLiftFrame, liftAt, pickRider, type LiftFrame, type LiftRider } from './lift'
 
 export const BUILDING_W = 1000
 export const BUILDING_H = 688
@@ -470,24 +471,21 @@ export function cityOverlapsBuilding(rects: readonly CityRect[] = buildingCityRe
 
 // ------------------------------------------------------------------- lift
 
-export interface BuildingLiftRider {
-  id: string
-  floor: FloorId
-  inLift: boolean
-  liftTo: FloorId | null
-}
+/** A rider as the building view reports it — the journey's own rider shape. */
+export type BuildingLiftRider = LiftRider
 
-export interface BuildingLiftState {
+/**
+ * The car's state as the GEDUNG painter and its gate see it: the shared
+ * `LiftFrame` (level, door, direction, flash, call lamps) plus the pixel rect
+ * it occupies in the design sheet. One source — `lift.ts` — decides the
+ * motion; this file only maps `level` onto the three bands.
+ */
+export interface BuildingLiftState extends LiftFrame {
   x: number
   y: number
   w: number
   h: number
-  /** source floor while moving, null when parked */
-  from: FloorId | null
-  to: FloorId | null
-  /** 0 at the source, 1 at the target */
-  progress: number
-  moving: boolean
+  /** kept for the old probe/tests: same value as `rider` */
   riderId: string | null
 }
 
@@ -496,52 +494,40 @@ export function buildingLiftY(floor: FloorId): number {
   return BLD_BANDS[floor].floorY - BLD_CAR_H / 2
 }
 
-/** Smoothstep: no jerk at either floor. */
-function smooth(p: number): number {
-  const k = Math.min(1, Math.max(0, p))
-  return k * k * (3 - 2 * k)
+/** One storey in px: 83 px band + 9 px slab. */
+export const BLD_FLOOR_PITCH = BLD_BANDS[1].floorY - BLD_BANDS[2].floorY // 92
+
+/** Car centre y for a continuous floor level (1 = lobby … 3 = Tim Dev). */
+export function buildingLiftYAt(level: number): number {
+  return buildingLiftY(1) - (level - 1) * BLD_FLOOR_PITCH
+}
+
+/** Scratch frame for `buildingLift()` — the gate/probe path, never a frame loop. */
+const LIFT_SCRATCH = emptyLiftFrame()
+
+/**
+ * The one car, in design px. Idle it runs the deterministic service of
+ * `lift.ts` (L1 → L2 → L3 → L2, doors per stop); with a rider aboard it
+ * follows that agent's journey and the idle service waits. `t` is the
+ * animation clock; `?still=1` freezes it upstream.
+ */
+export function buildingLift(riders: readonly BuildingLiftRider[], t: number): BuildingLiftState {
+  return buildingLiftFrom(liftAt(LIFT_SCRATCH, t, pickRider(riders)))
 }
 
 /**
- * The one car. Riders dwell in the lift for LIFT_DWELL seconds; over that
- * dwell it travels from their floor to the destination, so mid-dwell it is
- * visibly BETWEEN two bands (gate c). No rider → parked at L1 with the doors
- * closed. Rider order is by id, so two simultaneous riders never flicker.
+ * Map a `LiftFrame` onto the GEDUNG sheet. The probe hands in the LIVE frame
+ * of the running service (`?still=`, a paused rider, …), so what it reports is
+ * exactly what the painter drew — never a second evaluation of the clock.
  */
-export function buildingLift(
-  riders: readonly BuildingLiftRider[],
-  t: number,
-  dwell = 2.6,
-): BuildingLiftState {
-  const sorted = [...riders].filter((r) => r.inLift).sort((a, b) => a.id.localeCompare(b.id))
-  const rider = sorted[0]
-  if (!rider) {
-    return {
-      x: BLD_LIFT.x,
-      y: buildingLiftY(1),
-      w: BLD_LIFT.w,
-      h: BLD_CAR_H,
-      from: null,
-      to: null,
-      progress: 0,
-      moving: false,
-      riderId: null,
-    }
-  }
-  const to = rider.liftTo ?? rider.floor
-  const phase = (((t % dwell) + dwell) % dwell) / dwell
-  const p = smooth(phase)
-  const y = buildingLiftY(rider.floor) + (buildingLiftY(to) - buildingLiftY(rider.floor)) * p
+export function buildingLiftFrom(frame: LiftFrame): BuildingLiftState {
   return {
+    ...frame,
     x: BLD_LIFT.x,
-    y,
+    y: buildingLiftYAt(frame.level),
     w: BLD_LIFT.w,
     h: BLD_CAR_H,
-    from: rider.floor,
-    to,
-    progress: p,
-    moving: to !== rider.floor,
-    riderId: rider.id,
+    riderId: frame.rider,
   }
 }
 
