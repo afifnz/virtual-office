@@ -38,6 +38,7 @@ import {
 } from '../frontend/src/scene2d/labels'
 import {
   COMPACT_MAX_W,
+  PHONE_BOARD_MARGIN,
   PHONE_CTRL_BAND,
   SIDE_AVATAR_H,
   SIDE_BOARD_H,
@@ -56,6 +57,7 @@ import {
   SIDE_W,
   boardsFor,
   sideRows,
+  sideScale,
   sideSeats,
   sideTransform,
   sideWallGate,
@@ -72,6 +74,15 @@ const fail = (msg: string) => {
 }
 const ok = (msg: string) => console.log('ok  ', msg)
 const near = (a: number, b: number, eps = 0.01) => Math.abs(a - b) <= eps
+/** L∞ clearance between two rects: ≤ 0 means they overlap or touch. */
+const rectGap = (
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+) =>
+  Math.max(
+    Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w)),
+    Math.max(a.y - (b.y + b.h), b.y - (a.y + a.h)),
+  )
 const expect = (label: string, got: unknown, want: unknown) => {
   const a = JSON.stringify(got)
   const b = JSON.stringify(want)
@@ -290,9 +301,9 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
  * screen shows design x 110…890 and y 174…518. Three things follow, and each
  * one was a reported defect:
  *
- *   a. boards and nameplates must sit inside 110…890 (≥ 4 CSS px margin), or
- *      they are cut by the screen edge — that was "BAGA…" and the ARSITEKTUR
- *      panel hanging off the right;
+ *   a. boards and nameplates must sit inside 110…890 (boards ≥ 8 CSS px from
+ *      the edge, plates ≥ 4), or they are cut by the screen edge — that was
+ *      "BAGA…" and the clock card's "WIB · L1" hugging the right edge;
  *   b. the zoom control, the pad and the agent chip must not overlap a desk
  *      rect — they live in the empty bands above/below the stage;
  *   c. the phone wall must be the compact set (plaque + status + clock).
@@ -395,6 +406,8 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
   const HEIGHTS = [692, 640, 600, 560, 520, 470]
   let worstClear = Infinity
   let deskHits = 0
+  /** closest the D-pad ever comes to a desk rect (needs ≥ 8 px) */
+  let padDeskGap = Infinity
   for (const h of HEIGHTS) {
     const pad = padAt(h)
     const boxes: Array<[string, typeof pad]> = [
@@ -424,12 +437,21 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
               fail(`${PW}×${h} zoom ${zoom}: the ${name} control covers L${f} ${s.meta.id}'s desk (${JSON.stringify(c)} vs ${JSON.stringify(desk)})`)
             }
           }
+          // the pad must also keep a real gap, not just avoid a pixel overlap
+          const gap = rectGap(pad, desk)
+          padDeskGap = Math.min(padDeskGap, gap)
+          if (gap < 8) {
+            fail(
+              `${PW}×${h} zoom ${zoom}: the pad is ${gap.toFixed(1)} px from L${f} ${s.meta.id}'s desk (need ≥ 8)`,
+            )
+          }
         }
       }
     }
   }
   if (!deskHits) ok(`0 of ${metas.length} desks are covered by the zoom control, the chip or the pad at ${HEIGHTS.join('/')} × zoom 1–2`)
   ok(`closest the stage ever comes to the pad: ${worstClear.toFixed(1)} px (≥ 4)`)
+  ok(`the D-pad keeps ${padDeskGap.toFixed(1)} px from the nearest desk (≥ 8, ${HEIGHTS.length} heights × zoom 1–2)`)
 
   // a desktop window narrowed by the roster rail keeps its 150 px/unit camera
   const narrow = sideTransform(720, 688, { camX: SIDE_W / 2, zoom: 2, floor: 3 })
@@ -450,26 +472,34 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
 
   /**
    * (a) boards + nameplates stay on screen. Swept over the phone widths people
-   * actually hold (390/375/360/320) and over the pan range: at the fit zoom a
-   * plate is clamped into the window, and a plate whose head has left the
-   * window is cropped together with its desk, so only fully visible agents are
-   * asserted.
+   * actually hold (390/375/360/320) plus 760 (the widest compact canvas) and
+   * over the pan range: the cards keep ≥ 8 CSS px from the screen edge (the
+   * reported "WIB · L1" hugging the right edge), and at the fit zoom a plate is
+   * clamped into the window. A plate whose head has left the window is cropped
+   * together with its desk, so only fully visible agents are asserted.
    */
-  const WIDTHS = [390, 375, 360, 320]
+  const WIDTHS = [760, 390, 375, 360, 320]
+  const boardMargin = Math.ceil(PHONE_BOARD_MARGIN / sideScale(PH, 1, band))
   for (const w of WIDTHS) {
     const t = sideTransform(w, PH, { camX: SIDE_W / 2, zoom: 1, floor: 3 }, band)
     const win = visibleDesignRect(w, PH, 1, SIDE_W / 2, band)
-    const wall = boardsFor(true, win)
+    const wall = boardsFor(true, win, boardMargin)
+    let worstEdge = Infinity
     for (const b of wall) {
       const sx = t.left + b.x * t.s
       const sy = t.top + SIDE_BOARD_TOP * t.s
       const sw = b.w * t.s
       const sh = b.h * t.s
-      if (sx < 4 - 1e-6 || sy < 4 - 1e-6 || sx + sw > w - 4 + 1e-6 || sy + sh > PH - 4 + 1e-6) {
-        fail(`${w} px: board ${b.id} leaves the canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)})`)
+      worstEdge = Math.min(worstEdge, sx, sy, w - (sx + sw), PH - (sy + sh))
+      if (sx < 8 - 1e-6 || sy < 8 - 1e-6 || sx + sw > w - 8 + 1e-6 || sy + sh > PH - 8 + 1e-6) {
+        fail(
+          `${w} px: board ${b.id} leaves the ${w}×${PH} canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)}, y ${sy.toFixed(1)}…${(sy + sh).toFixed(1)})`,
+        )
       }
     }
-    ok(`${w} px: 3 boards at x ${wall.map((b) => Math.round(b.x)).join(',')} fit the ${Math.round(win.x0)}…${Math.round(win.x1)} window`)
+    ok(
+      `${w} px: 3 boards at x ${wall.map((b) => Math.round(b.x)).join(',')} keep ${worstEdge.toFixed(1)} px inside the canvas (≥ 8)`,
+    )
 
     for (const camX of [SIDE_W / 2, SIDE_W / 2 - 110, SIDE_W / 2 + 110]) {
       const ct = sideTransform(w, PH, { camX, zoom: 1, floor: 3 }, band)

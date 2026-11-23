@@ -284,28 +284,39 @@ export interface SideBoard {
   h: number
 }
 
+/** Fixed gap between the three phone boards, design px. */
+export const PHONE_BOARD_GAP = 12
+
+/** Clear space the phone boards keep from the canvas edge, CSS px. */
+export const PHONE_BOARD_MARGIN = 8
+
 /**
- * The phone wall, laid out inside the design window the viewport really shows
- * (780 px wide at 390, 720 at 360, 1000 at ≥500): the plaque hugs the left
- * edge, the clock the right one, the status board takes what is between them.
- * Fixed 390 px coordinates clipped the plaque on a 360 px phone.
+ * The phone wall, laid out from the design window the viewport really shows
+ * (780 px wide at 390, 720 at 360, 1000 at ≥500): `margin` design px on both
+ * sides, a fixed gap between the cards, and the status board takes what is
+ * left. The margin is passed in from the painter as `8 CSS px / scale`, so the
+ * cards never hug (or cross) the screen edge — the old fixed x put the clock
+ * 5 CSS px from it, which reads as clipped on a phone screenshot.
  */
-export function phoneBoards(win: DesignWindow): SideBoard[] {
-  const plaque: SideBoard = { id: 'plaque', x: win.x0 + 10, w: 120, h: SIDE_BOARD_H }
-  const clock: SideBoard = { id: 'clock', x: win.x1 - 10 - 116, w: 116, h: SIDE_BOARD_H }
-  const left = plaque.x + plaque.w + 12
-  const right = clock.x - 12
-  return [
-    plaque,
-    { id: 'status', x: left, w: Math.max(180, right - left), h: SIDE_BOARD_H },
-    clock,
-  ]
+export function phoneBoards(win: DesignWindow, margin = 16, gap = PHONE_BOARD_GAP): SideBoard[] {
+  const left = win.x0 + margin
+  const right = Math.max(left, win.x1 - margin)
+  const inner = right - left
+  // the plaque and the clock keep their desktop proportions until the window
+  // is too narrow for them, then they shrink with it
+  const plaqueW = Math.min(120, Math.round(inner * 0.24))
+  const clockW = Math.min(116, Math.round(inner * 0.23))
+  const plaque: SideBoard = { id: 'plaque', x: left, w: plaqueW, h: SIDE_BOARD_H }
+  const clock: SideBoard = { id: 'clock', x: right - clockW, w: clockW, h: SIDE_BOARD_H }
+  const statusX = plaque.x + plaque.w + gap
+  const statusW = Math.max(0, clock.x - gap - statusX)
+  return [plaque, { id: 'status', x: statusX, w: statusW, h: SIDE_BOARD_H }, clock]
 }
 
 /** One switch for the painter, the plate layout and the gates. */
-export function boardsFor(compact: boolean, win?: DesignWindow): SideBoard[] {
+export function boardsFor(compact: boolean, win?: DesignWindow, margin?: number): SideBoard[] {
   if (!compact) return SIDE_BOARDS
-  return phoneBoards(win ?? { x0: 110, y0: 0, x1: 890, y1: SIDE_H })
+  return phoneBoards(win ?? { x0: 110, y0: 0, x1: 890, y1: SIDE_H }, margin)
 }
 
 export interface DesignWindow {

@@ -543,6 +543,9 @@ export function drawBoards(
  * 13 px label lands on 6.5 CSS px at half scale). The pinboard, burndown and
  * architecture diagram are gone — at this scale their text is 3 px tall and the
  * diagram hangs off the right edge of the screen.
+ *
+ * `boards` already carries the 8 CSS px screen margin (see `phoneBoards`), so
+ * the rail spans the cards themselves: nothing in this wall reaches the edge.
  */
 function drawCompactBoards(
   ctx: Ctx,
@@ -554,8 +557,8 @@ function drawCompactBoards(
   const t = THEME_TOKENS[theme]
   const first = boards[0]!
   const last = boards[boards.length - 1]!
-  const railL = first.x - 8
-  const railR = last.x + last.w + 8
+  const railL = first.x
+  const railR = last.x + last.w
 
   ctx.fillStyle = theme === 'day' ? '#B9C5D3' : '#3A4557'
   ctx.fillRect(railL, SIDE_RAIL_TOP, railR - railL, 3)

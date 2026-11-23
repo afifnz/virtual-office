@@ -49,6 +49,7 @@ import {
 } from './labels'
 import {
   COMPACT_MAX_W,
+  PHONE_BOARD_MARGIN,
   SIDE_BOARD_TOP,
   SIDE_BOARDS,
   SIDE_FLOOR_BACK,
@@ -380,9 +381,13 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   const status = THEME_STATUS[theme]
   const dpr = r.dpr
   const compact = r.compact ?? r.viewW < COMPACT_MAX_W
-  // the phone wall lives inside the design window this viewport really shows
+  // the phone wall lives inside the design window this viewport really shows,
+  // with 8 CSS px of clearance from the screen edge (converted to design px at
+  // the fit scale, so it is 16 at 390 px and 24 on a 470 px canvas)
+  const wallScale = sideScale(r.viewH, 1, band)
   const wallWindow = compact ? visibleDesignRect(r.viewW, r.viewH, 1, SIDE_W / 2, band) : undefined
-  const boards = boardsFor(compact, wallWindow)
+  const boardMargin = compact && wallScale > 0 ? Math.ceil(PHONE_BOARD_MARGIN / wallScale) : undefined
+  const boards = boardsFor(compact, wallWindow, boardMargin)
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.fillStyle = pal.page

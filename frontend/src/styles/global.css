@@ -2262,8 +2262,9 @@ body {
      · the screen shows 780 design px of the sheet (110…890), so anything that
        must not be cut by the screen edge has to live inside that window. The
        painter drops the pinboard / burndown / architecture boards (3 px text,
-       right edge clipped) and keeps a compact plaque + status board + clock;
-       nameplates clamp to the window with a 4 CSS px margin;
+       right edge clipped) and keeps a compact plaque + status board + clock,
+       laid out with an 8 CSS px margin on both sides; nameplates clamp to the
+       window with a 4 CSS px margin;
      · the stage sits in the middle of the canvas with ~174 px of empty band
        above and below, which is where the zoom control and the pad belong —
        never on top of a desk.

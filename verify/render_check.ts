@@ -43,9 +43,12 @@ import {
   SIDE_H,
   SIDE_RAIL_TOP,
   SIDE_W,
+  PHONE_BOARD_MARGIN,
   PHONE_CTRL_BAND,
+  boardsFor,
   sideSeats,
   sideScale,
+  sideTransform,
   visibleDesignRect,
 } from '../frontend/src/scene2d/side'
 import { PLATE_DOT, PLATE_DOT_GAP, PLATE_PAD, plateWidth, shortName } from '../frontend/src/scene2d/labels'
@@ -116,12 +119,19 @@ function recordCtx(rec: Recorder): CanvasRenderingContext2D {
     rec.ops.push({ name, box, fill: String(styles.fillStyle), alpha: Number(styles.globalAlpha) })
   }
   const gradient = { addColorStop() {} }
+  /** Width of `s` in the *current* font: a real 2D context measures, we only
+   *  need an honest bound for "does this text leave its card". */
+  const fontPx = (): number => {
+    const m = /(\d+(?:\.\d+)?)px/.exec(String(styles.font))
+    return m ? Number(m[1]) : 8
+  }
+  const textW = (s: string): number => String(s).length * fontPx() * 0.62
   const methods: Record<string, (...a: never[]) => unknown> = {
     fillRect: ((x: number, y: number, w: number, h: number) => push('fillRect', [x, y, x + w, y + h])) as never,
     strokeRect: (() => undefined) as never,
     fillText: ((t: string, x: number, y: number) => {
       rec.texts.push(String(t))
-      push(`fillText:${t}`, [x, y, x + 1, y + 1])
+      push(`fillText:${t}`, [x, y, x + textW(String(t)), y + fontPx()])
     }) as never,
     drawImage: ((_img: unknown, x: number, y: number, w = 0, h = 0) => push('drawImage', [x, y, x + w, y + h])) as never,
     beginPath: (() => {
@@ -157,7 +167,7 @@ function recordCtx(rec: Recorder): CanvasRenderingContext2D {
     scale: (() => undefined) as never,
     rotate: (() => undefined) as never,
     setTransform: (() => undefined) as never,
-    measureText: ((s: string) => ({ width: String(s).length * 6 })) as never,
+    measureText: ((s: string) => ({ width: textW(String(s)) })) as never,
     createLinearGradient: (() => gradient) as never,
     createRadialGradient: (() => gradient) as never,
   }
@@ -547,13 +557,43 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
   const PH = 692
   const win = visibleDesignRect(PW, PH, 1, SIDE_W / 2, PHONE_CTRL_BAND)
   const margin = Math.ceil(4 / sideScale(PH, 1, PHONE_CTRL_BAND))
+  // the wall is laid out from the real viewport: 8 CSS px in from each edge
+  const boardMargin = Math.ceil(PHONE_BOARD_MARGIN / sideScale(PH, 1, PHONE_CTRL_BAND))
+  const wall = boardsFor(true, win, boardMargin)
+  const tPhone = sideTransform(PW, PH, { camX: SIDE_W / 2, zoom: 1, floor: 3 }, PHONE_CTRL_BAND)
   /** Board cards are 148 px tall fills; the label text is char-split by tracking. */
   const cardXs = (c: FakeCanvas): number[] =>
     c.rec.ops
       .filter((o) => o.name === 'fill' && Math.round(o.box[3] - o.box[1]) === SIDE_BOARD_H && o.box[2] - o.box[0] > 80)
       .map((o) => Math.round(o.box[0]))
+  /**
+   * (c) no board label leaves its card — and therefore none leaves the canvas.
+   * Every text op in the board band (y 132…280) must fit inside one of the
+   * three cards; the clock's "WIB" and "L3" are in here, and the 5 px edge
+   * margin is exactly what put them against the screen edge.
+   */
+  const checkBoardText = (ops: Op[], where: string): number => {
+    let n = 0
+    for (const o of ops) {
+      if (!o.name.startsWith('fillText:')) continue
+      if (o.box[1] < SIDE_BOARD_TOP - 1 || o.box[1] > SIDE_BOARD_TOP + SIDE_BOARD_H - 4) continue
+      n++
+      const text = o.name.slice('fillText:'.length)
+      const card = wall.find((b) => o.box[0] >= b.x - 0.5 && o.box[2] <= b.x + b.w + 0.5)
+      if (!card) {
+        fail(`${where}: board text "${text}" spans x ${o.box[0].toFixed(0)}…${o.box[2].toFixed(0)}, outside the cards`)
+      }
+      const sx = tPhone.left + o.box[0] * tPhone.s
+      const sw = (o.box[2] - o.box[0]) * tPhone.s
+      if (sx < 8 - 1e-6 || sx + sw > PW - 8 + 1e-6) {
+        fail(`${where}: board text "${text}" leaves the canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)} of ${PW})`)
+      }
+    }
+    return n
+  }
   let phoneFrames = 0
   let platesSeen = 0
+  let boardTexts = 0
   for (const theme of THEMES) {
     for (const floor of FLOOR_IDS) {
       clearStaticCache()
@@ -579,6 +619,7 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
       const count = texts.find((t) => /^\d+\/\d+$/.test(t))
       const want = `${[0, 1, 4, 8][floor]}/${[0, 1, 4, 8][floor]}`
       if (count !== want) fail(`L${floor}/${theme} phone: board count ${count}, want ${want}`)
+      boardTexts += checkBoardText(rec.ops, `L${floor}/${theme} phone frame`)
 
       // every seated agent still gets a plate, and the whole plate — not just
       // the text origin — stays inside the window the viewport shows
@@ -603,13 +644,24 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
     }
   }
   if (phoneFrames) ok(`${phoneFrames} phone frames (${FLOOR_IDS.length} floors × ${THEMES.length} themes at ${PW}×${PH}) paint ${platesSeen} plates inside ${win.x0}…${win.x1}`)
+  if (boardTexts) ok(`${boardTexts} board labels (status count, legend, clock) sit inside their card at ${PW}×${PH}`)
 
   // the two cached stages: three boards for the phone, six for the desktop
   const phoneSheets = created.map(cardXs).filter((xs) => xs.length === 3)
   if (!phoneSheets.length) fail(`no cached phone stage hangs 3 boards (saw ${created.map((c) => cardXs(c).length).join(',')})`)
-  else if (JSON.stringify(phoneSheets[0]) !== JSON.stringify([120, 252, 764])) {
-    fail(`phone stage boards at x ${phoneSheets[0].join(',')}, want 120,252,764`)
-  } else ok(`phone stage hangs 3 boards at x ${phoneSheets[0].join(',')} (pinboard/burndown/architecture dropped)`)
+  else if (JSON.stringify(phoneSheets[0]) !== JSON.stringify([126, 258, 758])) {
+    fail(`phone stage boards at x ${phoneSheets[0].join(',')}, want 126,258,758`)
+  } else {
+    ok(`phone stage hangs 3 boards at x ${phoneSheets[0].join(',')} — 8 CSS px in from each edge (pinboard/burndown/architecture dropped)`)
+    // the cached shell's own labels (team, ZONA, PAPAN STATUS, online, WIB, L3)
+    const sheet = created.find((c) => cardXs(c).length === 3)
+    if (!sheet) fail('phone stage shell is missing')
+    else {
+      const n = checkBoardText(sheet.rec.ops, 'phone stage shell')
+      if (n < 6) fail(`phone stage shell paints only ${n} board labels`)
+      else ok(`phone stage shell: ${n} board labels inside the cards, none outside the canvas`)
+    }
+  }
   const wideSheets = created.map(cardXs).filter((xs) => xs.length === 6)
   if (!wideSheets.length) fail('the wide stage is gone — desktop would lose its six boards')
   else if (JSON.stringify(wideSheets[0]) !== JSON.stringify([4, 124, 338, 532, 696, 900])) {
