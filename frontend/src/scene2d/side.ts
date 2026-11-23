@@ -59,10 +59,11 @@ export const SIDE_STAGGER = 100
 export const SIDE_ROOM_UNITS = SIDE_ROOM_H / SIDE_PPU
 
 /**
- * Below this CSS width the stage is compacted: the phone cannot show the whole
- * 1000 px sheet (it draws at half scale, 500 CSS px wide), so a board that sits
- * outside the 390 px window is clipped at the screen edge and its 6–9 px labels
- * land on 3–4 CSS px. `verify/visual_check.ts` replays the window arithmetic.
+ * Below this CSS width the stage is compacted: the phone fits the whole
+ * 1000 px sheet into the canvas (390 CSS px wide at 390), so a board that sits
+ * near the sheet edge is only 4–8 CSS px from the screen edge and its 6–9 px
+ * labels land on 2–4 CSS px. `verify/visual_check.ts` replays the window
+ * arithmetic.
  */
 export const COMPACT_MAX_W = 640
 
@@ -96,17 +97,47 @@ export interface SideTransform {
  */
 export const PHONE_CTRL_BAND = 120
 
+/** zoom 2 = the 150 px/unit reference camera, zoom 1 = half scale (desktop). */
+export const MIN_ZOOM = 1
+export const MAX_ZOOM = 2
+/** Lowest zoom a phone fit may land on (a short canvas, landscape). */
+export const MIN_FIT_ZOOM = 0.25
+
 /**
- * Fit the 688 px stage vertically; zoom 2 is the design camera.
+ * Fit the whole sheet into the canvas, controls included: CSS px per design px.
  *
- * With `band` the scale is also capped to what fits above the reserved bottom
- * band. At 390×692 the fit (0.5) is already smaller, so the overview is
- * unchanged; at zoom 2 the cap is what keeps the pad off the front-row desks.
+ * A 390×692 phone canvas fits 390/1000 = 0.39, so the entire floor — every
+ * desk, every nameplate — is on screen and an avatar is 58.5 CSS px tall, the
+ * 55–60 px of the R&D phone mockup. Vertical fit is measured above the
+ * reserved control band, never through it.
  */
-export function sideScale(canvasH: number, zoom: number, band = 0): number {
-  const fit = Math.min(1, canvasH / SIDE_H)
-  const s = fit * (zoom / 2)
-  return band > 0 ? Math.min(s, Math.max(0, (canvasH - band) / SIDE_H)) : s
+export function fitScale(canvasW: number, canvasH: number, band = 0): number {
+  if (canvasW <= 0 || canvasH <= 0) return 0
+  const usableH = Math.max(0, canvasH - band)
+  return Math.max(0, Math.min(1, canvasW / SIDE_W, usableH / SIDE_H))
+}
+
+/** The zoom (2 = the 150 px/unit camera) at which the whole sheet fits. */
+export function fitZoomFor(canvasW: number, canvasH: number, band = 0): number {
+  const s = fitScale(canvasW, canvasH, band)
+  if (!(s > 0)) return MIN_ZOOM
+  return Math.min(MAX_ZOOM, Math.max(MIN_FIT_ZOOM, Math.round(2 * s * 100) / 100))
+}
+
+/**
+ * CSS px per design px.
+ *
+ * Desktop fits the height and multiplies from there (zoom 2 = 150 px/unit).
+ * The phone is different: `zoom` is absolute (2 = the same reference camera)
+ * and the floor never goes below the fit, so the default view shows the whole
+ * floor and zooming in is what makes panning necessary. The stage is also
+ * capped so it never runs under the reserved control band.
+ */
+export function sideScale(canvasW: number, canvasH: number, zoom: number, band = 0): number {
+  if (canvasW <= 0 || canvasH <= 0) return 0
+  const usableH = Math.max(0, canvasH - band)
+  if (band > 0) return Math.min(zoom / 2, usableH / SIDE_H)
+  return Math.min(1, canvasH / SIDE_H) * (zoom / 2)
 }
 
 export function sideTransform(
@@ -115,7 +146,7 @@ export function sideTransform(
   vp: SideViewport,
   band = 0,
 ): SideTransform {
-  const s = sideScale(canvasH, vp.zoom, band)
+  const s = sideScale(canvasW, canvasH, vp.zoom, band)
   const stageH = SIDE_H * s
   // centred, but never past the control band: on a short phone the stage is
   // pushed up (cropping the roof) rather than sliding under the pad
@@ -138,7 +169,7 @@ export function screenToDesign(t: SideTransform, x: number, y: number): { x: num
 
 /** Clamp the horizontal pan so the stage never drifts off screen. */
 export function clampSideCam(camX: number, canvasW: number, canvasH: number, zoom: number, band = 0): number {
-  const s = sideScale(canvasH, zoom, band)
+  const s = sideScale(canvasW, canvasH, zoom, band)
   const stage = SIDE_W * s
   if (stage <= canvasW) return SIDE_W / 2
   const half = (stage - canvasW) / (2 * s)
@@ -328,9 +359,9 @@ export interface DesignWindow {
 
 /**
  * The part of the design sheet the viewport shows when the camera sits at
- * `camX`. On a phone the sheet is drawn at half scale, so a 390 px screen shows
- * only 780 design px (110…890): boards, nameplates and anything else that must
- * not be clipped has to live inside this window.
+ * `camX`. At the phone's fit zoom the sheet is drawn at 0.39 (390 px wide
+ * screen, 1000 design px), so the window is the whole stage; the same helper
+ * describes the smaller window once the user zooms in.
  */
 export function visibleDesignRect(
   viewW: number,

@@ -1,11 +1,12 @@
 /**
  * The 2D office canvas — side view (elevation) with pan + zoom.
  *
- * One floor at a time, camera fixed at 150 px/unit at zoom 2 (1000×688 stage),
- * zoom 1 is half scale for phones. Horizontal pan only; vertical is locked
- * because there are exactly two rows. The static stage is cached per
- * (floor × theme); the dynamic pass draws desks, vector avatars, the live
- * board, clock and lift car.
+ * One floor at a time. Desktop: camera at 150 px/unit at zoom 2 (1000×688
+ * stage), zoom 1 is half scale. Phone: the default camera *fits the whole
+ * floor* (0.39 at 390×692 — every desk and nameplate visible, avatar ≈58 CSS
+ * px, like the R&D mockup); zooming in from there is what makes panning
+ * necessary. The static stage is cached per (floor × theme); the dynamic pass
+ * draws desks, vector avatars, the live board, clock and lift car.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusPayload, Agent, Comm } from '../lib/types'
@@ -42,28 +43,38 @@ export interface OfficeProps {
   onNear: (id: string | null) => void
   onMove: () => void
   onPick: (id: string) => void
+  /** true while the stage is wider than the canvas, i.e. panning does something */
+  onPan?: (canPan: boolean) => void
   theme: ThemeName
   dpr?: [number, number]
 }
 
 const PAN_SPEED = 380 // design px per second while a key/pad is held
+/** Phone zoom step: the fit is 0.78, so a whole step would jump past the floor. */
+const PHONE_ZOOM_STEP = 0.25
 
 function initialVp(command: RigCommand): SideViewport {
   const floor = command.floor ?? 1
-  return { camX: SIDE_W / 2, zoom: fitZoom(floor, 1000, 688), floor }
+  return { camX: SIDE_W / 2, zoom: 1, floor }
 }
 
 function zoomPercent(zoom: number): string {
-  return `${zoom * 100}%`
+  return `${Math.round(zoom * 100)}%`
 }
 
-export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, theme }: OfficeProps) {
+export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, onPan, theme }: OfficeProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const vpRef = useRef<SideViewport>(initialVp(command))
-  const [zoomLabel, setZoomLabel] = useState(vpRef.current.zoom)
+  // null until the first resize knows the canvas: the label then shows the fit
+  // (78 % on a phone), never a provisional 100 %
+  const [zoomLabel, setZoomLabel] = useState<number | null>(null)
   const fitPending = useRef(SPOT_VIEW[vpRef.current.floor][command.spot]?.fit !== false)
+  const lastFitRef = useRef(0)
+  const panRef = useRef(false)
+  const onPanRef = useRef(onPan)
+  onPanRef.current = onPan
   const viewRef = useRef({ w: 0, h: 0, dpr: 1 })
   const tRef = useRef(0)
   const readyRef = useRef(false)
@@ -131,7 +142,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
       fitPending.current = true
       const { w, h } = viewRef.current
       if (w > 0 && h > 0) {
-        vpRef.current = { camX: SIDE_W / 2, zoom: fitZoom(floor, w, h), floor }
+        vpRef.current = { camX: SIDE_W / 2, zoom: fitZoom(floor, w, h, bandRef.current), floor }
         fitPending.current = false
       }
     }
@@ -139,8 +150,13 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
   }, [command])
 
   const zoomBy = useCallback((delta: number) => {
-    const zoom = clampZoom(vpRef.current.zoom + delta)
-    vpRef.current = { ...vpRef.current, zoom, camX: clampSideCam(vpRef.current.camX, viewRef.current.w, viewRef.current.h, zoom, bandRef.current) }
+    const { w, h } = viewRef.current
+    const band = bandRef.current
+    // the phone's floor is the fit: you can zoom in, never out past the floor
+    const min = band > 0 ? fitZoom(vpRef.current.floor, w, h, band) : undefined
+    const step = band > 0 ? PHONE_ZOOM_STEP : 1
+    const zoom = clampZoom(vpRef.current.zoom + delta * step, min)
+    vpRef.current = { ...vpRef.current, zoom, camX: clampSideCam(vpRef.current.camX, w, h, zoom, band) }
     setZoomLabel(zoom)
   }, [])
 
@@ -157,12 +173,16 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
     canvas.width = Math.max(1, Math.round(w * dpr))
     canvas.height = Math.max(1, Math.round(h * dpr))
     viewRef.current = { w, h, dpr }
-    if (fitPending.current) {
-      const zoom = fitZoom(vpRef.current.floor, w, h)
-      vpRef.current = { camX: SIDE_W / 2, zoom, floor: vpRef.current.floor }
+    const fit = fitZoom(vpRef.current.floor, w, h, bandRef.current)
+    // re-fit on the first layout, on a floor change, and whenever the view is
+    // still at the fit (rotation, address-bar resize) — never over a zoom the
+    // user chose
+    if (fitPending.current || Math.abs(vpRef.current.zoom - lastFitRef.current) < 1e-6) {
+      vpRef.current = { camX: SIDE_W / 2, zoom: fit, floor: vpRef.current.floor }
       fitPending.current = false
-      setZoomLabel(zoom)
+      setZoomLabel(fit)
     }
+    lastFitRef.current = fit
     vpRef.current = { ...vpRef.current, camX: clampSideCam(vpRef.current.camX, w, h, vpRef.current.zoom, bandRef.current) }
   }, [])
 
@@ -236,6 +256,13 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         const placed = placeAgents(f.metas, f.byId, f.now, f.comms, tRef.current)
         const targets = pickTargets(placed).filter((p) => p.floor === vpRef.current.floor)
         const tr = sideTransform(w, h, vpRef.current, bandRef.current)
+        // the D-pad only earns its place once there is something to pan to:
+        // at the fit zoom the whole floor is on screen and the pad is hidden
+        const canPan = SIDE_W * tr.s > w + 0.5
+        if (canPan !== panRef.current) {
+          panRef.current = canPan
+          onPanRef.current?.(canPan)
+        }
         const centre = screenToDesign(tr, w / 2, h / 2)
         let near: string | null = null
         let best = Infinity
@@ -339,11 +366,14 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         const [a, b] = [...pointersRef.current.values()]
         const d = Math.hypot(a!.x - b!.x, a!.y - b!.y)
         if (pinchRef.current.d > 0 && d > 0) {
-          const zoom = clampZoom(vpRef.current.zoom * (d / pinchRef.current.d))
+          const band = bandRef.current
+          const { w, h } = viewRef.current
+          const min = band > 0 ? fitZoom(vpRef.current.floor, w, h, band) : undefined
+          const zoom = clampZoom(vpRef.current.zoom * (d / pinchRef.current.d), min)
           vpRef.current = {
             ...vpRef.current,
             zoom,
-            camX: clampSideCam(vpRef.current.camX, viewRef.current.w, viewRef.current.h, zoom, bandRef.current),
+            camX: clampSideCam(vpRef.current.camX, w, h, zoom, band),
           }
           setZoomLabel(zoom)
           onMove()
@@ -428,7 +458,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         <button type="button" onClick={() => zoomBy(-1)} aria-label="Perkecil">
           −
         </button>
-        <span aria-hidden="true">{zoomPercent(zoomLabel)}</span>
+        <span aria-hidden="true">{zoomLabel === null ? '' : zoomPercent(zoomLabel)}</span>
         <button type="button" onClick={() => zoomBy(1)} aria-label="Perbesar">
           +
         </button>

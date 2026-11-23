@@ -17,7 +17,7 @@ import { clampCam, clampZoom, fitZoom, nearestAt } from '../frontend/src/scene2d
 import { glyphFor, textWidth } from '../frontend/src/scene2d/pixelfont'
 import { TEAM, THEME_STATUS, THEME_TOKENS } from '../frontend/src/scene2d/palette'
 import { avatarKey } from '../frontend/src/scene2d/avatar'
-import { sideRows, sideTransform, designToScreen, screenToDesign } from '../frontend/src/scene2d/side'
+import { sideRows, sideTransform, designToScreen, screenToDesign, PHONE_CTRL_BAND, sideScale } from '../frontend/src/scene2d/side'
 import { rosterAgents } from '../frontend/src/lib/roster'
 
 let fails = 0
@@ -208,8 +208,23 @@ if (clampOk) ok('zoom clamps to the integer range 1..2 (the camera is a fixed se
 
 // ------------------------------------------------------------- 6b. default zoom
 if (fitZoom(3, 1000, 688) !== 2) fail(`fitZoom(1000×688) = ${fitZoom(3, 1000, 688)}, want 2`)
-else if (fitZoom(3, 390, 692) !== 1) fail(`fitZoom(390×692) = ${fitZoom(3, 390, 692)}, want 1`)
-else ok('default zoom: 1000×688 desktop → 2, 390×692 mobile → 1')
+else if (fitZoom(3, 720, 688) !== 2) fail(`fitZoom(720×688, no band) = ${fitZoom(3, 720, 688)}, want 2`)
+else if (fitZoom(3, 390, 692) !== 1) fail(`fitZoom(390×692, no band) = ${fitZoom(3, 390, 692)}, want 1`)
+else ok('default zoom (non-phone): 1000×688 desktop → 2, a narrow window without the phone band → 1')
+
+// the phone default is the WHOLE FLOOR: 0.39 CSS px per design px at 390×692,
+// i.e. zoom 0.78, an avatar 58.5 CSS px (the R&D mockup's 55–60)
+const phoneFit = fitZoom(3, 390, 692, PHONE_CTRL_BAND)
+if (!near(phoneFit, 0.78)) fail(`phone fitZoom(390×692, band) = ${phoneFit}, want 0.78`)
+else if (!near(sideScale(390, 692, phoneFit, PHONE_CTRL_BAND), 0.39, 0.001)) {
+  fail(`phone fit scale = ${sideScale(390, 692, phoneFit, PHONE_CTRL_BAND)}, want 0.39`)
+} else ok(`phone default zoom: 390×692 with the control band → ${phoneFit} (fit-to-floor, avatar ${150 * 0.39} px)`)
+
+// a phone zoom is fractional: the fit is the floor, zoom 2 the reference camera
+if (clampZoom(0.5, 0.78) !== 0.78) fail(`phone clampZoom(0.5) = ${clampZoom(0.5, 0.78)}, want 0.78 (the fit)`)
+else if (!near(clampZoom(1.337, 0.78), 1.34)) fail(`phone clampZoom(1.337) = ${clampZoom(1.337, 0.78)}, want 1.34`)
+else if (clampZoom(9, 0.78) !== 2) fail(`phone clampZoom(9) = ${clampZoom(9, 0.78)}, want 2`)
+else ok('phone zoom clamps between the fit (0.78) and 2, keeping fractions')
 
 // ---------------------------------------------------------------- 7. hit test
 const pts = [
@@ -229,6 +244,18 @@ const lo = clampCam(-999, 390, 692, 1)
 const hi = clampCam(999, 390, 692, 1)
 if (!near(lo, 390) || !near(hi, 610)) fail(`clampCam at zoom 1 / 390 wide = ${lo}..${hi}, want 390..610`)
 else ok(`pan clamp at 390 px / zoom 1: camX ${lo}..${hi} (stage 500 px, never leaves the view)`)
+
+// the phone fit is exactly as wide as the canvas: no pan until the user zooms
+const fitCam = clampCam(999, 390, 692, phoneFit, PHONE_CTRL_BAND)
+if (!near(fitCam, 500)) fail(`phone clampCam at the fit = ${fitCam}, want 500 (nothing to pan)`)
+else ok('pan is locked at the phone fit (stage 390 px = canvas 390 px)')
+const z2lo = clampCam(0, 390, 692, 2, PHONE_CTRL_BAND)
+const z2hi = clampCam(999, 390, 692, 2, PHONE_CTRL_BAND)
+if (!(z2lo < 500 && z2hi > 500)) {
+  fail(`phone pan at zoom 2 is clamped to ${z2lo}..${z2hi} — wants room either side of the centre`)
+} else {
+  ok(`phone pan at zoom 2: camX ${z2lo}..${z2hi} (stage ${(1000 * sideScale(390, 692, 2, PHONE_CTRL_BAND)).toFixed(0)} px wide, pan both ways)`)
+}
 
 // --------------------------------------------------------------- 9. pixel font
 if (textWidth('TEST') !== (4 * 6 - 1)) fail(`textWidth(TEST) = ${textWidth('TEST')}, want 23`)

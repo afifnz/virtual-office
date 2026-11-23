@@ -2256,21 +2256,26 @@ body {
 /* ==========================================================================
    M4 — PHONE CANVAS (≤760 px)
 
-   The stage is 1000×688 design px and a 390×692 phone canvas draws it at half
-   scale, i.e. 500×344 CSS px. Two consequences drive everything below:
+   The stage is 1000×688 design px and a 390×692 phone canvas FITS ALL OF IT:
+   0.39 CSS px per design px, i.e. 390×268 CSS px (an avatar is 58.5 px — the
+   R&D mockup). The default zoom is therefore 0.78 (2 = the 150 px/unit
+   camera), every desk and nameplate on the floor is visible, and panning only
+   becomes possible once the user zooms in. Three consequences drive everything
+   below:
 
-     · the screen shows 780 design px of the sheet (110…890), so anything that
-       must not be cut by the screen edge has to live inside that window. The
-       painter drops the pinboard / burndown / architecture boards (3 px text,
-       right edge clipped) and keeps a compact plaque + status board + clock,
-       laid out with an 8 CSS px margin on both sides; nameplates clamp to the
-       window with a 4 CSS px margin;
-     · the stage sits in the middle of the canvas with ~174 px of empty band
-       above and below, which is where the zoom control and the pad belong —
-       never on top of a desk.
+     · the whole sheet is on screen at the fit, so nothing can be cut by the
+       screen edge. The painter still keeps the compact wall (plaque + status
+       board + clock) — six cards would render 8 px labels at 3 px — with an
+       8 CSS px margin, and clamps nameplates to a 4 CSS px margin;
+     · the stage is 268 px tall in the middle of a 692 px canvas: ~212 px of
+       empty band above and below, which is where the zoom control and the pad
+       belong — never on top of a desk;
+     · the D-pad is rendered only while the stage is wider than the canvas
+       (`App` hides it at the fit), so it cannot cover the front row.
 
-   `verify/visual_check.ts` §11 parses the `--m-*` values below and asserts both
-   properties at 390×692. Change the numbers, keep the gate honest.
+   `verify/visual_check.ts` §11 and `verify/render_check.ts` §6 parse the
+   `--m-*` values below and assert all of it at 390×692. Change the numbers,
+   keep the gate honest.
    ========================================================================== */
 
 @media (max-width: 760px) {

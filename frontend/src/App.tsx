@@ -65,6 +65,9 @@ export default function App() {
   const [nearId, setNearId] = useState<string | null>(null)
   const [pickedId, setPickedId] = useState<string | null>(null)
   const [chipVisible, setChipVisible] = useState(true)
+  // the phone shows the whole floor by default, so there is nothing to pan to
+  // until the user zooms in — the pad appears only then (never over a desk)
+  const [canPan, setCanPan] = useState(false)
   const moveIntent = useRef<MoveIntent>({ x: 0, z: 0 })
 
   // theme: stored override → ?theme= → the office clock (never the device clock)
@@ -180,6 +183,7 @@ export default function App() {
           onNear={setNearId}
           onMove={onMove}
           onPick={onPick}
+          onPan={setCanPan}
           theme={theme.mode}
           dpr={mobile ? [1, 1.5] : [1, 1.8]}
         />
@@ -247,10 +251,12 @@ export default function App() {
       ) : null}
 
       {/* the sheet and the taskboard are modal: the pad and bar step aside so
-          nothing ever sits on top of the movement controls */}
+          nothing ever sits on top of the movement controls. The pad itself is
+          only there while panning can do something (the phone default fits the
+          whole floor). */}
       {mobile && !feedOpen && !taskOpen && !kpiOpen ? (
         <>
-          <DPad intent={moveIntent} />
+          {canPan ? <DPad intent={moveIntent} /> : null}
           <nav className="mobile-bar" aria-label="Panel">
             <button
               type="button"

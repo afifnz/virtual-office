@@ -46,12 +46,13 @@ import {
   PHONE_BOARD_MARGIN,
   PHONE_CTRL_BAND,
   boardsFor,
+  fitScale,
   sideSeats,
-  sideScale,
   sideTransform,
   visibleDesignRect,
 } from '../frontend/src/scene2d/side'
-import { PLATE_DOT, PLATE_DOT_GAP, PLATE_PAD, plateWidth, shortName } from '../frontend/src/scene2d/labels'
+import { fitZoom } from '../frontend/src/scene2d/viewport'
+import { PLATE_DOT, PLATE_DOT_GAP, PLATE_H, PLATE_PAD, plateWidth, shortName } from '../frontend/src/scene2d/labels'
 import { sunMoonBox } from '../frontend/src/scene2d/city'
 import { liftCarLabel, liftHeaderLabel, liftHeaderTeam } from '../frontend/src/scene2d/props-side'
 import type { AgentMeta } from '../frontend/src/lib/agents'
@@ -163,8 +164,10 @@ function recordCtx(rec: Recorder): CanvasRenderingContext2D {
     clip: (() => undefined) as never,
     save: (() => undefined) as never,
     restore: (() => undefined) as never,
-    translate: (() => undefined) as never,
-    scale: (() => undefined) as never,
+    // the camera transform is recorded, not applied: the gate can then prove
+    // the painter put the dynamic pass under it (see §6)
+    translate: ((x: number, y: number) => push('translate', [x, y, 0, 0])) as never,
+    scale: ((x: number, y: number) => push('scale', [x, y, 0, 0])) as never,
     rotate: (() => undefined) as never,
     setTransform: (() => undefined) as never,
     measureText: ((s: string) => ({ width: textW(String(s)) })) as never,
@@ -546,21 +549,29 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
 
 /**
  * A 390×692 canvas is the phone: 390×844 minus the 96 px HUD and the 56 px bar.
- * It draws the sheet at half scale, so only design x 110…890 reaches the glass.
- * The frame must therefore (a) hang the compact wall — the pinboard, burndown
- * and architecture panels are 3 px text and the diagram ends past the right
- * edge — and (b) keep every nameplate inside that window. Both were reported
- * from a real screenshot ("BAGA…" cut in half, ARSITEKTUR hanging off).
+ * The default camera FITS THE WHOLE FLOOR: the 1000×688 sheet is scaled to
+ * 390 px (0.39, avatar 58.5 CSS px) and the dynamic pass is drawn under the
+ * same camera, so all eight L3 desks, their plates and the three boards are on
+ * screen at once. Three regressions this gates:
+ *
+ *   a. the painter drawing desks/plates at 1:1 design px (390 px of design =
+ *      only 2.6 floor units — the "BAGA…" screenshot) instead of under the
+ *      camera transform;
+ *   b. a plate touching the canvas edge;
+ *   c. a board hanging off the sheet.
  */
 {
   const PW = 390
   const PH = 692
-  const win = visibleDesignRect(PW, PH, 1, SIDE_W / 2, PHONE_CTRL_BAND)
-  const margin = Math.ceil(4 / sideScale(PH, 1, PHONE_CTRL_BAND))
+  const band = PHONE_CTRL_BAND
+  const fit = fitScale(PW, PH, band)
+  const fitZ = fitZoom(3, PW, PH, band)
+  const win = visibleDesignRect(PW, PH, fitZ, SIDE_W / 2, band)
+  const margin = Math.ceil(4 / fit)
   // the wall is laid out from the real viewport: 8 CSS px in from each edge
-  const boardMargin = Math.ceil(PHONE_BOARD_MARGIN / sideScale(PH, 1, PHONE_CTRL_BAND))
+  const boardMargin = Math.ceil(PHONE_BOARD_MARGIN / fit)
   const wall = boardsFor(true, win, boardMargin)
-  const tPhone = sideTransform(PW, PH, { camX: SIDE_W / 2, zoom: 1, floor: 3 }, PHONE_CTRL_BAND)
+  const tPhone = sideTransform(PW, PH, { camX: SIDE_W / 2, zoom: fitZ, floor: 3 }, band)
   /** Board cards are 148 px tall fills; the label text is char-split by tracking. */
   const cardXs = (c: FakeCanvas): number[] =>
     c.rec.ops
@@ -594,6 +605,8 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
   let phoneFrames = 0
   let platesSeen = 0
   let boardTexts = 0
+  let desksSeen = 0
+  let cameraFrames = 0
   for (const theme of THEMES) {
     for (const floor of FLOOR_IDS) {
       clearStaticCache()
@@ -604,10 +617,10 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
         byId: new Map(fullRoster().map((a) => [a.id, a])),
         now: NOW,
         comms: [],
-        vp: { camX: SIDE_W / 2, zoom: 1, floor },
+        vp: { camX: SIDE_W / 2, zoom: fitZ, floor },
         viewW: PW,
         viewH: PH,
-        band: PHONE_CTRL_BAND,
+        band,
         dpr: 1,
         still: true,
         t: 0,
@@ -621,9 +634,49 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
       if (count !== want) fail(`L${floor}/${theme} phone: board count ${count}, want ${want}`)
       boardTexts += checkBoardText(rec.ops, `L${floor}/${theme} phone frame`)
 
-      // every seated agent still gets a plate, and the whole plate — not just
-      // the text origin — stays inside the window the viewport shows
+      /**
+       * (a) the camera really is applied to the dynamic pass: a
+       * translate(t.left, t.top) + scale(t.s, t.s) pair must follow the stage
+       * bitmap, and the desks must be painted inside it.
+       */
+      const stageIdx = rec.ops.findIndex((o) => o.name === 'drawImage' && Math.abs(o.box[2] - SIDE_W * tPhone.s) < 1)
+      const camIdx = rec.ops.findIndex(
+        (o, i) => i > stageIdx && o.name === 'translate' && Math.abs(o.box[0] - tPhone.left) < 0.5 && Math.abs(o.box[1] - tPhone.top) < 0.5,
+      )
+      const scaleIdx = rec.ops.findIndex((o, i) => i > camIdx && o.name === 'scale' && Math.abs(o.box[0] - tPhone.s) < 1e-6)
+      if (stageIdx < 0) fail(`L${floor}/${theme} phone: the stage bitmap is not drawn at ${SIDE_W * tPhone.s} px wide`)
+      else if (camIdx < 0) fail(`L${floor}/${theme} phone: the painter never translates the dynamic pass to the camera (desks at 1:1 design px)`)
+      else if (scaleIdx < 0) fail(`L${floor}/${theme} phone: the painter never scales the dynamic pass by ${tPhone.s}`)
+      else cameraFrames++
+
+      // (a) every desk of this floor is painted inside the canvas
       const seats = sideSeats(metasOf().filter((m) => m.desk.floor === floor))
+      for (const s of seats) {
+        const dx = s.cx - 64 * s.scale
+        const dy = s.floorY - 58 * s.scale
+        const dw = 128 * s.scale
+        const found = rec.ops.some(
+          (o) =>
+            o.name === 'fill' &&
+            Math.abs(o.box[0] - dx) < 0.6 &&
+            Math.abs(o.box[1] - dy) < 0.6 &&
+            Math.abs(o.box[2] - (dx + dw)) < 0.6,
+        )
+        if (!found) {
+          fail(`L${floor}/${theme} phone: ${s.meta.id}'s desk slab is not painted`)
+          continue
+        }
+        const sx = tPhone.left + dx * tPhone.s
+        const sy = tPhone.top + dy * tPhone.s
+        const sw = dw * tPhone.s
+        const sh = 6 * s.scale * tPhone.s
+        if (sx < 0 || sy < 0 || sx + sw > PW || sy + sh > PH) {
+          fail(`L${floor}/${theme} phone: ${s.meta.id}'s desk is cut by the canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)}, y ${sy.toFixed(1)}…${(sy + sh).toFixed(1)})`)
+        } else desksSeen++
+      }
+
+      // every seated agent still gets a plate, and the whole plate — not just
+      // the text origin — stays inside the canvas with 4 CSS px of clearance
       for (const s of seats) {
         const name = shortName(s.meta.name)
         const op = rec.ops.find((o) => o.name === `fillText:${name}`)
@@ -632,25 +685,31 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
           continue
         }
         platesSeen++
-        // the text sits PLATE_PAD + dot + gap inside the plate
+        // the text sits PLATE_PAD + dot + gap inside the plate, mid-height
         const plateX = op.box[0] - PLATE_PAD - PLATE_DOT - PLATE_DOT_GAP
+        const plateY = op.box[1] - PLATE_H / 2 - 0.5
         const plateW = plateWidth(name, true)
-        if (plateX < win.x0 + margin - 0.5 || plateX + plateW > win.x1 - margin + 0.5) {
+        const sx = tPhone.left + plateX * tPhone.s
+        const sy = tPhone.top + plateY * tPhone.s
+        const sw = plateW * tPhone.s
+        const sh = PLATE_H * tPhone.s
+        if (sx < 4 - 1e-6 || sy < 4 - 1e-6 || sx + sw > PW - 4 + 1e-6 || sy + sh > PH - 4 + 1e-6) {
           fail(
-            `L${floor}/${theme} phone: plate ${name} spans x ${plateX.toFixed(0)}…${(plateX + plateW).toFixed(0)}, outside ${win.x0 + margin}…${win.x1 - margin}`,
+            `L${floor}/${theme} phone: plate ${name} spans x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)} of ${PW}, y ${sy.toFixed(1)}…${(sy + sh).toFixed(1)} of ${PH} (need 4 px)`,
           )
         }
       }
     }
   }
-  if (phoneFrames) ok(`${phoneFrames} phone frames (${FLOOR_IDS.length} floors × ${THEMES.length} themes at ${PW}×${PH}) paint ${platesSeen} plates inside ${win.x0}…${win.x1}`)
+  if (phoneFrames) ok(`${phoneFrames} phone frames (${FLOOR_IDS.length} floors × ${THEMES.length} themes at ${PW}×${PH}, fit zoom ${fitZ}) paint ${platesSeen} plates and ${desksSeen} desks inside the canvas`)
+  if (cameraFrames === phoneFrames) ok(`all ${phoneFrames} phone frames apply the camera to the dynamic pass (translate ${tPhone.left},${tPhone.top} + scale ${tPhone.s})`)
   if (boardTexts) ok(`${boardTexts} board labels (status count, legend, clock) sit inside their card at ${PW}×${PH}`)
 
   // the two cached stages: three boards for the phone, six for the desktop
   const phoneSheets = created.map(cardXs).filter((xs) => xs.length === 3)
   if (!phoneSheets.length) fail(`no cached phone stage hangs 3 boards (saw ${created.map((c) => cardXs(c).length).join(',')})`)
-  else if (JSON.stringify(phoneSheets[0]) !== JSON.stringify([126, 258, 758])) {
-    fail(`phone stage boards at x ${phoneSheets[0].join(',')}, want 126,258,758`)
+  else if (JSON.stringify(phoneSheets[0]) !== JSON.stringify([21, 153, 863])) {
+    fail(`phone stage boards at x ${phoneSheets[0].join(',')}, want 21,153,863`)
   } else {
     ok(`phone stage hangs 3 boards at x ${phoneSheets[0].join(',')} — 8 CSS px in from each edge (pinboard/burndown/architecture dropped)`)
     // the cached shell's own labels (team, ZONA, PAPAN STATUS, online, WIB, L3)

@@ -58,6 +58,7 @@ import {
   SIDE_H,
   SIDE_W,
   boardsFor,
+  fitZoomFor,
   sideScale,
   sideTransform,
   sideSeats,
@@ -383,9 +384,12 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   const compact = r.compact ?? r.viewW < COMPACT_MAX_W
   // the phone wall lives inside the design window this viewport really shows,
   // with 8 CSS px of clearance from the screen edge (converted to design px at
-  // the fit scale, so it is 16 at 390 px and 24 on a 470 px canvas)
-  const wallScale = sideScale(r.viewH, 1, band)
-  const wallWindow = compact ? visibleDesignRect(r.viewW, r.viewH, 1, SIDE_W / 2, band) : undefined
+  // the fit scale, so it is 21 at 390 px). The wall is laid out from the FIT
+  // window, never the current zoom: it is painted into the cached stage, so it
+  // must not move or re-key the cache while the user zooms.
+  const wallZoom = band > 0 ? fitZoomFor(r.viewW, r.viewH, band) : 1
+  const wallScale = sideScale(r.viewW, r.viewH, wallZoom, band)
+  const wallWindow = compact ? visibleDesignRect(r.viewW, r.viewH, wallZoom, SIDE_W / 2, band) : undefined
   const boardMargin = compact && wallScale > 0 ? Math.ceil(PHONE_BOARD_MARGIN / wallScale) : undefined
   const boards = boardsFor(compact, wallWindow, boardMargin)
 
@@ -396,6 +400,14 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   // the cached stage, scaled by the camera
   const stage = staticLayerFor(r.vp.floor, theme, tzLabel(), compact, boards)
   ctx.drawImage(stage, t.left, t.top, SIDE_W * t.s, SIDE_H * t.s)
+
+  // The dynamic pass is painted in design px, so the camera has to be applied
+  // once here — otherwise the desks, avatars and nameplates are drawn 1:1 and
+  // a 390 px phone shows only 390/150 = 2.6 floor units of them, unscaled and
+  // off the stage the sheet was just fitted into (the "BAGA…" screenshot).
+  ctx.save()
+  ctx.translate(t.left, t.top)
+  ctx.scale(t.s, t.s)
 
   const resolved = placeAgents(r.metas, r.byId, r.now, r.comms, r.t)
   const onFloor = resolved.filter((p) => p.floor === r.vp.floor)
@@ -457,16 +469,19 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
   const labelAgents = labelAgentsFor(seats, statuses)
   const bounds = { w: SIDE_W, h: SIDE_H }
   const reserved = boards.map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
-  // On the phone the sheet is wider than the screen: clamp plates to the part
-  // of the stage the viewport really shows, with a 4 CSS px safety margin, or a
-  // plate near the edge is cut by the screen ("BAGA…"). The window follows the
-  // camera, so panning never cuts a visible agent's plate; a plate whose head
-  // has left the window keeps the stage bounds and is cropped with its desk.
+  // On the phone the sheet can be wider than the screen (zoomed in): clamp
+  // plates to the part of the stage the viewport really shows, with a 4 CSS px
+  // safety margin, or a plate near the edge is cut by the screen ("BAGA…"). At
+  // the fit zoom that window is the whole stage, so nothing moves. The window
+  // follows the camera, so panning never cuts a visible agent's plate; a plate
+  // whose head has left the window keeps the stage bounds and is cropped with
+  // its desk.
+  const labelScale = sideScale(r.viewW, r.viewH, r.vp.zoom, band)
   const labelWindow =
-    compact && r.vp.zoom <= 1
+    band > 0 && labelScale > 0
       ? {
-          ...visibleDesignRect(r.viewW, r.viewH, 1, r.vp.camX, band),
-          margin: Math.ceil(4 / sideScale(r.viewH, 1, band)),
+          ...visibleDesignRect(r.viewW, r.viewH, r.vp.zoom, r.vp.camX, band),
+          margin: Math.ceil(4 / labelScale),
           visibleHeadsOnly: true,
         }
       : undefined
@@ -498,6 +513,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, r: RenderInput): void
 
   // camera frame: nothing is drawn outside the stage, but the page is already
   // filled, so the section reads as a slice of a building.
+  ctx.restore()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
 }
 

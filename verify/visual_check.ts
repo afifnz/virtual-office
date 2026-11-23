@@ -56,6 +56,7 @@ import {
   SIDE_STAGGER,
   SIDE_W,
   boardsFor,
+  fitScale,
   sideRows,
   sideScale,
   sideSeats,
@@ -63,6 +64,7 @@ import {
   sideWallGate,
   visibleDesignRect,
 } from '../frontend/src/scene2d/side'
+import { clampCam, fitZoom } from '../frontend/src/scene2d/viewport'
 import { lookDistance, lookHash } from '../frontend/src/scene2d/avatar'
 import { THEME_STATUS, THEME_TOKENS } from '../frontend/src/scene2d/palette'
 import { PIXEL_FONT_ROLES } from '../frontend/src/scene2d/props-side'
@@ -296,17 +298,19 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
 // ------------------------------------------- 11. the phone frame (390×692)
 
 /**
- * The phone canvas is 390×692 (390×844 minus the 96 px HUD and the 56 px bar)
- * and draws the 1000×688 sheet at half scale: 500×344 CSS px, centred, so the
- * screen shows design x 110…890 and y 174…518. Three things follow, and each
- * one was a reported defect:
+ * The phone shows the WHOLE floor by default — the R&D mockup framing, not a
+ * cropped cluster. The 1000×688 sheet is scaled to fit the 390 px canvas
+ * (0.39 CSS px per design px, so an avatar is 58.5 CSS px), which is why the
+ * phone zoom is fractional: the fit is 0.78, and 2 (the 150 px/unit camera) is
+ * the top of the range. Four things follow, and each one was a reported
+ * defect:
  *
- *   a. boards and nameplates must sit inside 110…890 (boards ≥ 8 CSS px from
- *      the edge, plates ≥ 4), or they are cut by the screen edge — that was
- *      "BAGA…" and the clock card's "WIB · L1" hugging the right edge;
- *   b. the zoom control, the pad and the agent chip must not overlap a desk
- *      rect — they live in the empty bands above/below the stage;
- *   c. the phone wall must be the compact set (plaque + status + clock).
+ *   a. every desk on the floor is fully inside the canvas (8 on L3, not the
+ *      ~2.6 units the half-scale window showed), so no agent is cut off;
+ *   b. every nameplate rect keeps ≥ 4 CSS px from the canvas edge — "BAGA…";
+ *   c. no control that is actually on screen overlaps a desk rect;
+ *   d. the pad only exists while panning can do something (zoomed in), and
+ *      even then it sits in the band the painter keeps clear.
  *
  * The overlay geometry is parsed from `global.css`, so the check follows the
  * real CSS instead of a copy of it.
@@ -349,10 +353,25 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
   const PW = vars['canvas-w'] ?? 390
   const PH = vars['canvas-h'] ?? 692
   const band = PHONE_CTRL_BAND
-  const ph = sideTransform(PW, PH, { camX: SIDE_W / 2, zoom: 1, floor: 3 }, band)
+  const fit = fitScale(PW, PH, band)
+  const fitZ = fitZoom(3, PW, PH, band)
+  const ph = sideTransform(PW, PH, { camX: SIDE_W / 2, zoom: fitZ, floor: 3 }, band)
   const stageBottom = ph.top + SIDE_H * ph.s
-  expect(`phone camera (${PW}×${PH})`, { s: ph.s, left: ph.left, top: ph.top }, { s: 0.5, left: -55, top: 174 })
-  ok(`stage ${SIDE_W * ph.s}×${SIDE_H * ph.s} CSS px at y ${ph.top}–${stageBottom.toFixed(0)}; the screen shows design x ${visibleDesignRect(PW, PH, 1).x0}…${visibleDesignRect(PW, PH, 1).x1}`)
+  const r3 = (v: number) => Math.round(v * 1000) / 1000
+
+  // (a) the default framing: the whole sheet, at a fractional zoom
+  expect(`phone fit zoom (${PW}×${PH})`, fitZ, 0.78)
+  expect(`phone camera at the fit (${PW}×${PH})`, { s: r3(ph.s), left: r3(ph.left), top: r3(ph.top) }, { s: 0.39, left: 0, top: 211.84 })
+  if (Math.abs(SIDE_W * ph.s - PW) > 0.5) {
+    fail(`the fit leaves the stage ${r3(SIDE_W * ph.s)} CSS px wide on a ${PW} px canvas — not a fit-to-floor`)
+  }
+  const avatarCss = SIDE_AVATAR_H * ph.s
+  if (avatarCss < 55 || avatarCss > 60) fail(`avatar is ${r3(avatarCss)} CSS px at the fit, want 55–60 (the mockup)`)
+  else ok(`the whole 1000×688 sheet fits: stage ${r3(SIDE_W * ph.s)}×${r3(SIDE_H * ph.s)} CSS px at y ${r3(ph.top)}–${r3(stageBottom)}, avatar ${r3(avatarCss)} px (mockup 55–60)`)
+  if (!near(clampCam(999, PW, PH, fitZ, band), SIDE_W / 2, 0.01)) {
+    fail(`pan is not locked at the fit: camX ${clampCam(999, PW, PH, fitZ, band)}`)
+  } else ok('pan is locked at the fit (nothing to pan to, so the pad stays hidden)')
+
   expect(
     'canvas height = app − HUD − bar',
     PH,
@@ -397,32 +416,36 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
   }
 
   /**
-   * The invariant the screenshot failed: whatever the canvas height and
-   * whatever the zoom, no overlay may sit on a desk. Heights 470…692 cover a
-   * short phone (browser chrome eats the difference) up to the reference 692.
-   * The control rects are rebuilt per height — the pad moves, the top band does
-   * not.
+   * (c) no control that is on screen may sit on a desk. At the fit zoom the
+   * stage is 268 px tall in the middle of the canvas, so the zoom control and
+   * the chip live in the empty band above it and the pad is not rendered at
+   * all; once the user zooms in the stage grows, the pad appears, and the
+   * reserved bottom band is what keeps it off the front row. Heights 470…692
+   * cover a short phone (browser chrome eats the difference) up to 692.
    */
   const HEIGHTS = [692, 640, 600, 560, 520, 470]
-  let worstClear = Infinity
   let deskHits = 0
-  /** closest the D-pad ever comes to a desk rect (needs ≥ 8 px) */
+  /** closest the D-pad ever comes to a desk rect (needs ≥ 8) */
   let padDeskGap = Infinity
+  let padHidden = 0
   for (const h of HEIGHTS) {
     const pad = padAt(h)
-    const boxes: Array<[string, typeof pad]> = [
-      ['zoom', zoomBox],
-      ['chip', chipBox],
-      ['pad', pad],
-    ]
-    for (const zoom of [1, 2]) {
+    const fitHere = fitZoom(3, PW, h, band)
+    for (const zoom of [fitHere, 1, 1.5, 2]) {
       const t = sideTransform(PW, h, { camX: SIDE_W / 2, zoom, floor: 3 }, band)
       const bottom = t.top + SIDE_H * t.s
       if (t.s <= 0) fail(`${PW}×${h} zoom ${zoom}: the stage has no scale`)
-      worstClear = Math.min(worstClear, pad.y - bottom)
+      // the pad is only rendered while the stage is wider than the canvas
+      const canPan = SIDE_W * t.s > PW + 0.5
+      if (!canPan) padHidden++
       if (pad.y < bottom + 4) {
         fail(`${PW}×${h} zoom ${zoom}: the stage ends at ${bottom.toFixed(1)}, the pad starts at ${pad.y} (need 4 px clear)`)
       }
+      const boxes: Array<[string, typeof pad]> = [
+        ['zoom', zoomBox],
+        ['chip', chipBox],
+      ]
+      if (canPan) boxes.push(['pad', pad])
       for (const f of FLOOR_IDS) {
         for (const s of sideSeats(metas.filter((m) => m.desk.floor === f))) {
           const desk = {
@@ -438,20 +461,22 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
             }
           }
           // the pad must also keep a real gap, not just avoid a pixel overlap
-          const gap = rectGap(pad, desk)
-          padDeskGap = Math.min(padDeskGap, gap)
-          if (gap < 8) {
-            fail(
-              `${PW}×${h} zoom ${zoom}: the pad is ${gap.toFixed(1)} px from L${f} ${s.meta.id}'s desk (need ≥ 8)`,
-            )
+          if (canPan) {
+            const gap = rectGap(pad, desk)
+            padDeskGap = Math.min(padDeskGap, gap)
+            if (gap < 8) {
+              fail(
+                `${PW}×${h} zoom ${zoom}: the pad is ${gap.toFixed(1)} px from L${f} ${s.meta.id}'s desk (need ≥ 8)`,
+              )
+            }
           }
         }
       }
     }
   }
-  if (!deskHits) ok(`0 of ${metas.length} desks are covered by the zoom control, the chip or the pad at ${HEIGHTS.join('/')} × zoom 1–2`)
-  ok(`closest the stage ever comes to the pad: ${worstClear.toFixed(1)} px (≥ 4)`)
-  ok(`the D-pad keeps ${padDeskGap.toFixed(1)} px from the nearest desk (≥ 8, ${HEIGHTS.length} heights × zoom 1–2)`)
+  if (!deskHits) ok(`0 of ${metas.length} desks are covered by a visible control at ${HEIGHTS.join('/')} × zoom fit–2`)
+  if (padHidden !== HEIGHTS.length) fail(`the pad is rendered at the fit zoom (${padHidden} of ${HEIGHTS.length} heights hid it)`)
+  else ok(`the pad is hidden at the fit zoom on all ${HEIGHTS.length} heights, and keeps ${padDeskGap.toFixed(1)} px from the nearest desk once it appears (≥ 8)`)
 
   // a desktop window narrowed by the roster rail keeps its 150 px/unit camera
   const narrow = sideTransform(720, 688, { camX: SIDE_W / 2, zoom: 2, floor: 3 })
@@ -466,24 +491,31 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
     if (boardsFor(true).some((b) => b.id === id)) fail(`the phone wall still hangs ${id}`)
   }
   expect('phone wall board ids', boardsFor(true).map((b) => b.id), ['plaque', 'status', 'clock'])
-  const wideArch = SIDE_BOARDS.find((b) => b.id === 'architecture')!
-  if (wideArch.x + wideArch.w <= visibleDesignRect(PW, PH, 1).x1) fail('the wide ARSITEKTUR board would fit the phone window — the compact wall is unnecessary')
-  else ok(`the wide wall cannot fit: ARSITEKTUR ends at design x ${wideArch.x + wideArch.w}, the phone window ends at ${visibleDesignRect(PW, PH, 1).x1}`)
+  // the six-board wall would now fit the width, but its 8 px labels land on
+  // 3.1 CSS px at the fit — wallpaper, not a board. The three-card wall stays.
+  const boardLabelCss = 8 * fit
+  if (boardLabelCss >= 4) {
+    fail(`an 8 px board label is ${boardLabelCss.toFixed(1)} CSS px at the fit — the compact wall would be unnecessary`)
+  } else {
+    ok(`the six-board wall's 8 px labels land on ${boardLabelCss.toFixed(1)} CSS px at the fit, so the phone keeps three cards`)
+  }
 
   /**
-   * (a) boards + nameplates stay on screen. Swept over the phone widths people
-   * actually hold (390/375/360/320) plus 760 (the widest compact canvas) and
-   * over the pan range: the cards keep ≥ 8 CSS px from the screen edge (the
-   * reported "WIB · L1" hugging the right edge), and at the fit zoom a plate is
-   * clamped into the window. A plate whose head has left the window is cropped
-   * together with its desk, so only fully visible agents are asserted.
+   * (a) + (b) every desk, board and nameplate stays on screen. Swept over the
+   * phone widths people actually hold (390/375/360/320) plus 760 (the widest
+   * compact canvas), at the fit zoom: the whole floor is visible, the cards
+   * keep ≥ 8 CSS px from the screen edge and every plate rect ≥ 4.
    */
   const WIDTHS = [760, 390, 375, 360, 320]
-  const boardMargin = Math.ceil(PHONE_BOARD_MARGIN / sideScale(PH, 1, band))
+  let fitDesks = 0
+  let fitPlates = 0
+  let worstPlateEdge = Infinity
   for (const w of WIDTHS) {
-    const t = sideTransform(w, PH, { camX: SIDE_W / 2, zoom: 1, floor: 3 }, band)
-    const win = visibleDesignRect(w, PH, 1, SIDE_W / 2, band)
-    const wall = boardsFor(true, win, boardMargin)
+    const fitHere = fitZoom(3, w, PH, band)
+    const sHere = sideScale(w, PH, fitHere, band)
+    const t = sideTransform(w, PH, { camX: SIDE_W / 2, zoom: fitHere, floor: 3 }, band)
+    const win = visibleDesignRect(w, PH, fitHere, SIDE_W / 2, band)
+    const wall = boardsFor(true, win, Math.ceil(PHONE_BOARD_MARGIN / sHere))
     let worstEdge = Infinity
     for (const b of wall) {
       const sx = t.left + b.x * t.s
@@ -497,46 +529,97 @@ else ok(`every agent has its own (floor, slot): ${placed.size}`)
         )
       }
     }
-    ok(
-      `${w} px: 3 boards at x ${wall.map((b) => Math.round(b.x)).join(',')} keep ${worstEdge.toFixed(1)} px inside the canvas (≥ 8)`,
-    )
+    ok(`${w} px: 3 boards at x ${wall.map((b) => Math.round(b.x)).join(',')} keep ${worstEdge.toFixed(1)} px inside the canvas (≥ 8)`)
 
-    for (const camX of [SIDE_W / 2, SIDE_W / 2 - 110, SIDE_W / 2 + 110]) {
-      const ct = sideTransform(w, PH, { camX, zoom: 1, floor: 3 }, band)
-      const cwin = visibleDesignRect(w, PH, 1, camX, band)
-      const margin = Math.ceil(4 / ct.s)
-      let visiblePlates = 0
-      for (const f of FLOOR_IDS) {
-        const seats = sideSeats(metas.filter((m) => m.desk.floor === f))
-        const labels = labelAgentsFor(seats, statusMap)
-        const reserved = wall.map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
-        const { plates, violations } = layoutSideLabels(labels, BOUNDS, reserved, {
-          ...cwin,
-          margin,
-          visibleHeadsOnly: true,
-        })
-        const gate = sideGate(seats, plates, BOUNDS, { ...cwin, margin, visibleHeadsOnly: true })
-        if (violations.length) fail(`${w} px camX ${camX}: L${f} ${violations.join('; ')}`)
-        if (gate.plateOverlaps !== 0) fail(`${w} px camX ${camX}: L${f} ${gate.plateOverlaps} plate overlaps`)
-        if (gate.plateOnHead !== 0) fail(`${w} px camX ${camX}: L${f} ${gate.plateOnHead} plates cover another head`)
-        for (const p of plates) {
-          const seat = seats.find((q) => q.meta.id === p.id)
-          const headCy = seat ? seat.headTop + seat.headH / 2 : 0
-          const headVisible =
-            !!seat && seat.cx >= cwin.x0 && seat.cx <= cwin.x1 && headCy >= cwin.y0 && headCy <= cwin.y1
-          if (!headVisible) continue
-          visiblePlates++
-          const sx = ct.left + p.x * ct.s
-          const sy = ct.top + p.y * ct.s
-          const sw = p.w * ct.s
-          const sh = p.h * ct.s
-          if (sx < 4 - 1e-6 || sy < 4 - 1e-6 || sx + sw > w - 4 + 1e-6 || sy + sh > PH - 4 + 1e-6) {
-            fail(`${w} px camX ${camX} L${f} ${p.id}: nameplate leaves the canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)} of ${w})`)
-          }
+    // (a) the fit really shows the floor: desk rects inside the canvas = agents
+    let hereDesks = 0
+    for (const f of FLOOR_IDS) {
+      const seats = sideSeats(metas.filter((m) => m.desk.floor === f))
+      for (const s of seats) {
+        const x = t.left + (s.cx - 64 * s.scale) * t.s
+        const y = t.top + (s.floorY - s.avatarH) * t.s
+        const dw = 128 * s.scale * t.s
+        const dh = (s.avatarH + 4) * t.s
+        if (x >= 0 && y >= 0 && x + dw <= w && y + dh <= PH) hereDesks++
+        else fail(`${w} px: L${f} ${s.meta.id}'s desk is cut by the canvas (${x.toFixed(1)},${y.toFixed(1)} ${dw.toFixed(1)}×${dh.toFixed(1)})`)
+      }
+    }
+    if (hereDesks !== metas.length) fail(`${w} px: ${hereDesks} of ${metas.length} desks visible at the fit`)
+    else if (w === PW) fitDesks = hereDesks
+
+    // (b) every nameplate, at the fit: ≥ 4 CSS px inside the canvas
+    const margin = Math.ceil(4 / sHere)
+    for (const f of FLOOR_IDS) {
+      const seats = sideSeats(metas.filter((m) => m.desk.floor === f))
+      const labels = labelAgentsFor(seats, statusMap)
+      const reserved = wall.map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
+      const { plates, violations } = layoutSideLabels(labels, BOUNDS, reserved, { ...win, margin, visibleHeadsOnly: true })
+      if (violations.length) fail(`${w} px: L${f} ${violations.join('; ')}`)
+      const gate = sideGate(seats, plates, BOUNDS, { ...win, margin, visibleHeadsOnly: true })
+      if (gate.plateOverlaps !== 0) fail(`${w} px: L${f} ${gate.plateOverlaps} plate overlaps`)
+      if (gate.plateOnHead !== 0) fail(`${w} px: L${f} ${gate.plateOnHead} plates cover another head`)
+      for (const p of plates) {
+        const sx = t.left + p.x * t.s
+        const sy = t.top + p.y * t.s
+        const sw = p.w * t.s
+        const sh = p.h * t.s
+        const edge = Math.min(sx, sy, w - (sx + sw), PH - (sy + sh))
+        worstPlateEdge = Math.min(worstPlateEdge, edge)
+        if (edge < 4 - 1e-6) {
+          fail(`${w} px L${f} ${p.id}: nameplate leaves the canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)} of ${w}, ${edge.toFixed(1)} px from the edge)`)
+        }
+        if (w === PW) fitPlates++
+      }
+    }
+  }
+  if (fitDesks === metas.length) {
+    ok(`${fitDesks}/${metas.length} desks visible at the fit on ${PW} px (1/4/8 per floor) — no agent is cropped`)
+  }
+  ok(`${fitPlates} nameplates at the fit on ${PW} px, all ≥ ${worstPlateEdge.toFixed(1)} px inside the canvas (≥ 4)`)
+
+  /**
+   * Zoomed in the stage is wider than the canvas, so panning is active; the
+   * plates of the agents still on screen must stay ≥ 4 px inside the canvas at
+   * every pan position (a plate whose head has left the window is cropped with
+   * its desk).
+   */
+  for (const camX of [SIDE_W / 2, SIDE_W / 2 - 110, SIDE_W / 2 + 110]) {
+    const zoom = 2
+    const ct = sideTransform(PW, PH, { camX, zoom, floor: 3 }, band)
+    const cwin = visibleDesignRect(PW, PH, zoom, camX, band)
+    const margin = Math.ceil(4 / sideScale(PW, PH, zoom, band))
+    let visiblePlates = 0
+    for (const f of FLOOR_IDS) {
+      const seats = sideSeats(metas.filter((m) => m.desk.floor === f))
+      const labels = labelAgentsFor(seats, statusMap)
+      const wall = boardsFor(true, visibleDesignRect(PW, PH, fitZ, SIDE_W / 2, band), Math.ceil(PHONE_BOARD_MARGIN / fit))
+      const reserved = wall.map((b) => ({ x: b.x, y: SIDE_BOARD_TOP, w: b.w, h: b.h }))
+      const { plates, violations } = layoutSideLabels(labels, BOUNDS, reserved, {
+        ...cwin,
+        margin,
+        visibleHeadsOnly: true,
+      })
+      const gate = sideGate(seats, plates, BOUNDS, { ...cwin, margin, visibleHeadsOnly: true })
+      if (violations.length) fail(`zoom ${zoom} camX ${camX}: L${f} ${violations.join('; ')}`)
+      if (gate.plateOverlaps !== 0) fail(`zoom ${zoom} camX ${camX}: L${f} ${gate.plateOverlaps} plate overlaps`)
+      if (gate.plateOnHead !== 0) fail(`zoom ${zoom} camX ${camX}: L${f} ${gate.plateOnHead} plates cover another head`)
+      for (const p of plates) {
+        const seat = seats.find((q) => q.meta.id === p.id)
+        const headCy = seat ? seat.headTop + seat.headH / 2 : 0
+        const headVisible =
+          !!seat && seat.cx >= cwin.x0 && seat.cx <= cwin.x1 && headCy >= cwin.y0 && headCy <= cwin.y1
+        if (!headVisible) continue
+        visiblePlates++
+        const sx = ct.left + p.x * ct.s
+        const sy = ct.top + p.y * ct.s
+        const sw = p.w * ct.s
+        const sh = p.h * ct.s
+        if (sx < 4 - 1e-6 || sy < 4 - 1e-6 || sx + sw > PW - 4 + 1e-6 || sy + sh > PH - 4 + 1e-6) {
+          fail(`zoom ${zoom} camX ${camX} L${f} ${p.id}: nameplate leaves the canvas (x ${sx.toFixed(1)}…${(sx + sw).toFixed(1)} of ${PW})`)
         }
       }
-      if (camX === SIDE_W / 2) ok(`${w} px: ${visiblePlates} nameplates of visible agents sit ≥4 px inside the canvas`)
     }
+    if (camX === SIDE_W / 2) ok(`zoomed in (${zoom}×): ${visiblePlates} nameplates of visible agents stay ≥4 px inside the canvas`)
   }
 }
 

@@ -102,13 +102,14 @@
     notes.push('no .roster-body — the agent panel is closed (open [Agen] to test the scroll)')
   }
 
-  // 3. side camera: zoom 1..2, horizontal pan inside the 1000 px stage
+  // 3. side camera: the fit (≈0.78 on a phone) up to the 150 px/unit camera at
+  //    2, horizontal pan inside the 1000 px stage
   const zoomText = document.querySelector('.zoom-ctrl span')?.textContent ?? null
   const vp = typeof window.__office2dVp === 'function' ? window.__office2dVp() : null
   if (vp && canvasRect) {
-    if (!(vp.zoom === 1 || vp.zoom === 2)) problems.push(`side camera zoom is ${vp.zoom}, want 1 or 2`)
+    if (!(vp.zoom > 0.2 && vp.zoom <= 2)) problems.push(`side camera zoom is ${vp.zoom}, want 0.2..2`)
     if (!Number.isFinite(vp.camX) || vp.camX < 0 || vp.camX > 1000) problems.push(`camX ${vp.camX} outside the 1000 px stage`)
-    if (zoomText !== `${vp.zoom * 100}%`) notes.push(`zoom label ${zoomText} vs vp.zoom ${vp.zoom}`)
+    if (zoomText !== `${Math.round(vp.zoom * 100)}%`) notes.push(`zoom label ${zoomText} vs vp.zoom ${vp.zoom}`)
   } else {
     problems.push('window.__office2dVp() is missing')
   }
