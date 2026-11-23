@@ -444,12 +444,14 @@ cd frontend && npx tsc --noEmit && npm run build      # dist/ (JS 216 kB, 71 kB 
 Pemeriksaan murni, tanpa browser (esbuild + node):
 
 ```bash
-for c in roster_check layout_check anim_check visual_check theme_check render_check building_check; do
+for c in roster_check layout_check anim_check visual_check theme_check render_check building_check status_check; do
   frontend/node_modules/.bin/esbuild verify/$c.ts --bundle --format=esm \
     --platform=node --outfile=/tmp/$c.mjs && node /tmp/$c.mjs
 done
 ```
 
+- `status_check` — `waiting` vs `stale` truth: chip/label, header & tab
+  arithmetic (waiting and stale are never counted as bekerja), palette.
 - `layout_check` — grid 4.5 × 4.0, sirkulasi ≥ 1.6, nav graph bebas furnitur.
 - `roster_check` — `/api/config` menggerakkan kantor: meja lama tidak bergeser,
   agen baru dapat meja di lattice, penempatan deterministik, `look` stabil per id.
