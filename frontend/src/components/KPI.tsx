@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { useKPI } from '../hooks/useKPI'
 import { agentMeta } from '../lib/roster'
 import { compact } from '../lib/format'
-import type { KpiAgent, KpiWindowKey } from '../lib/types'
+import { childBadge, isStaleAgent } from '../lib/status'
+import type { Agent, KpiAgent, KpiWindowKey, StatusPayload } from '../lib/types'
 
 const WINDOWS: Array<{ key: KpiWindowKey; label: string }> = [
   { key: '7d', label: '7 hari' },
@@ -21,14 +22,22 @@ function num(n: number): string {
   return compact(n)
 }
 
-function Row({ agent, max }: { agent: KpiAgent; max: number }) {
+function Row({ agent, max, live }: { agent: KpiAgent; max: number; live?: Agent }) {
   const meta = agentMeta(agent.id)
   const width = max > 0 ? Math.max(2, Math.round((agent.messages / max) * 100)) : 0
   const blocked = agent.blocked_pct !== null && agent.blocked_pct >= 10
+  const badge = live ? childBadge(live) : null
   return (
-    <li className={`kpi-row ${blocked ? 'is-blocked' : ''}`}>
+    <li className={`kpi-row ${blocked ? 'is-blocked' : ''} ${live && isStaleAgent(live) ? 'is-stale' : ''}`}>
       <span className="kpi-name" title={`${meta.name} (${agent.id})`}>
         {meta.name}
+        {badge ? (
+          <span className="child-badge" aria-label={`${live?.children?.running ?? 0} anak berjalan`}>
+            {badge}
+          </span>
+        ) : null}
+        {live?.status === 'waiting' ? <span className="kpi-live waiting">menunggu anak</span> : null}
+        {live && isStaleAgent(live) ? <span className="kpi-live stale">tidak aktif</span> : null}
       </span>
       <span
         className="kpi-track"
@@ -55,9 +64,24 @@ function Row({ agent, max }: { agent: KpiAgent; max: number }) {
  * KPI per agent. A centered panel on desktop, a full sheet on phones. It reads
  * /api/kpi only while open; the server caches each window for 60 s.
  */
-export function KPI({ onClose, mobile }: { onClose: () => void; mobile: boolean }) {
+export function KPI({
+  onClose,
+  mobile,
+  status,
+}: {
+  onClose: () => void
+  mobile: boolean
+  /** Live snapshot, so a row can say "menunggu anak"/"tidak aktif" honestly. */
+  status?: StatusPayload | null
+}) {
   const [win, setWin] = useState<KpiWindowKey>('7d')
   const { data, error, loading, stale, refresh } = useKPI(win, true)
+
+  const liveById = useMemo(() => {
+    const m = new Map<string, Agent>()
+    for (const a of status?.agents ?? []) m.set(a.id, a)
+    return m
+  }, [status])
 
   // A report for the other window must never be labelled with the current one.
   const report = data && data.window === win ? data : null
@@ -139,7 +163,7 @@ export function KPI({ onClose, mobile }: { onClose: () => void; mobile: boolean 
               <>
                 <ol className="kpi-list">
                   {agents.map((a) => (
-                    <Row key={a.id} agent={a} max={max} />
+                    <Row key={a.id} agent={a} max={max} live={liveById.get(a.id)} />
                   ))}
                 </ol>
                 <p className="kpi-caption">

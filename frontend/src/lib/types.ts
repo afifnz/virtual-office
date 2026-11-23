@@ -1,10 +1,16 @@
 /** Wire types for GET /api/status — mirrors the Go contract exactly. */
 
-export type AgentStatus = 'idle' | 'working' | 'reviewing' | 'blocked' | 'offline'
+export type AgentStatus = 'idle' | 'working' | 'reviewing' | 'waiting' | 'blocked' | 'offline'
 
 export interface CurrentActivity {
   kind: string
   tools: string[]
+}
+
+/** Subagent sessions spawned by the agent's last delegate_task call. */
+export interface ChildCount {
+  total: number
+  running: number
 }
 
 export interface BlockedInfo {
@@ -36,6 +42,15 @@ export interface Agent {
   task: string | null
   source: string | null
   blocked: BlockedInfo | null
+  /**
+   * Additive truth fields. A stale working/reviewing verdict was demoted to
+   * idle by the backend; the UI must not count it as working.
+   */
+  stale?: boolean
+  /** Kind of the newest event behind the verdict (tool, tool_result, reply…). */
+  last_kind?: string
+  /** Present while the agent waits on the subagents it delegated to. */
+  children?: ChildCount | null
 }
 
 export type FeedKind = 'task' | 'tool' | 'tool_result' | 'reply' | 'request' | 'delegation_result'

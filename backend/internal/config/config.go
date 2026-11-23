@@ -49,6 +49,11 @@ const (
 	// still stopping a loop that ignores Retry-After.
 	DefaultRateLimitPerMin = 120
 	DefaultRateLimitBurst  = 30
+
+	// DefaultStaleSeconds mirrors derive.StaleAfter: a working/reviewing
+	// verdict older than this, with no reply or session end, becomes idle.
+	// OFFICE_STALE_SECONDS overrides it.
+	DefaultStaleSeconds = 180
 )
 
 // Config is the resolved server configuration.
@@ -74,6 +79,10 @@ type Config struct {
 	RateLimit       bool
 	RateLimitPerMin int
 	RateLimitBurst  int
+
+	// StaleSeconds is how long a working/reviewing status may stand without a
+	// new event before the snapshot demotes it to idle.
+	StaleSeconds int
 }
 
 // Load reads the environment, applying defaults, and validates the result.
@@ -158,6 +167,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	staleSec, err := envInt("OFFICE_STALE_SECONDS", DefaultStaleSeconds, 1, 86_400)
+	if err != nil {
+		return Config{}, err
+	}
 
 	var profiles []string
 	if src == "remote" {
@@ -199,6 +212,7 @@ func Load() (Config, error) {
 		RateLimit:       rateOn,
 		RateLimitPerMin: perMin,
 		RateLimitBurst:  burst,
+		StaleSeconds:    staleSec,
 	}, nil
 }
 

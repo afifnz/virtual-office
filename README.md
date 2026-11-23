@@ -299,9 +299,19 @@ yang sama (`derive.prepare`) tetapi tidak saling bergantung.
 |---|---|
 | `working` | ada sesi aktif: pesan terakhir < 20 detik, atau mid-turn (peran terakhir `user`/`tool`/tool-call) < 15 menit |
 | `reviewing` | sama seperti working tapi profilnya reviewer (`reviewer`, `edu-reviewer`) |
+| `waiting` | tool terakhir adalah `delegate_task` dan sesi anaknya (`parent_session_id`) yang mulai setelah panggilan itu masih berjalan — menunggu subagen, bukan bekerja. Bertahan melewati jendela mid-turn induk (subagen boleh jalan >15 menit); anak yang sudah senyap >15 menit dianggap tidak berjalan agar baris bocor tidak menyandera induk. `current.tools` tetap `["delegate_task"]`, `children: {total, running}` menghitung sesi anak |
 | `blocked` | sesi terakhir berakhir dengan ≥ 2 tool result gagal berturut, atau `end_reason` mengandung error/timeout; berlaku 30 menit |
-| `idle` | punya data tapi tidak ada sesi aktif |
+| `idle` | punya data tapi tidak ada sesi aktif (sesi yang sudah berakhir selalu idle) |
 | `offline` | profil tidak punya `state.db` |
+
+**`stale`** (aditif, bukan status baru): `working`/`reviewing` yang tidak punya
+event baru selama `OFFICE_STALE_SECONDS` (default 180 detik) **dan** tidak
+ditutup balasan/sesi berakhir akan diturunkan ke `idle` dengan `stale: true` +
+`last_kind` (jenis event terakhir: `tool`, `tool_result`, `reply`, …). Karena
+`status` sudah diturunkan, klien harus membaca flag `stale` — bukan menebak dari
+status lama. Field `status`, `current`, `today`, `total` tidak berubah bentuk —
+UI memakai `stale` untuk menjelaskan kenapa meja itu diam, dan tidak
+menghitungnya sebagai bekerja.
 
 **Subagen**: sesi `source='subagent'` tersimpan di `state.db` induk
 (`profile_name` = induk). Profil tujuan dibaca dari argumen `delegate_task`
@@ -336,6 +346,7 @@ Semua lewat environment variable; tidak ada path user yang di-hardcode.
 | `RATE_LIMIT` | `on` | `off` mematikan rate limit per-IP untuk `/api/*` |
 | `RATE_LIMIT_PER_MIN` | `120` | token yang diisi ulang per menit per IP |
 | `RATE_LIMIT_BURST` | `30` | token awal; lonjakan sebesar ini dilayani sekaligus |
+| `OFFICE_STALE_SECONDS` | `180` | batas diam sebelum `working`/`reviewing` diturunkan ke `idle` + `stale: true`; harus 1..86400 |
 
 Profil yang punya folder `$HERMES_HOME/profiles/<nama>/state.db` otomatis
 ditambahkan ke roster walau tidak ada di `PROFILES`. Profil tanpa `state.db`
@@ -435,12 +446,14 @@ cd frontend && npx tsc --noEmit && npm run build      # dist/ (JS 216 kB, 71 kB 
 Pemeriksaan murni, tanpa browser (esbuild + node):
 
 ```bash
-for c in roster_check layout_check anim_check visual_check theme_check render_check building_check; do
+for c in roster_check layout_check anim_check visual_check theme_check render_check building_check status_check; do
   frontend/node_modules/.bin/esbuild verify/$c.ts --bundle --format=esm \
     --platform=node --outfile=/tmp/$c.mjs && node /tmp/$c.mjs
 done
 ```
 
+- `status_check` — `waiting` vs `stale` truth: chip/label, header & tab
+  arithmetic (waiting and stale are never counted as bekerja), palette.
 - `layout_check` — grid 4.5 × 4.0, sirkulasi ≥ 1.6, nav graph bebas furnitur.
 - `roster_check` — `/api/config` menggerakkan kantor: meja lama tidak bergeser,
   agen baru dapat meja di lattice, penempatan deterministik, `look` stabil per id.

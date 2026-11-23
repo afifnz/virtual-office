@@ -292,7 +292,7 @@ export default function App() {
         <TaskBoard status={data} now={now} onClose={() => setTaskOpen(false)} mobile={mobile} />
       ) : null}
 
-      {kpiOpen ? <KPI mobile={mobile} onClose={() => setKpiOpen(false)} /> : null}
+      {kpiOpen ? <KPI mobile={mobile} onClose={() => setKpiOpen(false)} status={data} /> : null}
 
       {displayAgent && (!mobile || chipVisible) ? (
         <ProximityCard

@@ -124,7 +124,7 @@ expect('UTC 18:00', resolveTheme('2026-11-22T18:00:00Z', 'UTC', null, false).mod
 // ---------------------------------------------------------- 8. contrast table
 // Text threshold 4.5:1, dot/line 3:1 (design §3.2). The background is the
 // *composite* glass over the page, not white/black.
-const STATUSES = ['working', 'reviewing', 'idle', 'blocked', 'offline', 'ok', 'danger'] as const
+const STATUSES = ['working', 'reviewing', 'waiting', 'idle', 'blocked', 'offline', 'ok', 'danger'] as const
 for (const theme of ['day', 'night'] as const) {
   const t = THEME_TOKENS[theme]
   const glass = compositeOver(t.glass.surface, t.glass.alpha, t.page)

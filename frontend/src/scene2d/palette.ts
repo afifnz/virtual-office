@@ -47,6 +47,7 @@ export const PALETTE = {
 export const STATUS = {
   working: '#F2B434',
   reviewing: '#A98CE0',
+  waiting: '#FFA94D',
   idle: '#6FB1E8',
   blocked: '#FFC93B',
   offline: '#8B93A5',
@@ -211,6 +212,7 @@ export const THEME_STATUS = {
   day: {
     working: '#8A5406',
     reviewing: '#6D28D9',
+    waiting: '#9A3412',
     idle: '#1D4ED8',
     blocked: '#B33A12',
     offline: '#556073',
@@ -220,6 +222,7 @@ export const THEME_STATUS = {
   night: {
     working: '#F2B434',
     reviewing: '#A98CE0',
+    waiting: '#FFA94D',
     idle: '#6FB1E8',
     blocked: '#FFC93B',
     offline: '#8B93A5',
