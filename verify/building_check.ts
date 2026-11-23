@@ -3,20 +3,27 @@
  *
  * Proves, without a browser and without screenshots:
  *
- *   a. one frame holds three floor bands, 13 desks and 13 nameplates, every
- *      rect inside the 1000×688 sheet AND inside a 390×692 phone canvas;
- *      0 plate↔plate overlap, 0 plate over another head;
- *   b. the building is centred: |building centre − canvas centre| ≤ 2 % width;
- *   c. the lift car is visible BETWEEN two bands while a delegation rides
- *      (not parked on a floor, inside the shaft);
- *   d. the procedural skyline never covers the facade: 0 city rect ∩ building;
+ *   a. ONE scale: the 83 px floor band is round(m2px(3.4)) within 5 %, every
+ *      band is exactly that tall, the 9 px slab sits between them, and every
+ *      interior prop (desk, chair, seat, monitor, door, lift car, shaft) is
+ *      m2px(real metres) within ±10 %;
+ *   b. one person everywhere: the 42 px avatar is 45–60 % of the band;
+ *   c. one frame holds three floor bands, 13 desks and 13 nameplates, every
+ *      rect inside the 1000×688 stage AND inside a 390×692 phone canvas IN
+ *      FINAL px (design rect × SCENE_ZOOM); 0 plate↔plate overlap, 0 plate
+ *      over another head, no plate taller than its desk or outside its band;
+ *   d. the building is centred on the design sheet: |centre − sheet centre|
+ *      ≤ 2 % width; the lift car is visible BETWEEN two bands while a
+ *      delegation rides; the procedural skyline never covers the facade;
  *   e. the painter itself runs for both themes, desktop and phone, online and
  *      offline — 13 desks and 13 plates every frame (the offline seed is a
  *      first-class case, not an accident);
- *   f. street scale: the 7 m tree (172 px) and the 6 m lamp (147 px) are
- *      `PX_PER_M × metres`, they stand clear of the facade bay, and every piece
- *      of street furniture is painted BEFORE the facade — so a canopy can only
- *      be occluded by the tower, never painted over it.
+ *   f. street scale, true depth: the 7 m tree (172 px) and the 6 m lamp
+ *      (147 px) are `PX_PER_M × metres`, the road is exactly 2 × 86 px lanes
+ *      (lane depth = lane width, no squeeze), every prop stands clear of the
+ *      facade bay and of its neighbours, and all furniture is painted BEFORE
+ *      the facade — so a canopy can only be occluded by the tower, never
+ *      painted over it.
  *
  * The old per-floor gates stay as they are; this file never replaces them.
  *
@@ -30,19 +37,28 @@ import { FLOOR_IDS, type FloorId } from '../frontend/src/lib/rooms'
 import {
   BLD,
   BLD_BAND_ORDER,
+  BLD_BAND_H,
   BLD_BANDS,
+  BLD_CAR_H,
+  BLD_DESK,
+  BLD_DOOR_H,
   BLD_FURNITURE,
+  BLD_LIFT,
+  BLD_PROP,
+  BLD_SLAB_H,
   BLD_STREET,
+  BLD_ZEBRA,
   BUILDING_H,
   BUILDING_W,
   BLD_AVATAR_H,
-  BLD_DESK,
-  BLD_LIFT,
+  BLD_DASH,
   LANE_DEPTH,
   LANE_W,
   PX_PER_M,
+  SCENE_H,
+  SCENE_W,
+  SCENE_ZOOM,
   STREET_PROPS,
-  STREET_SHAPE,
   buildingCityRects,
   buildingDeskRect,
   buildingGeometry,
@@ -53,6 +69,8 @@ import {
   buildingSeatsFor,
   cityOverlapsBuilding,
   layoutBuildingPlates,
+  m2px,
+  propSpan,
 } from '../frontend/src/scene2d/building'
 import {
   BUILDING_PHASES,
@@ -99,22 +117,39 @@ else ok(`floor split L1/L2/L3 = ${split.join('/')}`)
 if (seats.length !== 13) fail(`${seats.length} building seats, want 13`)
 
 // ------------------------------------------------------- 2. band geometry
-if (bands.length !== 3) fail(`${bands.length} floor bands, want 3`)
-const order = bands.map((b) => b.floor).join(',')
-if (order !== '3,2,1') fail(`bands top→bottom = ${order}, want 3,2,1`)
-else ok(`3 stacked bands (top→bottom): ${bands.map((b) => `L${b.floor} ${b.y0}–${b.y1}`).join(' · ')}`)
-for (const b of bands) {
-  if (!(b.y1 > b.y0)) fail(`L${b.floor}: band height ${b.y1 - b.y0}`)
-  if (b.y1 - b.y0 !== 150) fail(`L${b.floor}: band ${b.y1 - b.y0} px, want 150`)
-  if (!(b.floorY > b.y0 && b.floorY < b.y1)) fail(`L${b.floor}: floor line ${b.floorY} outside its band`)
-  if (b.y0 < 0 || b.y1 > BUILDING_H) fail(`L${b.floor}: band leaves the stage`)
+{
+  if (bands.length !== 3) fail(`${bands.length} floor bands, want 3`)
+  const order = bands.map((b) => b.floor).join(',')
+  if (order !== '3,2,1') fail(`bands top→bottom = ${order}, want 3,2,1`)
+  else ok(`3 stacked bands (top→bottom): ${bands.map((b) => `L${b.floor} ${b.y0}–${b.y1}`).join(' · ')}`)
+  // (a) the band IS the scale: 83 px = round(m2px(3.4)) within 5 %
+  const wantBand = m2px(3.4)
+  const bandErr = Math.abs(BLD_BAND_H - wantBand) / wantBand
+  if (bandErr > 0.05) fail(`BLD_BAND_H ${BLD_BAND_H} vs m2px(3.4) ${r2(wantBand)} (${r2(bandErr * 100)} % off, limit 5 %)`)
+  for (const b of bands) {
+    if (!(b.y1 > b.y0)) fail(`L${b.floor}: band height ${b.y1 - b.y0}`)
+    if (b.y1 - b.y0 !== BLD_BAND_H) fail(`L${b.floor}: band ${b.y1 - b.y0} px, want ${BLD_BAND_H}`)
+    if (b.y1 - b.floorY !== 6) fail(`L${b.floor}: floor lip ${b.y1 - b.floorY} px, want 6`)
+    if (!(b.floorY > b.y0 && b.floorY < b.y1)) fail(`L${b.floor}: floor line ${b.floorY} outside its band`)
+    if (b.y0 < 0 || b.y1 > SCENE_H) fail(`L${b.floor}: band leaves the design sheet`)
+  }
+  // the 9 px spandrel between bands = round(m2px(0.35))
+  for (let i = 0; i < bands.length - 1; i++) {
+    const gap = bands[i + 1]!.y0 - bands[i]!.y1
+    if (gap !== BLD_SLAB_H) fail(`slab between L${bands[i]!.floor}/L${bands[i + 1]!.floor} is ${gap} px, want ${BLD_SLAB_H}`)
+  }
+  const bandBottom = Math.max(...bands.map((b) => b.y1))
+  if (bandBottom !== BLD_STREET.top) fail(`the lowest band ends at ${bandBottom}, the street starts at ${BLD_STREET.top}`)
+  else
+    ok(
+      `bands ${bands[0]!.y0}–${bandBottom} = 3 × ${BLD_BAND_H} px + 2 × ${BLD_SLAB_H} px slab, ` +
+        `${BLD_BAND_H} px = round(m2px(3.4)) — a 3.4 m floor-to-floor storey (3.0 m clear + 0.4 m slab/services)`,
+    )
 }
-const bandTop = Math.min(...bands.map((b) => b.y0))
-const bandBottom = Math.max(...bands.map((b) => b.y1))
-if (bandBottom > BLD_STREET.top) fail(`the lowest band ends at ${bandBottom}, below the street ${BLD_STREET.top}`)
-else ok(`bands 94–560 above the street line ${BLD_STREET.top}, each 150 px tall`)
 
 // ------------------------------------------------------ 3. desks + plates
+/** design px → final stage px: what the painter actually blits. */
+const fin = (r: Rect): Rect => ({ x: r.x * SCENE_ZOOM, y: r.y * SCENE_ZOOM, w: r.w * SCENE_ZOOM, h: r.h * SCENE_ZOOM })
 const platesBySeat = new Map(layoutBuildingPlates(seats).plates.map((p) => [p.id, p]))
 const { plates, violations } = layoutBuildingPlates(seats)
 if (plates.length !== 13) fail(`${plates.length} plates, want 13`)
@@ -124,16 +159,23 @@ let plateOnHead = 0
 let offStage = 0
 for (const s of seats) {
   const desk = buildingDeskRect(s)
-  if (!inside(desk, BUILDING_W, BUILDING_H)) {
+  if (!inside(fin(desk), BUILDING_W, BUILDING_H)) {
     offStage++
-    fail(`${s.meta.id}: desk ${JSON.stringify(desk)} leaves the ${BUILDING_W}×${BUILDING_H} sheet`)
+    fail(`${s.meta.id}: desk ${JSON.stringify(fin(desk))} leaves the ${BUILDING_W}×${BUILDING_H} stage in final px`)
   }
   const p = platesBySeat.get(s.meta.id)
   if (!p) {
     fail(`${s.meta.id}: no nameplate`)
     continue
   }
-  if (!inside({ x: p.x, y: p.y, w: p.w, h: p.h }, BUILDING_W, BUILDING_H)) offStage++
+  if (!inside(fin({ x: p.x, y: p.y, w: p.w, h: p.h }), BUILDING_W, BUILDING_H)) offStage++
+  // the plate is a UI chip: never taller than the desk it labels, never
+  // outside the floor band of the agent it names
+  if (p.h > 58 * BLD_DESK.scale + 0.01) fail(`${p.id}: plate ${p.h} px is taller than the ${r2(58 * BLD_DESK.scale)} px desk`)
+  const band = BLD_BANDS[s.floor]
+  if (p.y < band.y0 || p.y + p.h > band.y1) {
+    fail(`${p.id}: plate ${p.y}…${p.y + p.h} leaves its band ${band.y0}…${band.y1}`)
+  }
   for (const q of plates) {
     if (q.id === p.id) continue
     if (overlap(p, q)) {
@@ -155,13 +197,22 @@ for (let i = 0; i < plates.length; i++) {
     if (overlap(plates[i]!, plates[j]!)) plateOverlap++
   }
 }
-if (offStage === 0) ok(`13 desks + 13 nameplates inside the ${BUILDING_W}×${BUILDING_H} sheet`)
+if (offStage === 0) ok(`13 desks + 13 nameplates inside the ${BUILDING_W}×${BUILDING_H} stage in final px (design × ${SCENE_ZOOM})`)
 if (plateOverlap === 0 && plateOnHead === 0) {
-  ok(`plates: 0 overlap, 0 over another head (${plates.length} plates, max width ${Math.max(...plates.map((p) => p.w))} px)`)
+  ok(`plates: 0 overlap, 0 over another head, none taller than its desk or outside its band (${plates.length} plates, max width ${Math.max(...plates.map((p) => p.w))} px)`)
 }
-if (BLD_AVATAR_H < 30 || BLD_AVATAR_H > 45) fail(`avatar ${BLD_AVATAR_H} px, want 30–45 (overview scale)`)
-else ok(`overview scale: avatar ${BLD_AVATAR_H} px, desk ${r2(128 * BLD_DESK.scale)} px wide (per-floor avatar is 150)`)
-if (measureSans(shortName('Dimas'), 9, 700) <= 0) fail('plate measurement returned 0')
+// (b) one person everywhere: the avatar is 42 px = 45–60 % of the 83 px band
+{
+  const ratio = BLD_AVATAR_H / BLD_BAND_H
+  if (BLD_AVATAR_H !== 42) fail(`avatar ${BLD_AVATAR_H} px, want exactly 42 (the 1.7 m scale anchor)`)
+  else if (!(ratio >= 0.45 && ratio <= 0.6)) fail(`avatar is ${r2(ratio * 100)} % of the band, want 45–60 %`)
+  else
+    ok(
+      `one person everywhere: avatar ${BLD_AVATAR_H} px = ${r2(ratio * 100)} % of the ${BLD_BAND_H} px band ` +
+        `(final ${r2(42 * SCENE_ZOOM)} px); desk ${r2(128 * BLD_DESK.scale)} design / ${r2(128 * BLD_DESK.scale * SCENE_ZOOM)} final px`,
+    )
+}
+if (measureSans(shortName('Dimas'), 8.5, 700) <= 0) fail('plate measurement returned 0')
 
 // --------------------------------------- 4. the two canvases (desktop/phone)
 {
@@ -183,10 +234,11 @@ if (measureSans(shortName('Dimas'), 9, 700) <= 0) fail('plate measurement return
       ['desk', buildingDeskRect(s)],
       ['plate', platesBySeat.get(s.meta.id)!],
     ] as const) {
-      const sx = phone.left + r.x * phone.s
-      const sy = phone.top + r.y * phone.s
-      const sw = r.w * phone.s
-      const sh = r.h * phone.s
+      const f = fin(r)
+      const sx = phone.left + f.x * phone.s
+      const sy = phone.top + f.y * phone.s
+      const sw = f.w * phone.s
+      const sh = f.h * phone.s
       if (sx < 0 || sy < 0 || sx + sw > PW || sy + sh > PH) {
         cut++
         fail(`390×692: ${s.meta.id} ${name} spans ${sx.toFixed(1)}…${(sx + sw).toFixed(1)} × ${sy.toFixed(1)}…${(sy + sh).toFixed(1)}`)
@@ -194,8 +246,8 @@ if (measureSans(shortName('Dimas'), 9, 700) <= 0) fail('plate measurement return
     }
   }
   for (const b of bands) {
-    const sy = phone.top + b.y0 * phone.s
-    const sh = (b.y1 - b.y0) * phone.s
+    const sy = phone.top + b.y0 * SCENE_ZOOM * phone.s
+    const sh = (b.y1 - b.y0) * SCENE_ZOOM * phone.s
     if (sy < 0 || sy + sh > PH) {
       cut++
       fail(`390×692: L${b.floor} band spans y ${sy.toFixed(1)}…${(sy + sh).toFixed(1)}`)
@@ -207,18 +259,56 @@ if (measureSans(shortName('Dimas'), 9, 700) <= 0) fail('plate measurement return
   if (fit <= 0) fail('phone fit scale is 0')
 }
 
+// --------------------------------- 4b. everything on the stage, in FINAL px
+{
+  const foot = BLD_STREET.walk - STREET_PROPS.inset
+  const furnitureRect = (p: { kind: 'tree' | 'lamp'; x: number; h: number }): Rect => {
+    const [x0, x1] = propSpan(p)
+    return { x: x0, y: foot - p.h, w: x1 - x0, h: p.h }
+  }
+  const rects: Array<[string, Rect]> = [
+    ['building', buildingRect()],
+    ['street', { x: 0, y: BLD_STREET.top, w: SCENE_W, h: BLD_STREET.bottom - BLD_STREET.top }],
+    ['lift shaft', { x: BLD_LIFT.x, y: BLD_LIFT.top, w: BLD_LIFT.w, h: BLD_LIFT.bottom - BLD_LIFT.top }],
+    ...bands.map((b) => [`L${b.floor} band`, { x: BLD.x0, y: b.y0, w: BLD.x1 - BLD.x0, h: b.y1 - b.y0 }] as [string, Rect]),
+    ...seats.map((s) => [`${s.meta.id} desk`, buildingDeskRect(s)] as [string, Rect]),
+    ...plates.map((p) => [`${p.id} plate`, { x: p.x, y: p.y, w: p.w, h: p.h }] as [string, Rect]),
+    ...BLD_FURNITURE.map((p) => [`${p.kind}@${p.x}`, furnitureRect(p)] as [string, Rect]),
+    ...buildingCityRects().map((r, i) => [`city ${i}`, { x: r.x, y: r.y, w: r.w, h: r.h }] as [string, Rect]),
+  ]
+  let out = 0
+  for (const [name, r] of rects) {
+    if (!inside(fin(r), BUILDING_W, BUILDING_H)) {
+      out++
+      fail(`final px: ${name} ${JSON.stringify(fin(r))} leaves the ${BUILDING_W}×${BUILDING_H} stage`)
+    }
+  }
+  // the same rects on the 390×692 phone at its fit (s 0.39)
+  const phone = sideTransform(390, 692, { camX: 500, camY: 344, zoom: 0.78, floor: 1 }, PHONE_CTRL_BAND)
+  for (const [name, r] of rects) {
+    const f = fin(r)
+    const sx = phone.left + f.x * phone.s
+    const sy = phone.top + f.y * phone.s
+    if (sx < 0 || sy < 0 || sx + f.w * phone.s > 390 || sy + f.h * phone.s > 692) {
+      out++
+      fail(`390×692: ${name} spans ${r2(sx)}…${r2(sx + f.w * phone.s)} × ${r2(sy)}…${r2(sy + f.h * phone.s)}`)
+    }
+  }
+  if (!out) ok(`${rects.length} design rects (building, bands, desks, plates, furniture, lift, street, city) × ${SCENE_ZOOM} all inside the stage AND the 390×692 phone fit`)
+}
+
 // -------------------------------------------------------- 5. it is centred
 {
   const b = buildingRect()
-  const dx = Math.abs(b.x + b.w / 2 - BUILDING_W / 2)
-  const limit = BUILDING_W * 0.02
-  if (dx > limit) fail(`building centre is ${dx} px off the stage centre (limit ${limit})`)
-  else ok(`building centred: |${b.x + b.w / 2} − ${BUILDING_W / 2}| = ${dx} px ≤ ${limit} (2 %)`)
+  const dx = Math.abs(b.x + b.w / 2 - SCENE_W / 2)
+  const limit = SCENE_W * 0.02
+  if (dx > limit) fail(`building centre is ${dx} px off the design-sheet centre (limit ${r2(limit)})`)
+  else ok(`building centred on the design sheet: |${b.x + b.w / 2} − ${r2(SCENE_W / 2)}| = ${r2(dx)} px ≤ ${r2(limit)} (2 %)`)
   // and the rendered centring: at the fit the stage is centred in the canvas
   const phone = sideTransform(390, 692, { camX: 500, camY: 344, zoom: 0.78, floor: 1 }, PHONE_CTRL_BAND)
-  const cx = phone.left + (b.x + b.w / 2) * phone.s
+  const cx = phone.left + (b.x + b.w / 2) * SCENE_ZOOM * phone.s
   const off = Math.abs(cx - 390 / 2)
-  if (off > 390 * 0.02) fail(`rendered building centre is ${off} px off the canvas centre on 390 px`)
+  if (off > 390 * 0.02) fail(`rendered building centre is ${r2(off)} px off the canvas centre on 390 px`)
   else ok(`rendered centre on 390×692: ${r2(cx)} vs canvas 195 (${r2(off)} px)`)
 }
 
@@ -271,7 +361,7 @@ if (measureSans(shortName('Dimas'), 9, 700) <= 0) fail('plate measurement return
   const hit = buildingHit(seats, first.cx, first.floorY - first.avatarH / 2)
   if (!hit || !('id' in hit) || hit.id !== first.meta.id) fail(`click on ${first.meta.id} → ${JSON.stringify(hit)}`)
   else ok(`click on a desk → ${hit.id} (opens that floor + desk)`)
-  const bandOnly = buildingHit(seats, 660, BLD_BANDS[2].y0 + 8)
+  const bandOnly = buildingHit(seats, 620, BLD_BANDS[2]!.y0 + 8)
   if (!bandOnly || !('floor' in bandOnly) || bandOnly.floor !== 2) fail(`click on the empty L2 band → ${JSON.stringify(bandOnly)}`)
   else ok('click on an empty band → its floor')
   const outside = buildingHit(seats, 80, 200)
@@ -534,47 +624,88 @@ else ok(`${frames} building frames (${THEMES.length} themes × desktop/phone × 
   scaleNear(STREET_PROPS.treeH, 7, 'tree height', 0.15)
   scaleNear(STREET_PROPS.lampH, 6, 'lamp height')
   scaleNear(LANE_W, 3.5, 'lane width')
+  scaleNear(BLD_ZEBRA.x1 - BLD_ZEBRA.x0, 3.6, 'zebra width')
+  scaleNear(BLD_DASH.line, 3, 'dash paint')
+  scaleNear(BLD_DASH.line + BLD_DASH.gap, 9, 'dash pitch')
   scaleNear(BLD_STREET.walk - BLD_STREET.top, 1.8, 'near sidewalk')
   scaleNear(BLD_STREET.far - BLD_STREET.road, 0.8, 'far sidewalk', 0.25)
+  scaleNear(BLD_STREET.bottom - BLD_STREET.top, 9.6, 'whole street (true depth)')
   if (STREET_PROPS.treeH < 150 || STREET_PROPS.treeH > 200) fail(`tree ${STREET_PROPS.treeH} px outside the 150–200 px window`)
-  if (LANE_DEPTH < 44 || LANE_DEPTH > 52) fail(`lane depth ${LANE_DEPTH} px outside the foreshortened 44–52 px window`)
+  // the depth axis is no longer squeezed: a lane is as deep as it is wide
+  if (LANE_DEPTH !== LANE_W) fail(`lane depth ${LANE_DEPTH} ≠ lane width ${LANE_W} (the ×0.56 squeeze is back?)`)
+  if (BLD_STREET.road - BLD_STREET.walk !== 2 * LANE_W) {
+    fail(`road depth ${BLD_STREET.road - BLD_STREET.walk} ≠ 2 lanes (${2 * LANE_W})`)
+  }
   if (!fails) {
     ok(
-      `street scale ${PX_PER_M} px/m: tree ${STREET_PROPS.treeH} px (7 m), lamp ${STREET_PROPS.lampH} px (6 m), ` +
-        `lane ${LANE_W} px wide / ${LANE_DEPTH} px deep, sidewalks ${BLD_STREET.walk - BLD_STREET.top}+${BLD_STREET.far - BLD_STREET.road} px`,
+      `street scale ${PX_PER_M} px/m at TRUE depth: road ${BLD_STREET.road - BLD_STREET.walk} px = 2 × ${LANE_W} px lanes ` +
+        `(lane depth = lane width), sidewalks ${BLD_STREET.walk - BLD_STREET.top}+${BLD_STREET.far - BLD_STREET.road} px, ` +
+        `${BLD_STREET.bottom - BLD_STREET.top} px = 9.6 m kerb to kerb to kerb`,
     )
   }
 
-  // each prop stands on the kerb, whole canopy clear of the facade bay
+  // ---------------- interior props, all derived from m2px (gate c) ----------
+  {
+    const s = BLD_DESK.scale
+    const propNear = (got: number, want: number, name: string) => {
+      const dev = Math.abs(got - want) / want
+      if (dev > 0.1) fail(`${name}: ${r2(got)} px vs ${r2(want)} px (${r2(dev * 100)} % off, limit 10 %)`)
+    }
+    propNear(128 * s, BLD_PROP.deskW, 'desk width (128 × scale vs m2px(1.6))')
+    propNear(58 * s, BLD_PROP.deskH, 'desk height (58 × scale vs m2px(0.75))')
+    propNear(84 * s, BLD_PROP.chairH, 'chair back (84 × scale vs m2px(1.05))')
+    propNear(36 * s, BLD_PROP.seatH, 'seat (36 × scale vs m2px(0.45))')
+    propNear(38 * s, BLD_PROP.monitorW, 'monitor width (38 × scale vs m2px(0.49))')
+    propNear((3.3 + 8.3 + 23) * s, BLD_PROP.monitorH, 'monitor height ((3.3+8.3+23) × scale vs m2px(0.45))')
+    propNear(BLD_DOOR_H, BLD_PROP.doorH, 'lift door (BLD_DOOR_H vs m2px(2.1))')
+    propNear(BLD_CAR_H, BLD_PROP.carH, 'lift car (BLD_CAR_H vs m2px(2.2))')
+    propNear(BLD_LIFT.w, BLD_PROP.shaftW, 'lift shaft (BLD_LIFT.w vs m2px(1.2))')
+    // and the table itself is honest: every entry IS m2px(real metres)
+    const metres: Array<[keyof typeof BLD_PROP, number]> = [
+      ['deskW', 1.6],
+      ['deskH', 0.75],
+      ['chairH', 1.05],
+      ['seatH', 0.45],
+      ['monitorW', 0.49],
+      ['monitorH', 0.45],
+      ['doorH', 2.1],
+      ['carH', 2.2],
+      ['shaftW', 1.2],
+    ]
+    for (const [key, m] of metres) {
+      if (Math.abs(BLD_PROP[key] - m2px(m)) > 1e-9) fail(`BLD_PROP.${key} ${BLD_PROP[key]} is not m2px(${m})`)
+    }
+    if (BLD_PROP.namePlateH !== 15) fail(`BLD_PROP.namePlateH ${BLD_PROP.namePlateH}, want the 15 px UI chip`)
+    if (!fails) {
+      ok(
+        `interior props from one scale: desk ${r2(128 * s)}×${r2(58 * s)} (1.6×0.75 m), chair ${r2(84 * s)} seat ${r2(36 * s)}, ` +
+          `monitor ${r2(38 * s)}×${r2((3.3 + 8.3 + 23) * s)}, door ${BLD_DOOR_H}, car ${BLD_CAR_H}, shaft ${BLD_LIFT.w} — all ±10 % of metres`,
+      )
+    }
+  }
+
+  // each prop stands on the kerb, whole painted span clear of the facade bay
   const foot = BLD_STREET.walk - STREET_PROPS.inset
   let offStreet = 0
   let inFacadeBay = 0
   for (const prop of BLD_FURNITURE) {
     const top = foot - prop.h
-    const reach = STREET_SHAPE.reach(prop.kind, prop.h)
-    if (top < 0 || foot > BUILDING_H) {
+    if (top < 0 || foot > SCENE_H) {
       offStreet++
       fail(`${prop.kind} at x ${prop.x} spans y ${r2(top)}…${foot}, outside the sheet`)
     }
-    if (prop.x - reach < BLD.x0 && prop.x + reach > BLD.x1) {
+    const [x0, x1] = propSpan(prop)
+    if (x1 > BLD.x0 && x0 < BLD.x1) {
       inFacadeBay++
-      fail(`${prop.kind} at x ${prop.x} covers the whole facade bay`)
-    }
-    // it may touch the bay only if the facade (painted later) can cover it
-    if (prop.x + reach > BLD.x0 && prop.x - reach < BLD.x1) {
-      fail(`${prop.kind} at x ${prop.x} reaches into the facade bay by ${r2(Math.min(prop.x + reach - BLD.x0, BLD.x1 - (prop.x - reach)))} px`)
+      fail(`${prop.kind} at x ${prop.x} paints over the facade bay (${r2(Math.max(x0, BLD.x0))}…${r2(Math.min(x1, BLD.x1))})`)
     }
   }
   // a lamp head must never grow out of a canopy: keep the x-intervals apart
-  const spanOf = (prop: { kind: 'tree' | 'lamp'; x: number; h: number }) => {
-    if (prop.kind === 'tree') return [prop.x - STREET_SHAPE.canopyR(prop.h), prop.x + STREET_SHAPE.canopyR(prop.h)] as const
-    return [prop.x - 1.5, prop.x + STREET_SHAPE.reach('lamp', prop.h)] as const
-  }
   let propHits = 0
   for (let i = 0; i < BLD_FURNITURE.length; i++) {
     for (let j = i + 1; j < BLD_FURNITURE.length; j++) {
-      const a = spanOf(BLD_FURNITURE[i]!)
-      const b = spanOf(BLD_FURNITURE[j]!)
+      const a = propSpan(BLD_FURNITURE[i]!)
+      const b = propSpan(BLD_FURNITURE[j]!)
       if (a[1] > b[0] && b[1] > a[0]) {
         propHits++
         fail(`${BLD_FURNITURE[i]!.kind}@${BLD_FURNITURE[i]!.x} overlaps ${BLD_FURNITURE[j]!.kind}@${BLD_FURNITURE[j]!.x} (${r2(a[0])}…${r2(a[1])} vs ${r2(b[0])}…${r2(b[1])})`)
@@ -587,7 +718,7 @@ else ok(`${frames} building frames (${THEMES.length} themes × desktop/phone × 
   if (!offStreet && !inFacadeBay) {
     ok(
       `${BLD_FURNITURE.length} props on the near kerb (${trees.length} trees ${STREET_PROPS.treeH}/${STREET_PROPS.treeH2} px, ` +
-        `${lamps.length} lamps ${STREET_PROPS.lampH} px), all inside the ${BUILDING_W}×${BUILDING_H} sheet and clear of the facade bay`,
+        `${lamps.length} lamps ${STREET_PROPS.lampH} px), all inside the ${r2(SCENE_W)}×${r2(SCENE_H)} sheet and clear of the facade bay`,
     )
   }
 

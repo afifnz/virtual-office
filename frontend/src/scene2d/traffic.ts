@@ -24,6 +24,7 @@ import {
   LANE_DEPTH,
   LANE_W,
   PX_PER_M,
+  SCENE_W,
   buildingCityRects,
 } from './building'
 
@@ -36,19 +37,19 @@ export const ROAD = {
    * bus, so even the longest vehicle is fully off-screen when it wraps.
    */
   x0: -140,
-  x1: 1140,
-  top: BLD_STREET.walk, // 572
-  bottom: BLD_STREET.road, // 668
+  x1: SCENE_W + 140,
+  top: BLD_STREET.walk, // 381
+  bottom: BLD_STREET.road, // 553
   /** wheels line of each lane (side view: y at the bottom of the vehicle) */
-  nearBase: 664,
-  farBase: 616,
+  nearBase: 547,
+  farBase: 461,
   /** dashed centre line */
-  centre: (BLD_STREET.walk + BLD_STREET.road) / 2, // 620
+  centre: (BLD_STREET.walk + BLD_STREET.road) / 2, // 467
   /** minimum bumper-to-bumper gap: 1.2 m at the street scale */
   minGap: 29,
 } as const
 
-const LOOP = ROAD.x1 - ROAD.x0 // 1280
+const LOOP = ROAD.x1 - ROAD.x0 // ≈ 1113
 
 /** The zebra crossing under the tower entrance (painted by the static sheet). */
 export const ZEBRA = BLD_ZEBRA
@@ -62,34 +63,36 @@ export const STOP_LINE = { near: ZEBRA.x0 - 10, far: ZEBRA.x1 + 10 } as const
 export const STOP_S = { near: STOP_LINE.near - ROAD.x0, far: ROAD.x1 - STOP_LINE.far } as const
 
 /** Signal heads on the near sidewalk, right of the zebra (never over the facade). */
-export const SIGNAL = { x: 560, y: 544, w: 26, h: 20 } as const
+export const SIGNAL = { x: 485, y: 355, w: 26, h: 20 } as const
 
 /** Sidewalk walking bands (feet line). 42 px walkers fit under the facade base. */
 export const WALK = {
-  near: { feet: 572, top: BLD_STREET.top }, // 528…572
-  far: { feet: 680, top: BLD_STREET.road }, // 668…688, 8 px of pavement under the feet
+  near: { feet: BLD_STREET.walk, top: BLD_STREET.top }, // 337…381
+  far: { feet: 565, top: BLD_STREET.road }, // 553…573, 8 px of pavement under the feet
 } as const
 
 /**
- * One light for both lanes: green 6 s, yellow 2 s, red 6 s (14 s cycle). The
+ * One light for both lanes: green 6 s, yellow 2 s, red 9 s (17 s cycle). The
  * pedestrian light walks during the red phase, so nobody crosses while a car
  * is moving — and a car never enters the zebra once the light leaves green.
+ * The 9 s red is sized by the crossing: clearance 2.2 s + walk 5.8 s = 8.0 s
+ * of the 9 s red phase.
  */
-export const LIGHT = { green: 6, yellow: 2, red: 6, cycle: 14 } as const
+export const LIGHT = { green: 6, yellow: 2, red: 9, cycle: 17 } as const
 /** Start of the red phase inside a cycle (green + yellow). */
 export const RED_START = LIGHT.green + LIGHT.yellow
 
 /**
- * Zebra clearance, recomputed for the new vehicle lengths.
+ * Zebra clearance, recomputed for the vehicle lengths.
  *
  * Worst case is a bus (220 px) that takes the stop line on the last frame of
  * yellow: it still has to travel its own length + the 88 px zebra + the 10 px
- * stop gap = 318 px at its 151 px/s free speed = 2.11 s. 2.3 s gives the queue
- * 0.2 s of slack; `verify/traffic_check.ts` sweeps the red phase and fails if
+ * stop gap = 318 px at its 151 px/s free speed = 2.11 s. 2.2 s gives the queue
+ * a hair of slack; `verify/traffic_check.ts` sweeps the red phase and fails if
  * anyone is still inside the zebra at red + clearance.
  */
 export const ZEBRA_CLEAR_PX = 220 + (ZEBRA.x1 - ZEBRA.x0) + 10 // 318
-export const CROSS_CLEARANCE = 2.3
+export const CROSS_CLEARANCE = 2.2
 
 export type LightPhase = 'green' | 'yellow' | 'red'
 
@@ -293,33 +296,34 @@ export interface PedView {
  * the crossers visit it (as the far end of their crossing).
  */
 export const PED_SPECS = [
-  { id: 'ped-1', kind: 'walk', side: 'near', from: 96, to: 380, speed: 30, phase: 0, coat: 0 },
-  { id: 'ped-2', kind: 'walk', side: 'near', from: 780, to: 946, speed: 26, phase: 5, coat: 1 },
-  { id: 'ped-3', kind: 'walk', side: 'near', from: 600, to: 740, speed: 28, phase: 9, coat: 2 },
-  { id: 'ped-x1', kind: 'cross', side: 'near', from: 474, to: 474, speed: 0, phase: 0, coat: 3 },
-  { id: 'ped-x2', kind: 'cross', side: 'near', from: 526, to: 526, speed: 0, phase: 14, coat: 1 },
+  { id: 'ped-1', kind: 'walk', side: 'near', from: 96, to: 330, speed: 30, phase: 0, coat: 0 },
+  { id: 'ped-2', kind: 'walk', side: 'near', from: 640, to: 790, speed: 26, phase: 5, coat: 1 },
+  { id: 'ped-3', kind: 'walk', side: 'near', from: 500, to: 620, speed: 28, phase: 9, coat: 2 },
+  { id: 'ped-x1', kind: 'cross', side: 'near', from: 391, to: 391, speed: 0, phase: 0, coat: 3 },
+  { id: 'ped-x2', kind: 'cross', side: 'near', from: 443, to: 443, speed: 0, phase: 1.7, coat: 1 },
 ] as const
 
 export const CROSS_PERIOD = LIGHT.cycle * 2
 /** Kerb lines: the two pavement edges the crossing spans. */
 export const CURB = { near: BLD_STREET.walk, far: BLD_STREET.road } as const
 
-/** Kerb to kerb: 108 px = 4.4 m of road at the street scale. */
+/** Kerb to kerb: 184 px = 7 m of road at the street scale (true depth). */
 export const CROSS_PX = WALK.far.feet - WALK.near.feet
-/** 108 px in 3.4 s = 31.8 px/s = 1.30 m/s: a brisk, readable walk. */
-export const CROSS_DUR = 3.4
-export const CROSS_SPEED = CROSS_PX / CROSS_DUR // 31.8 px/s
+/** 184 px in 5.8 s = 31.7 px/s = 1.29 m/s: a brisk, readable walk. */
+export const CROSS_DUR = 5.8
+export const CROSS_SPEED = CROSS_PX / CROSS_DUR // 31.7 px/s
 
 /**
- * Start `CROSS_CLEARANCE` (2.3 s) into the red phase: the last bus that took
+ * Start `CROSS_CLEARANCE` (2.2 s) into the red phase: the last bus that took
  * the line on yellow needs 318 px / 151 px/s ≈ 2.1 s to clear the zebra, so
- * the walker never meets one. The 3.4 s that remain carry the figure over both
- * kerbs. 2.3 + 3.4 = 5.7 s < 6 s of red, so the crossing always finishes on
- * green for the cars — which is exactly the safety margin the gate checks.
+ * the walker never meets one. The 5.8 s that remain carry the figure over both
+ * kerbs. 2.2 + 5.8 = 8.0 s < 9 s of red, so the crossing always finishes
+ * before the cars get green — which is exactly the safety margin the gate
+ * checks.
  */
-export const CROSS_START = RED_START + CROSS_CLEARANCE // 10.3 s into the first cycle
-const CROSS_END = CROSS_START + CROSS_DUR // 13.7 s
-const CROSS_BACK = CROSS_START + LIGHT.cycle // 24.3 s
+export const CROSS_START = RED_START + CROSS_CLEARANCE // 10.2 s into the first cycle
+const CROSS_END = CROSS_START + CROSS_DUR // 16.0
+const CROSS_BACK = CROSS_START + LIGHT.cycle // 27.2
 
 /**
  * Feet position of a crosser: pure in `t`, in the road only during the
@@ -494,17 +498,18 @@ export interface CloudDef {
 }
 
 /** Day sky, slow drift (px/s). Wraps well outside the sheet. The y values keep
- * every cloud inside the 38 px sky strip above the roof. */
+ * every cloud inside the 46 px sky strip above the roof. */
 export const CLOUDS: readonly CloudDef[] = [
   { x0: -60, y: 2, w: 96, speed: 4.2, alpha: 0.88 },
   { x0: 300, y: 12, w: 66, speed: 3.1, alpha: 0.72 },
   { x0: 560, y: 0, w: 124, speed: 5.4, alpha: 0.92 },
-  { x0: 860, y: 14, w: 78, speed: 3.6, alpha: 0.76 },
+  { x0: 700, y: 14, w: 78, speed: 3.6, alpha: 0.76 },
   { x0: 150, y: 8, w: 56, speed: 2.4, alpha: 0.62 },
 ]
 
-const SKY_LO = -170
-const SKY_HI = 1170
+/** Cloud wrap window: SCENE_W plus one cloud width on each side. */
+export const SKY_LO = -170
+export const SKY_HI = SCENE_W + 170
 const SKY_SPAN = SKY_HI - SKY_LO
 
 export function cloudX(c: CloudDef, t: number): number {
@@ -519,11 +524,14 @@ export interface BirdDef {
   size: number
 }
 
-/** Sparse fly-bys: each bird crosses the sky once per 37…71 s, day only. */
+/**
+ * Sparse fly-bys: each bird crosses the sky once per 37…71 s, day only. They
+ * fly at y 14–32 so they cross ABOVE the roof line (46), not beside the tower.
+ */
 export const BIRDS: readonly BirdDef[] = [
-  { y: 96, period: 37, offset: 0, speed: 82, size: 4 },
-  { y: 118, period: 53, offset: 21, speed: 66, size: 3.2 },
-  { y: 84, period: 71, offset: 44, speed: 96, size: 3.6 },
+  { y: 16, period: 37, offset: 0, speed: 82, size: 4 },
+  { y: 24, period: 53, offset: 21, speed: 66, size: 3.2 },
+  { y: 30, period: 71, offset: 44, speed: 96, size: 3.6 },
 ]
 
 export interface BirdState {

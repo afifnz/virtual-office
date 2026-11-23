@@ -17,7 +17,7 @@
  *   - every part is painted from the bbox (`PX_PER_M × metres`), never from a
  *     hardcoded pixel size.
  */
-import { BLD, BLD_STREET, BUILDING_W } from './building'
+import { BLD, BLD_STREET, SCENE_W } from './building'
 import { THEME_TOKENS, type ThemeName } from './palette'
 import {
   BIRDS,
@@ -77,9 +77,9 @@ const SKIN = { day: '#E8C39B', night: '#AF9273' } as const
 
 /** Nothing in the sky may paint over the facade bay (see the file header). */
 const SKY_CLIP: ReadonlyArray<readonly [number, number, number, number]> = [
-  [0, 0, BUILDING_W, BLD.roofTop], // above the roof
+  [0, 0, SCENE_W, BLD.roofTop], // above the roof
   [0, 0, BLD.x0 - 8, BLD_STREET.top], // left bay
-  [BLD.x1 + 8, 0, BUILDING_W - (BLD.x1 + 8), BLD_STREET.top], // right bay
+  [BLD.x1 + 8, 0, SCENE_W - (BLD.x1 + 8), BLD_STREET.top], // right bay
 ]
 
 function clipSky(ctx: Ctx): void {
@@ -91,7 +91,7 @@ function clipSky(ctx: Ctx): void {
 function drawClouds(ctx: Ctx, t: number): void {
   for (const c of CLOUDS) {
     const x = cloudX(c, t)
-    if (x > BUILDING_W + 10 || x + c.w < -10) continue
+    if (x > SCENE_W + 10 || x + c.w < -10) continue
     const y = c.y
     ctx.fillStyle = '#FFFFFF'
     ctx.globalAlpha = c.alpha * 0.9

@@ -4,25 +4,32 @@
  * This file is pure geometry — no DOM, no canvas — so the painter, the camera
  * and `verify/building_check.ts` all read the same numbers:
  *
- *   0–38     sky strip above the roof
- *   38–54    roof (coping + fascia)
- *   54–212   L3 Tim Dev     (band 150, floor line 202)
- *   212–220  slab
- *   220–370  L2 Tim Edu     (band 150, floor line 360)
- *   370–378  slab
- *   378–528  L1 Lobby       (band 150, floor line 518)
- *   528–688  street: near sidewalk 44, road 96, far sidewalk 20
+ *   0–46     sky strip above the roof
+ *   46–70    roof (coping + fascia)
+ *   70–153   L3 Tim Dev     (band 83, floor line 147)
+ *   153–162  slab
+ *   162–245  L2 Tim Edu     (band 83, floor line 239)
+ *   245–254  slab
+ *   254–337  L1 Lobby       (band 83, floor line 331)
+ *   337–381  near sidewalk  44 px (1.8 m) — the building stands on its back edge
+ *   381–553  road           172 px = 2 lanes × 86 px (2 × 3.5 m, true depth)
+ *   553–573  far sidewalk   20 px (0.8 m) — 236 px = 9.6 m of street, 1:1
  *
- * ONE scale for the street: `PX_PER_M = 24.5`, taken from the 42 px overview
- * avatar for a 1.7 m person. Every street prop (car, bus, van, moto, walker,
- * tree, lamp, lane marking, zebra) is derived from that constant — never sized
- * ad hoc, never inherited from the old toy scale.
+ * ONE scale for the whole scene: `PX_PER_M = 24.5`, taken from the 42 px
+ * overview avatar for a 1.7 m person. Every prop — floor band, desk, chair,
+ * monitor, lift door, lift car, tree, lamp, lane marking, zebra, vehicle — is
+ * `PX_PER_M × real metres`; `verify/*_check.ts` re-derives each one and fails
+ * outside ±10 %. A floor band is 83 px = round(m2px(3.4)): 3.4 m
+ * floor-to-floor = 3.0 m clear + 0.4 m slab/services, the midpoint of the real
+ * 3.2–3.6 m office window.
  *
- * The building is 480 px wide and centred on the 1000 px sheet (x 260–740), so
- * its centre IS the canvas centre — the difference is 0, well inside the 2 %
- * gate. One row of desks per floor keeps all 13 agents, desks and nameplates
- * readable at overview scale: a 0.38 desk scale (48.6 px wide) and a 42 px
- * avatar, both far smaller than the per-floor 150 px avatar on purpose.
+ * The scene is composed on a design sheet SMALLER than the stage and blown up
+ * once by the painter: geometry lives in 0…SCENE_W × 0…SCENE_H and every draw
+ * is multiplied by `SCENE_ZOOM`, so an 83 px band is 99.6 px on the 1000×688
+ * canvas. 1.2 is the largest uniform zoom at which the realistic street still
+ * fits: the composition is 573 design px tall (46 px sky + 337 px building +
+ * 236 px street), and 573 × 1.2 = 687.6 ≤ 688. One step more (1.25) would
+ * need 573 × 1.25 ≈ 716 px of canvas — 28 px of street or sky cropped.
  */
 import type { AgentMeta } from '../lib/agents'
 import { FLOORS, type FloorId } from '../lib/rooms'
@@ -31,48 +38,55 @@ import { measureSans, shortName } from './labels'
 export const BUILDING_W = 1000
 export const BUILDING_H = 688
 
+// --------------------------------------------------------------- the camera
+
+/**
+ * Uniform zoom of the GEDUNG sheet: design px × 1.2 = stage px.
+ *
+ * All geometry below stays in design px (0…SCENE_W × 0…SCENE_H); the painter
+ * applies `ctx.scale(SCENE_ZOOM, SCENE_ZOOM)` exactly once, and the gates
+ * multiply every design rect by it before the 1000×688 (and phone) checks.
+ */
+export const SCENE_ZOOM = 1.2
+/** Design sheet width: what 1000 stage px show at the zoom. */
+export const SCENE_W = BUILDING_W / SCENE_ZOOM // 833.33
+/** Design sheet height: what 688 stage px show at the zoom. */
+export const SCENE_H = BUILDING_H / SCENE_ZOOM // 573.33
+/** Design px → final stage px. */
+export const stagePx = (v: number): number => v * SCENE_ZOOM
+
 // --------------------------------------------------------------- the scale
 
 /**
  * The single scale of the GEDUNG view: 24.5 design px per metre.
  *
  * It is not invented — it is the overview avatar (42 px) divided by a real
- * person (1.7 m), rounded to the nearest 0.5. Everything the street paints is
- * `PX_PER_M × real metres`; `verify/traffic_check.ts` re-derives each prop from
+ * person (1.7 m), rounded to the nearest 0.5. Everything the scene paints is
+ * `PX_PER_M × real metres`; `verify/*_check.ts` re-derives each prop from
  * the table below and fails outside ±10 %.
  */
 export const PX_PER_M = 24.5
 
-/** Metres → design px at the one street scale. */
+/** Metres → design px at the one scene scale. */
 export const m2px = (metres: number): number => metres * PX_PER_M
 
 /**
- * Street depth is the one axis the sheet cannot draw at 1:1.
- *
- * A true 2 × 3.5 m carriageway plus two sidewalks is 10–12 m = 245–294 px.
- * The sheet is 688 px tall and the three 150 px bands + roof are untouchable,
- * so after lifting the whole building 32 px the street has 160 px. Drawing the
- * depth axis at 1:1 would need either a ~900 px canvas (which shrinks the
- * 42 px avatar at fit — not allowed) or a one-lane road. The scene is a 3/4
- * view, not an elevation, so the depth axis is foreshortened by one documented
- * constant: 0.56 → a 3.5 m lane is 48 px deep on screen while staying 85.75 px
- * wide wherever it is measurable (zebra, stop line, dash pattern).
+ * A 3.5 m lane, measured the same way in BOTH axes — the road keeps its true
+ * depth now that the bands are 83 px: 2 × 86 px + 44 + 20 px sidewalks =
+ * 236 px = 9.6 m of street at 1:1. (The old ×0.56 depth squeeze is gone.)
  */
-export const STREET_DEPTH_K = 0.56
-/** 3.5 m lane, full scale along the street (dash pattern, stop distance). */
-export const LANE_W = m2px(3.5) // 85.75
-/** The same lane measured across the road, on the sheet: 48 px. */
-export const LANE_DEPTH = Math.round(LANE_W * STREET_DEPTH_K) // 48
+export const LANE_W = Math.round(m2px(3.5)) // 86
+export const LANE_DEPTH = LANE_W
 
 /** Facade rectangle — the city must never intersect it (gate d). */
 export const BLD = {
-  x0: 260,
-  x1: 740,
-  cx: 500,
-  roofOverhangX: 252,
-  roofTop: 38,
+  x0: 177,
+  x1: 657,
+  cx: 417,
+  roofOverhangX: 169,
+  roofTop: 46,
   roofH: 24,
-  baseY: 528,
+  baseY: 337,
 } as const
 
 export interface BuildingBand {
@@ -85,30 +99,35 @@ export interface BuildingBand {
   floorY: number
 }
 
-/** Top → bottom, exactly as painted (the whole building sits 32 px higher than
- * the first draft so the street band can carry a scaled road). */
+/**
+ * Top → bottom. Each band is `BLD_BAND_H` = 83 px = round(m2px(3.4)) — a 3.4 m
+ * floor-to-floor storey — separated by `BLD_SLAB_H` = 9 px spandrels
+ * (round(m2px(0.35))). The floor lip is 6 px, so feet stand at y1 − 6.
+ */
 export const BLD_BANDS: Record<FloorId, BuildingBand> = {
-  3: { floor: 3, y0: 62, y1: 212, floorY: 202 },
-  2: { floor: 2, y0: 220, y1: 370, floorY: 360 },
-  1: { floor: 1, y0: 378, y1: 528, floorY: 518 },
+  3: { floor: 3, y0: 70, y1: 153, floorY: 147 },
+  2: { floor: 2, y0: 162, y1: 245, floorY: 239 },
+  1: { floor: 1, y0: 254, y1: 337, floorY: 331 },
 }
 export const BLD_BAND_ORDER: FloorId[] = [3, 2, 1]
-export const BLD_BAND_H = 150
-export const BLD_SLAB_H = 8
+export const BLD_BAND_H = 83
+export const BLD_SLAB_H = 9
 
 /**
- * Street bands under the building base, sized from `PX_PER_M`:
+ * Street bands under the building base, sized from `PX_PER_M` at true depth:
  *
- *   528–572  near sidewalk  44 px (1.8 m) — walkers stand at feet 572
- *   572–668  road           96 px = 2 lanes × 48 px deep (see STREET_DEPTH_K)
- *   668–688  far sidewalk   20 px (0.8 m)
+ *   337–381  near sidewalk  44 px (1.8 m) — walkers stand at feet 381
+ *   381–553  road           172 px = 2 lanes × 86 px (2 × 3.5 m, no squeeze)
+ *   553–573  far sidewalk   20 px (0.8 m)
+ *
+ * 236 px total = 9.6 m kerb-to-kerb-to-kerb, the same scale on both axes.
  */
 export const BLD_STREET = {
-  top: 528,
-  walk: 572,
-  road: 668,
-  far: 688,
-  bottom: 688,
+  top: 337,
+  walk: 381,
+  road: 553,
+  far: 573,
+  bottom: 573,
 } as const
 
 /**
@@ -129,22 +148,19 @@ export const STREET_PROPS = {
 } as const
 
 /**
- * Street furniture layout, shared by the painter and the gate. Every tree and
- * lamp stands clear of the facade x-range (260…740) by its whole canopy, so the
- * static sheet never needs to hide one behind the tower — and if it ever did,
- * the painter draws furniture BEFORE the facade, so occlusion would be the only
- * possible outcome (never a canopy over the glass).
+ * Street furniture layout, shared by the painter and the gate. The side bays
+ * are 169 px wide now (the tower is 480 px on an 833 px sheet), so four props
+ * fit: a tree + a lamp on the left, a lamp + the accent tree on the right.
+ * Every prop keeps its painted span clear of the facade bay and of its
+ * neighbours (see `propSpan`).
  */
 export const BLD_FURNITURE: ReadonlyArray<{ kind: 'tree' | 'lamp'; x: number; h: number }> = [
-  // left bay: tree, lamp, tree, lamp — the lamp heads (+16 px) fall in the gaps
-  { kind: 'tree', x: 60, h: STREET_PROPS.treeH },
-  { kind: 'lamp', x: 122, h: STREET_PROPS.lampH },
-  { kind: 'tree', x: 190, h: STREET_PROPS.treeH2 },
-  { kind: 'lamp', x: 240, h: STREET_PROPS.lampH },
-  // right bay: the two canopies leave no gap for a second head, so one lamp
-  { kind: 'lamp', x: 760, h: STREET_PROPS.lampH },
-  { kind: 'tree', x: 830, h: STREET_PROPS.treeH2 },
-  { kind: 'tree', x: 940, h: STREET_PROPS.treeH },
+  // left bay: tree first (56 keeps the 53 px canopy on the sheet), lamp after
+  { kind: 'tree', x: 56, h: STREET_PROPS.treeH },
+  { kind: 'lamp', x: 124, h: STREET_PROPS.lampH },
+  // right bay: the lamp head reaches right of the post, the accent tree after
+  { kind: 'lamp', x: 664, h: STREET_PROPS.lampH },
+  { kind: 'tree', x: 736, h: STREET_PROPS.treeH2 },
 ]
 
 /** Canopy radius + trunk + head sizes in px, from the one scale. */
@@ -157,26 +173,153 @@ export const STREET_SHAPE = {
 } as const
 
 /**
+ * Painted x-span of a prop: a tree is a symmetric canopy, a lamp is a 3 px
+ * post with its arm + head reaching RIGHT. Shared by the painter's occlusion
+ * rule and the gate's facade/prop clearance proofs.
+ */
+export function propSpan(prop: { kind: 'tree' | 'lamp'; x: number; h: number }): readonly [number, number] {
+  if (prop.kind === 'tree') {
+    const r = STREET_SHAPE.canopyR(prop.h)
+    return [prop.x - r, prop.x + r]
+  }
+  return [prop.x - 1.5, prop.x + STREET_SHAPE.reach('lamp', prop.h)]
+}
+
+/**
  * Road paint. The zebra is 3.6 m wide along the street (88 px) with 0.45 m
  * stripes; the centre line is 3 m of paint and 6 m of gap, exactly the
  * Indonesian marka putus the boss asked for (74 px + 147 px).
  */
-export const BLD_ZEBRA = { x0: 456, x1: 544, stripe: 11, gap: 11 } as const
+export const BLD_ZEBRA = { x0: 373, x1: 461, stripe: 11, gap: 11 } as const
 export const BLD_DASH = {
   line: Math.round(m2px(3)), // 74
   gap: Math.round(m2px(6)), // 147
   thick: 3,
 } as const
 
-/** One shaft through all three floors, in the east bay. */
-export const BLD_LIFT = { x: 692, w: 32, top: 88, bottom: 524 } as const
-/** Car height; its centre rides between `floorY - 18` values. */
-export const BLD_CAR_H = 36
+/** One shaft through all three floors, in the east bay: 1.2 m wide. */
+export const BLD_LIFT = { x: 610, w: Math.round(m2px(1.2)), top: 74, bottom: 331 } as const // w = 29
+/** Lift car, 2.2 m tall; its centre rides on `floorY − BLD_CAR_H/2`. */
+export const BLD_CAR_H = Math.round(m2px(2.2)) // 54
+/** Landing door, 2.1 m tall — the frame the painter draws at every floor. */
+export const BLD_DOOR_H = Math.round(m2px(2.1)) // 51
 
 /** The row of desks inside the facade, clear of the lift bay. */
-export const BLD_DESK = { x0: 276, x1: 684, maxPitch: 56, scale: 0.38 } as const
-/** 1.7 m at `PX_PER_M` — the anchor of the whole street scale. */
+export const BLD_DESK = { x0: 193, x1: 596, maxPitch: 56, scale: m2px(1.6) / 128 } as const // scale 0.30625
+/** 1.7 m at `PX_PER_M` — the anchor of the whole scene scale. */
 export const BLD_AVATAR_H = 42
+
+// ------------------------------------------------------------- nameplates
+
+/** Compact plates: first name + status dot, no chip, no team word. */
+export const B_PLATE_H = 15
+export const B_PLATE_FONT = 8.5
+export const B_PLATE_PAD = 3
+export const B_PLATE_DOT = 4
+export const B_PLATE_DOT_GAP = 3
+export const B_PLATE_GAP = 3
+export const B_PLATE_STEP = 15
+
+/**
+ * The real metres behind every interior prop, in design px — the gate
+ * re-derives each drawn prop against this table (±10 %). The plate is a UI
+ * element, not a physical object, so its height is the plain 15 px constant.
+ */
+export const BLD_PROP = {
+  /** desk top, 1.6 m wide (128 × desk scale) */
+  deskW: m2px(1.6), // 39.2
+  /** desk standing height, 0.75 m (58 × desk scale) */
+  deskH: m2px(0.75), // 18.4
+  /** chair backrest top, 1.05 m (84 × desk scale) */
+  chairH: m2px(1.05), // 25.7
+  /** seat surface, 0.45 m (36 × desk scale) */
+  seatH: m2px(0.45), // 11.0
+  /** monitor panel, 0.49 m wide (38 × desk scale) */
+  monitorW: m2px(0.49), // 12.0
+  /** monitor foot+neck+panel, 0.45 m ((3.3+8.3+23) × desk scale) */
+  monitorH: m2px(0.45), // 11.0
+  /** lift landing door, 2.1 m */
+  doorH: m2px(2.1), // 51.45
+  /** lift car, 2.2 m */
+  carH: m2px(2.2), // 53.9
+  /** lift shaft, 1.2 m */
+  shaftW: m2px(1.2), // 29.4
+  /** nameplate height (UI, not metres) */
+  namePlateH: B_PLATE_H, // 15
+} as const
+
+export function buildingPlateWidth(name: string): number {
+  return Math.ceil(measureSans(shortName(name), B_PLATE_FONT, 700) + B_PLATE_PAD * 2 + B_PLATE_DOT + B_PLATE_DOT_GAP)
+}
+
+export interface BuildingPlate {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  /** stacked above the ideal slot (always drawn with a connector) */
+  connector: boolean
+}
+
+/**
+ * Plates sit 3 px above the head. With 8 agents on a ~50 px pitch a single
+ * level cannot hold five-letter names, so neighbours alternate between two
+ * 15 px levels (plate height + 0) — level 1 tops out at floorY − 75, still
+ * inside the band (top = floorY − 77). A connector is drawn whenever a plate
+ * left its ideal slot.
+ */
+export function layoutBuildingPlates(seats: readonly BuildingSeat[]): {
+  plates: BuildingPlate[]
+  violations: string[]
+} {
+  const plates: BuildingPlate[] = []
+  const violations: string[] = []
+  const overlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+  for (const seat of seats) {
+    const w = buildingPlateWidth(seat.meta.name)
+    const idealX = Math.round(seat.cx - w / 2)
+    const idealBottom = seat.headTop - B_PLATE_GAP
+    let placed: BuildingPlate | null = null
+
+    for (let level = 0; level <= 3 && !placed; level++) {
+      const y = Math.round(idealBottom - B_PLATE_H - level * B_PLATE_STEP)
+      for (const dx of [0, -6, 6, -12, 12]) {
+        const x = Math.round(idealX + dx)
+        const box = { x, y, w, h: B_PLATE_H }
+        if (x < 1 || y < 1 || x + w > SCENE_W - 1 || y + B_PLATE_H > SCENE_H - 1) continue
+        if (plates.some((p) => overlap(box, p))) continue
+        // never cover another agent's head
+        if (
+          seats.some(
+            (o) =>
+              o.meta.id !== seat.meta.id &&
+              overlap(box, { x: o.cx - o.headW / 2, y: o.headTop, w: o.headW, h: o.headH }),
+          )
+        ) {
+          continue
+        }
+        placed = { id: seat.meta.id, x, y, w, h: B_PLATE_H, connector: level > 0 }
+        break
+      }
+    }
+    if (!placed) {
+      violations.push(`${seat.meta.id}: no free plate slot`)
+      placed = {
+        id: seat.meta.id,
+        x: Math.max(1, Math.min(idealX, SCENE_W - 1 - w)),
+        y: Math.max(1, Math.round(idealBottom - B_PLATE_H)),
+        w,
+        h: B_PLATE_H,
+        connector: false,
+      }
+    }
+    plates.push(placed)
+  }
+  return { plates, violations }
+}
 
 export interface BuildingSeat {
   meta: AgentMeta
@@ -190,7 +333,7 @@ export interface BuildingSeat {
   headTop: number
   headW: number
   headH: number
-  /** desk drawing scale (0.38) */
+  /** desk drawing scale (0.30625) */
   scale: number
 }
 
@@ -203,7 +346,7 @@ export function buildingDeskRect(seat: BuildingSeat): { x: number; y: number; w:
 /**
  * One row per floor, ordered left → right by world x. `pitch` is capped at
  * 56 px so the four-agent edu row stays a block instead of stretching across
- * the whole facade; L3's eight desks use the full 408 px row.
+ * the whole facade; L3's eight desks use the full 403 px row.
  */
 export function buildingSeats(metas: readonly AgentMeta[]): BuildingSeat[] {
   const out: BuildingSeat[] = []
@@ -240,89 +383,6 @@ export function buildingSeatsFor(seats: readonly BuildingSeat[], floor: FloorId)
   return seats.filter((s) => s.floor === floor)
 }
 
-// ------------------------------------------------------------- nameplates
-
-/** Compact plates: first name + status dot, no chip, no team word. */
-export const B_PLATE_H = 16
-export const B_PLATE_FONT = 9
-export const B_PLATE_PAD = 4
-export const B_PLATE_DOT = 5
-export const B_PLATE_DOT_GAP = 4
-export const B_PLATE_GAP = 4
-export const B_PLATE_STEP = 17
-
-export function buildingPlateWidth(name: string): number {
-  return Math.ceil(measureSans(shortName(name), B_PLATE_FONT, 700) + B_PLATE_PAD * 2 + B_PLATE_DOT + B_PLATE_DOT_GAP)
-}
-
-export interface BuildingPlate {
-  id: string
-  x: number
-  y: number
-  w: number
-  h: number
-  /** stacked above the ideal slot (always drawn with a connector) */
-  connector: boolean
-}
-
-/**
- * Plates sit 4 px above the head. With 8 agents on a 51 px pitch a single
- * level cannot hold five-letter names, so neighbours alternate between two
- * 17 px levels (plate height + 1) — same row, same-level neighbours are two
- * pitches apart. A connector is drawn whenever a plate left its ideal slot.
- */
-export function layoutBuildingPlates(seats: readonly BuildingSeat[]): {
-  plates: BuildingPlate[]
-  violations: string[]
-} {
-  const plates: BuildingPlate[] = []
-  const violations: string[] = []
-  const overlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
-    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
-
-  for (const seat of seats) {
-    const w = buildingPlateWidth(seat.meta.name)
-    const idealX = Math.round(seat.cx - w / 2)
-    const idealBottom = seat.headTop - B_PLATE_GAP
-    let placed: BuildingPlate | null = null
-
-    for (let level = 0; level <= 3 && !placed; level++) {
-      const y = Math.round(idealBottom - B_PLATE_H - level * B_PLATE_STEP)
-      for (const dx of [0, -6, 6, -12, 12]) {
-        const x = Math.round(idealX + dx)
-        const box = { x, y, w, h: B_PLATE_H }
-        if (x < 1 || y < 1 || x + w > BUILDING_W - 1 || y + B_PLATE_H > BUILDING_H - 1) continue
-        if (plates.some((p) => overlap(box, p))) continue
-        // never cover another agent's head
-        if (
-          seats.some(
-            (o) =>
-              o.meta.id !== seat.meta.id &&
-              overlap(box, { x: o.cx - o.headW / 2, y: o.headTop, w: o.headW, h: o.headH }),
-          )
-        ) {
-          continue
-        }
-        placed = { id: seat.meta.id, x, y, w, h: B_PLATE_H, connector: level > 0 }
-        break
-      }
-    }
-    if (!placed) {
-      violations.push(`${seat.meta.id}: no free plate slot`)
-      placed = {
-        id: seat.meta.id,
-        x: Math.max(1, Math.min(idealX, BUILDING_W - 1 - w)),
-        y: Math.max(1, Math.round(idealBottom - B_PLATE_H)),
-        w,
-        h: B_PLATE_H,
-        connector: false,
-      }
-    }
-    plates.push(placed)
-  }
-  return { plates, violations }
-}
-
 // ------------------------------------------------------------------- city
 
 /** Deterministic PRNG — the skyline is identical on every reload. */
@@ -351,27 +411,27 @@ export const CITY_GAP = 8
 export const CITY_LEFT_X1 = BLD.x0 - CITY_GAP
 export const CITY_RIGHT_X0 = BLD.x1 + CITY_GAP
 
-/** Buildings stand on the same street line as ours (y = BLD.baseY, 528). */
+/** Buildings stand on the same street line as ours (y = BLD.baseY, 337). */
 export function buildingCityRects(): CityRect[] {
   const rand = rng(0x51ed_270b)
   const rects: CityRect[] = []
   const sides: Array<[number, number]> = [
     [0, CITY_LEFT_X1],
-    [CITY_RIGHT_X0, BUILDING_W],
+    [CITY_RIGHT_X0, SCENE_W],
   ]
   for (const [bayX0, bayX1] of sides) {
     // one anchor tower per side, taller than our roof, so the skyline really
     // straddles the building instead of all sitting below it
     let tallPlaced = false
     for (let layer = 0; layer < 3; layer++) {
-      const minH = 96 + layer * 58
-      const maxH = 300 + layer * 100
+      const minH = 60 + layer * 38
+      const maxH = 190 + layer * 62
       let x = bayX0 - 24 - layer * 14
       while (x < bayX1 + 20) {
-        const w = 38 + rand() * 54
+        const w = 32 + rand() * 46
         let h = minH + rand() * (maxH - minH)
         if (layer === 2 && !tallPlaced) {
-          h = 506 + rand() * 14 // top 40…54, above the roof at 70
+          h = 300 + rand() * 30 // top 7…37, above the roof at 46
           tallPlaced = true
         }
         // clip into this bay: nothing may reach the facade bay
@@ -419,9 +479,9 @@ export interface BuildingLiftState {
   riderId: string | null
 }
 
-/** Car centre y at a floor (bottom of the car on the floor line). */
+/** Car centre y at a floor (the car bottom sits exactly on the floor line). */
 export function buildingLiftY(floor: FloorId): number {
-  return BLD_BANDS[floor].floorY - 18
+  return BLD_BANDS[floor].floorY - BLD_CAR_H / 2
 }
 
 /** Smoothstep: no jerk at either floor. */
@@ -499,9 +559,10 @@ export function buildingGeometry(metas: readonly AgentMeta[], riders: readonly B
   return {
     mode: 'building' as const,
     stage: { w: BUILDING_W, h: BUILDING_H },
+    scene: { w: SCENE_W, h: SCENE_H, zoom: SCENE_ZOOM },
     building,
-    /** |building centre − sheet centre| in px (gate b allows ≤ 2 % of width) */
-    centreOffset: Math.abs(building.x + building.w / 2 - BUILDING_W / 2),
+    /** |building centre − design sheet centre| in px (gate b allows ≤ 2 %) */
+    centreOffset: Math.abs(building.x + building.w / 2 - SCENE_W / 2),
     bands,
     seats: seats.map((s) => ({
       id: s.meta.id,

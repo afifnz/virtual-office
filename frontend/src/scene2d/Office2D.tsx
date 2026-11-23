@@ -19,7 +19,7 @@ import { clockInTimeZone } from '../lib/theme'
 import type { ThemeName } from './palette'
 import { pickTargets, placeAgents, renderFrame } from './render'
 import { buildingHit, buildingReport, renderBuildingFrame } from './render-building'
-import { buildingSeats } from './building'
+import { buildingSeats, SCENE_ZOOM } from './building'
 import { trafficReport, trafficAt } from './traffic'
 import { labelAgentsFor, layoutSideLabels, sideGate } from './labels'
 import {
@@ -340,8 +340,12 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         let near: string | null = null
         let best = Infinity
         if (building) {
+          // screenToDesign returns STAGE px; the building geometry is design
+          // px (one SCENE_ZOOM smaller), so divide before measuring
+          const cx = centre.x / SCENE_ZOOM
+          const cy = centre.y / SCENE_ZOOM
           for (const seat of buildingSeats(f.metas)) {
-            const d = Math.hypot(seat.cx - centre.x, seat.floorY - seat.avatarH / 2 - centre.y)
+            const d = Math.hypot(seat.cx - cx, seat.floorY - seat.avatarH / 2 - cy)
             if (d < best) {
               best = d
               near = seat.meta.id
@@ -518,8 +522,9 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
           const tr = sideTransform(w, h, vpRef.current, bandRef.current)
           const pt = screenToDesign(tr, e.clientX - rect.left, e.clientY - rect.top)
           if (buildingRef.current) {
-            // a desk → that agent's floor + desk; a bare band → that floor
-            const hit = buildingHit(buildingSeats(frame.current.metas), pt.x, pt.y)
+            // stage px → design px (the building sheet is one SCENE_ZOOM smaller
+            // than the stage the pointer was mapped onto)
+            const hit = buildingHit(buildingSeats(frame.current.metas), pt.x / SCENE_ZOOM, pt.y / SCENE_ZOOM)
             if (hit && 'id' in hit) onPick(hit.id)
             else if (hit && 'floor' in hit) onFloor?.(hit.floor)
             else onPick('')

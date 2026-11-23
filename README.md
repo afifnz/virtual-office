@@ -466,25 +466,32 @@ done
   kontras 4.5:1 untuk kedua tema.
 - `render_check` — setiap lantai × tema benar-benar digambar lewat `renderFrame`
   (tanpa browser), termasuk roster kosong, semua agen berjalan, dan seed offline.
-- `building_check` — mode GEDUNG: 3 band lantai + 13 meja + 13 nameplate di dalam
-  1000×688 **dan** 390×692, 0 label overlap, gedung tepat di tengah (selisih 0 px
-  dari batas 2 %), lift terlihat di antara lantai saat delegasi, dan 0 rect kota
-  menutupi fasad; frame siang/malam × desktop/HP × online/offline diaudit; skala
-  street furniture (pohon 7 m = 172 px, tiang 6 m = 147 px) dan urutan cat
-  **furniture sebelum fasad** (pohon/tiang hanya bisa tertutup gedung, tidak
-  pernah dicat di atasnya).
+- `building_check` — mode GEDUNG: **satu skala untuk seluruh adegan**. Band lantai
+  83 px = round(m2px(3,4)) (3,4 m floor-to-floor = 3,0 m clear + 0,4 m slab),
+  semua prop interior (meja, kursi, monitor, pintu lift, kereta lift, shaft)
+  diturunkan dari `m2px()` ±10 %, avatar 42 px = 50,6 % band (gerbang 45–60 %);
+  3 band + 13 meja + 13 nameplate + furnitur jalan + rect kota × `SCENE_ZOOM`
+  di dalam 1000×688 **dan** 390×692 dalam px final; 0 label overlap, gedung
+  tepat di tengah lembar design, lift terlihat di antara lantai saat delegasi,
+  0 rect kota menutupi fasad; jalan **kedalaman sejati** (lajur 86 px dalam =
+  86 px lebar, jalan 172 px = 2 lajur, total 236 px = 9,6 m pada 1:1), dan
+  urutan cat **furniture sebelum fasad** (pohon/tiang hanya bisa tertutup
+  gedung, tidak pernah dicat di atasnya).
 - `traffic_check` — keramaian jalan di mode GEDUNG, semuanya dari **satu skala**
   `PX_PER_M = 24,5` (avatar 42 px = 1,7 m; gerbang ±10 %): mobil 110×37, van
   135×54, bus 220×78 (tinggi 3,2 m, panjang dipangkas dari 294), motor 49×27,
-  pejalan 11×42, pohon 172 px, tiang lampu 147 px, lajur 86 px, zebra 88 px,
-  marka putus 74+147 px. 10 kendaraan (2 lajur, arah berlawanan) + 5 pejalan
-  kaki (3 trotoar, 2 penyeberang) di dalam band jalan/trotoar/zebra dan **tidak
-  pernah** menutupi fasad; 0 bbox kendaraan bertumpuk dalam 120 dtk pada 30 Hz
+  pejalan 11×42, pohon 172 px, tiang lampu 147 px, lajur 86 px (dalam = lebar,
+  tanpa forsir), jalan 172 px = 2 lajur, zebra 88 px (3,6 m), marka putus
+  74+147 px. 10 kendaraan (2 lajur, arah berlawanan) + 5 pejalan
+  kaki (3 trotoar, 2 penyeberang) di dalam band jalan/trotoar/zebra — badan
+  kendaraan seluruhnya di dalam band jalan 172 px — dan **tidak pernah**
+  menutupi fasad; 0 bbox kendaraan bertumpuk dalam 120 dtk pada 30 Hz
   (jarak bumper minimum 29 px); lampu merah menghentikan kendaraan (0 yang
-  menembus zebra, antrean diam di garis, clearance zebra 2,3 dtk dihitung dari
-  bus 318 px / 151 px·dtk⁻¹); jendela penyeberang 10,3–13,7 dtk masuk fase merah;
+  menembus zebra, antrean diam di garis, clearance zebra 2,2 dtk dihitung dari
+  bus 318 px / 151 px·dtk⁻¹); penyeberangan 184 px (7 m) dalam 5,8 dtk =
+  1,29 m/dtk, jendela 10,2–16,0 dtk masuk fase merah 9 dtk (siklus 6/2/9);
   posisi identik untuk `t` yang sama (`?still=1`); headlight hanya malam dan
-  selalu mengarah ke depan; siklus 6/2/6; awan/burung/kedip jendela
+  selalu mengarah ke depan; awan/burung/kedip jendela
   deterministik. Skrip juga melaporkan biaya painter (ms/frame dengan mock ctx —
   angka browser dari front desk lewat `__office2dPerf()` / `__office2dTraffic()`).
 
@@ -522,12 +529,17 @@ gedung dan `1..3` untuk lantai.
 Di GEDUNG: klik agen → pindah ke lantai agen itu + fokus meja; klik band lantai
 kosong → buka lantai itu; zoom masuk (tombol `+`/pinch) mengaktifkan pan vertikal
 dan horizontal (desktop sampai 3×). Nameplate diringkas (nama depan + dot
-status), skala overview: avatar 42 px, meja 48,6 px, band 150 px/lantai.
-Skala jalan: `PX_PER_M = 24,5` (42 px / 1,7 m) — mobil 110×37, bus 220×78,
-motor 49×27, pejalan 42, pohon 172, tiang lampu 147, lajur 86, zebra 88,
-trotoar dekat 44 / jauh 20 px; sumbu kedalaman jalan diforsir ×0,56 (lajur
-48 px di lembar) supaya dua lajur + trotoar muat di 160 px tanpa mengecilkan
-avatar atau mengubah geometri lantai.
+status). **Satu skala untuk seluruh adegan**, `PX_PER_M = 24,5` (42 px / 1,7 m),
+dikomposisikan pada lembar design 833×573 yang di-zoom seragam `SCENE_ZOOM
+= 1,2` ke kanvas 1000×688 (1,2 adalah zoom seragam terbesar yang masih memuat
+jalan realistis: 573 × 1,2 = 687,6 ≤ 688): band lantai 83 px design / 99,6 px
+final (3,4 m floor-to-floor), avatar 42/50,4 px (50,6 % band), meja
+39,2/47 px, pintu lift 51, kereta lift 54, shaft 29 px. Jalan kini
+**kedalaman sejati 9,6 m pada 1:1** (forsir ×0,56 dihapus): trotoar dekat 44 px
+(1,8 m), jalan 172 px = 2 lajur × 86 px (3,5 m), trotoar jauh 20 px (0,8 m);
+mobil 110×37, bus 220×78, motor 49×27, pejalan 42, pohon 172, tiang lampu 147,
+zebra 88 px (3,6 m), lampu 6/2/9 dengan jendela penyeberang 10,2–16,0 dtk di
+dalam merah.
 
 ## Catatan desain (kantor 2D)
 

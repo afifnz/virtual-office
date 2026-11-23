@@ -18,17 +18,19 @@ import { placeAgents, avatarPose, avatarSprite, poseFrame, type PlacedAgent } fr
 import { THEME_STATUS, THEME_TOKENS, type ThemeName } from './palette'
 import { shortName } from './labels'
 import { drawChair, drawDesk, drawKeyboardMouse, drawMonitor } from './props-side'
-import { SIDE_H, SIDE_W, sideTransform, type SideViewport } from './side'
+import { sideTransform, type SideViewport } from './side'
 import { drawSkyLife, drawStreetLife } from './render-traffic'
 import { cityWindowCells, trafficAt } from './traffic'
 import {
   BLD,
   BLD_AVATAR_H,
+  BLD_DOOR_H,
   BLD_FURNITURE,
   BLD_BAND_ORDER,
   BLD_BANDS,
   BLD_DASH,
   BLD_LIFT,
+  BLD_SLAB_H,
   BLD_STREET,
   BLD_ZEBRA,
   BUILDING_H,
@@ -37,6 +39,9 @@ import {
   B_PLATE_DOT_GAP,
   B_PLATE_FONT,
   B_PLATE_PAD,
+  SCENE_H,
+  SCENE_W,
+  SCENE_ZOOM,
   STREET_PROPS,
   STREET_SHAPE,
   buildingCityRects,
@@ -94,7 +99,8 @@ function groundShadow(ctx: Ctx, cx: number, y: number, rx: number, alpha: number
 // ------------------------------------------------------------ static layer
 
 const staticCache = new Map<ThemeName, HTMLCanvasElement>()
-const CACHE_SCALE = 1.25
+/** Backing-store supersample of the design sheet (SCENE_W × SCENE_H). */
+const CACHE_SCALE = 1.5
 
 export function clearBuildingCache(): void {
   staticCache.clear()
@@ -120,11 +126,12 @@ function drawSky(ctx: Ctx, theme: ThemeName): void {
   sky.addColorStop(0.82, c.skyLow)
   sky.addColorStop(1, c.horizon)
   ctx.fillStyle = sky
-  ctx.fillRect(0, 0, BUILDING_W, BLD_STREET.top)
+  ctx.fillRect(0, 0, SCENE_W, BLD_STREET.top)
 
   // sun (day) / moon (night), left of the tower so nothing is hidden by it
-  const sx = 138
-  const sy = 108
+  // (the left bay is 169 px wide: 84 ± 54 halo stays inside it)
+  const sx = 84
+  const sy = 96
   if (theme === 'day') {
     const halo = ctx.createRadialGradient(sx, sy, 4, sx, sy, 54)
     halo.addColorStop(0, 'rgba(255,255,255,0.9)')
@@ -142,7 +149,7 @@ function drawSky(ctx: Ctx, theme: ThemeName): void {
     // stars: a deterministic sprinkle in the upper sky
     ctx.fillStyle = 'rgba(255,255,255,0.75)'
     for (let i = 0; i < 42; i++) {
-      const x = (i * 137 + 23) % 940
+      const x = (i * 137 + 23) % 780
       const y = 18 + ((i * 61) % 190)
       if (x > BLD.x0 && x < BLD.x1) continue
       ctx.globalAlpha = 0.25 + ((i * 37) % 60) / 100
@@ -176,7 +183,7 @@ function drawSkyline(ctx: Ctx, theme: ThemeName): void {
   // paint over the building (gate d)
   for (const [x0, x1] of [
     [0, BLD.x0 - 8],
-    [BLD.x1 + 8, BUILDING_W],
+    [BLD.x1 + 8, SCENE_W],
   ] as const) {
     ctx.save()
     ctx.beginPath()
@@ -205,7 +212,7 @@ function drawSkyline(ctx: Ctx, theme: ThemeName): void {
   }
   // whole-sky depth veil
   ctx.fillStyle = theme === 'day' ? 'rgba(238,243,248,0.08)' : 'rgba(8,12,22,0.12)'
-  ctx.fillRect(0, 0, BUILDING_W, BLD_STREET.top)
+  ctx.fillRect(0, 0, SCENE_W, BLD_STREET.top)
 }
 
 function drawStreet(ctx: Ctx, theme: ThemeName): void {
@@ -216,20 +223,20 @@ function drawStreet(ctx: Ctx, theme: ThemeName): void {
 
   // near sidewalk (the building stands on it)
   ctx.fillStyle = theme === 'day' ? '#DCE4EE' : '#1B2433'
-  ctx.fillRect(0, top, BUILDING_W, walk - top)
+  ctx.fillRect(0, top, SCENE_W, walk - top)
   ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.1)' : 'rgba(255,255,255,0.07)'
-  for (let x = 0; x < BUILDING_W; x += 20) ctx.fillRect(x, top + 3, 1, walk - top - 6)
-  ctx.fillRect(0, walk - 1, BUILDING_W, 1)
+  for (let x = 0; x < SCENE_W; x += 20) ctx.fillRect(x, top + 3, 1, walk - top - 6)
+  ctx.fillRect(0, walk - 1, SCENE_W, 1)
 
   // road
   ctx.fillStyle = theme === 'day' ? '#7C8794' : '#0D1420'
-  ctx.fillRect(0, walk, BUILDING_W, road - walk)
+  ctx.fillRect(0, walk, SCENE_W, road - walk)
   ctx.fillStyle = theme === 'day' ? '#9AA4B0' : '#151E2C'
-  ctx.fillRect(0, walk + 4, BUILDING_W, 2)
+  ctx.fillRect(0, walk + 4, SCENE_W, 2)
   // dashed centre line: 3 m of paint, 6 m of gap, at PX_PER_M
   ctx.fillStyle = theme === 'day' ? '#F3F6FA' : '#C9BFA0'
   ctx.globalAlpha = theme === 'day' ? 0.85 : 0.5
-  for (let x = 8; x < BUILDING_W; x += dash.line + dash.gap) {
+  for (let x = 8; x < SCENE_W; x += dash.line + dash.gap) {
     // the centre line stops at the crossing, like a real marka putus
     if (x + dash.line > z.x0 - 10 && x < z.x1 + 10) continue
     ctx.fillRect(x, centre - dash.thick / 2, dash.line, dash.thick)
@@ -244,14 +251,13 @@ function drawStreet(ctx: Ctx, theme: ThemeName): void {
   // foreground pavement (the kerb the camera stands on) + its paving joints,
   // so a 42 px walker there clearly stands on pavement and not on asphalt
   ctx.fillStyle = theme === 'day' ? '#CDD7E3' : '#141C2B'
-  ctx.fillRect(0, road, BUILDING_W, far - road)
-  ctx.fillStyle = theme === 'day' ? '#B9C5D3' : '#0C1320'
-  ctx.fillRect(0, far, BUILDING_W, bottom - far)
+  ctx.fillRect(0, road, SCENE_W, far - road)
   ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.1)' : 'rgba(255,255,255,0.07)'
-  for (let x = 10; x < BUILDING_W; x += 20) ctx.fillRect(x, road + 4, 1, far - road - 6)
+  for (let x = 10; x < SCENE_W; x += 20) ctx.fillRect(x, road + 4, 1, far - road - 6)
   ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.08)' : 'rgba(255,255,255,0.05)'
-  ctx.fillRect(0, road, BUILDING_W, 1)
-  ctx.fillRect(0, far - 1, BUILDING_W, 1)
+  ctx.fillRect(0, road, SCENE_W, 1)
+  ctx.fillRect(0, far - 1, SCENE_W, 1)
+  void bottom
 }
 
 /**
@@ -349,35 +355,35 @@ function drawFacade(ctx: Ctx, theme: ThemeName): void {
     // window strip on the back wall: a hint of the city, tinted
     ctx.fillStyle = t.city.skyLow
     ctx.globalAlpha = theme === 'day' ? 0.4 : 0.24
-    ctx.fillRect(x0, b.y0 + 4, x1 - x0, 26)
+    ctx.fillRect(x0, b.y0 + 4, x1 - x0, 22)
     ctx.globalAlpha = 1
     ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.16)' : 'rgba(255,255,255,0.1)'
-    ctx.fillRect(x0, b.y0 + 30, x1 - x0, 1)
+    ctx.fillRect(x0, b.y0 + 26, x1 - x0, 1)
 
     // facade mullions, quiet so the plates stay readable
     ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.1)' : 'rgba(255,255,255,0.07)'
-    for (let x = x0 + 51; x < x1 - 6; x += 51) ctx.fillRect(x, b.y0 + 4, 1, b.y1 - b.y0 - 16)
+    for (let x = x0 + 49; x < x1 - 6; x += 49) ctx.fillRect(x, b.y0 + 4, 1, b.y1 - b.y0 - 16)
 
-    // floor plane + front lip
+    // floor plane + front lip (the lip shrank with the band: 12 → 6 px)
     ctx.fillStyle = t.floor
-    ctx.fillRect(x0, b.y1 - 12, x1 - x0, 12)
+    ctx.fillRect(x0, b.y1 - 6, x1 - x0, 6)
     ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.14)' : 'rgba(255,255,255,0.1)'
-    ctx.fillRect(x0, b.y1 - 12, x1 - x0, 1)
+    ctx.fillRect(x0, b.y1 - 6, x1 - x0, 1)
     ctx.fillStyle = theme === 'day' ? '#C3CEDC' : '#0D1420'
     ctx.fillRect(x0, b.y1 - 2, x1 - x0, 2)
 
     // slab between floors (L3/L2); L1 sits on the plinth
     if (floor !== 1) {
       ctx.fillStyle = frame
-      ctx.fillRect(x0, b.y1, x1 - x0, 8)
+      ctx.fillRect(x0, b.y1, x1 - x0, BLD_SLAB_H)
       ctx.fillStyle = theme === 'day' ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.1)'
       ctx.fillRect(x0, b.y1, x1 - x0, 1)
     }
 
     // floor label in the band's top-left
     const team = floor === 1 ? 'LOBBY' : floor === 2 ? 'TIM EDU' : 'TIM DEV'
-    text(ctx, `L${floor}`, x0 + 10, b.y0 + 7, 11, t.ink, 800)
-    text(ctx, team, x0 + 30, b.y0 + 9, 8, t.muted, 700)
+    text(ctx, `L${floor}`, x0 + 10, b.y0 + 5, 9, t.ink, 800)
+    text(ctx, team, x0 + 24, b.y0 + 6, 7, t.muted, 700)
   }
 
   // roof: coping overhangs 8 px each side, then the fascia band
@@ -390,17 +396,17 @@ function drawFacade(ctx: Ctx, theme: ThemeName): void {
   ctx.fillRect(BLD.x0, roofY + 8, BLD.x1 - BLD.x0, 16)
   ctx.fillStyle = theme === 'day' ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.12)'
   ctx.fillRect(roofX, roofY, roofW, 1)
-  // rooftop plant + antenna, anchored to the roof line (the sky strip is 38 px)
+  // rooftop plant + antenna, anchored to the roof line (the sky strip is 46 px)
   ctx.fillStyle = theme === 'day' ? '#B7C4D3' : '#0C1320'
-  ctx.fillRect(320, roofY - 12, 46, 12)
-  ctx.fillRect(600, roofY - 18, 34, 18)
-  ctx.fillRect(640, roofY - 26, 3, 16)
+  ctx.fillRect(237, roofY - 12, 46, 12)
+  ctx.fillRect(517, roofY - 18, 34, 18)
+  ctx.fillRect(557, roofY - 26, 3, 16)
   ctx.fillStyle = THEME_STATUS[theme].danger
   ctx.beginPath()
-  ctx.arc(641.5, roofY - 28, 2.5, 0, Math.PI * 2)
+  ctx.arc(558.5, roofY - 28, 2.5, 0, Math.PI * 2)
   ctx.fill()
   // building name on the fascia
-  text(ctx, 'AGENT OFFICE', BLD.cx - 43, roofY + 12, 10, theme === 'day' ? '#2B3A4D' : '#C6D0E0', 800)
+  text(ctx, 'AGENT OFFICE', BLD.cx - 30, roofY + 12, 8, theme === 'day' ? '#2B3A4D' : '#C6D0E0', 800)
 }
 
 function drawLiftShaftStatic(ctx: Ctx, theme: ThemeName): void {
@@ -417,19 +423,19 @@ function drawLiftShaftStatic(ctx: Ctx, theme: ThemeName): void {
   ctx.fillRect(x + w / 2 - 0.5, top + 10, 1, bottom - top - 20)
   for (const floor of [1, 2, 3] as const) {
     const b = BLD_BANDS[floor]
-    // landing door frame
+    // landing door frame: a 2.1 m door under a jamb, centred on the floor line
     ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.2)' : 'rgba(255,255,255,0.12)'
-    ctx.fillRect(x + 4, b.floorY - 42, w - 8, 44)
+    ctx.fillRect(x + 4, b.floorY - BLD_DOOR_H - 2, w - 8, BLD_DOOR_H + 2)
     ctx.fillStyle = theme === 'day' ? '#C7D2DF' : '#232E40'
-    ctx.fillRect(x + 6, b.floorY - 40, w - 12, 40)
+    ctx.fillRect(x + 6, b.floorY - BLD_DOOR_H, w - 12, BLD_DOOR_H)
     ctx.fillStyle = theme === 'day' ? '#AEBBCB' : '#2C374A'
-    ctx.fillRect(x + w / 2 - 0.5, b.floorY - 40, 1, 40)
+    ctx.fillRect(x + w / 2 - 0.5, b.floorY - BLD_DOOR_H, 1, BLD_DOOR_H)
     ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.8)' : 'rgba(0,0,0,0.6)'
-    rr(ctx, x + w / 2 - 8, b.floorY - 62, 16, 10, 2)
+    rr(ctx, x + w / 2 - 8, b.floorY - BLD_DOOR_H - 12, 16, 10, 2)
     ctx.fill()
-    text(ctx, `L${floor}`, x + w / 2 - 5.5, b.floorY - 61, 7, t.accent, 800)
+    text(ctx, `L${floor}`, x + w / 2 - 5, b.floorY - BLD_DOOR_H - 11, 6, t.accent, 800)
   }
-  text(ctx, 'LIFT', x + 10, bottom - 26, 6, theme === 'day' ? '#3B4A5E' : '#93A0B6', 700)
+  text(ctx, 'LIFT', x + 7, bottom - 20, 6, theme === 'day' ? '#3B4A5E' : '#93A0B6', 700)
 }
 
 /**
@@ -443,8 +449,10 @@ export const BUILDING_PHASES: readonly BuildingPhase[] = ['sky', 'skyline', 'str
 
 export function createBuildingLayer(theme: ThemeName, onPhase?: (phase: BuildingPhase) => void): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
-  canvas.width = Math.round(BUILDING_W * CACHE_SCALE)
-  canvas.height = Math.round(BUILDING_H * CACHE_SCALE)
+  // the backing store is the DESIGN sheet supersampled; the blit scales it to
+  // the 1000×688 stage in one draw (SCENE_W × SCENE_ZOOM = BUILDING_W)
+  canvas.width = Math.round(SCENE_W * CACHE_SCALE)
+  canvas.height = Math.round(SCENE_H * CACHE_SCALE)
   const ctx = canvas.getContext('2d')!
   ctx.scale(CACHE_SCALE, CACHE_SCALE)
 
@@ -592,7 +600,7 @@ function drawPlate(
   ctx.fillStyle = fill
   ctx.strokeStyle = border
   ctx.lineWidth = 1
-  rr(ctx, plate.x, plate.y, plate.w, plate.h, 7)
+  rr(ctx, plate.x, plate.y, plate.w, plate.h, 5)
   ctx.fill()
   ctx.stroke()
   const cy = plate.y + plate.h / 2
@@ -656,11 +664,16 @@ export function renderBuildingFrame(ctx: CanvasRenderingContext2D, r: BuildingRe
   // cheap antialiasing guard: the sheet is scaled down on a phone
   ctx.imageSmoothingEnabled = true
 
-  ctx.drawImage(buildingLayerFor(theme), tr.left, tr.top, SIDE_W * tr.s, SIDE_H * tr.s)
+  // the cached design sheet (SCENE_W × SCENE_H) fills the whole stage: the
+  // blit itself applies the uniform SCENE_ZOOM once…
+  ctx.drawImage(buildingLayerFor(theme), tr.left, tr.top, BUILDING_W * tr.s, BUILDING_H * tr.s)
 
   ctx.save()
   ctx.translate(tr.left, tr.top)
   ctx.scale(tr.s, tr.s)
+  // …and the dynamic half scales it again, so every live draw below stays in
+  // design px (0…SCENE_W × 0…SCENE_H) exactly like the geometry module
+  ctx.scale(SCENE_ZOOM, SCENE_ZOOM)
 
   // street life sits between the cached sheet and the desks: clouds/birds in
   // the sky (clipped to the bays), then the two lanes, the signal and walkers.
