@@ -48,6 +48,7 @@ import { buildingHit, clearBuildingCache, renderBuildingFrame } from '../fronten
 import { PHONE_CTRL_BAND, fitScale, sideTransform } from '../frontend/src/scene2d/side'
 import { fitZoom } from '../frontend/src/scene2d/viewport'
 import { shortName, measureSans } from '../frontend/src/scene2d/labels'
+import { defaultViewMode } from '../frontend/src/lib/view'
 import type { AgentMeta } from '../frontend/src/lib/agents'
 import type { ThemeName } from '../frontend/src/scene2d/palette'
 
@@ -261,7 +262,30 @@ if (measureSans(shortName('Dimas'), 9, 700) <= 0) fail('plate measurement return
   else ok('click outside the building → nothing')
 }
 
-// ------------------------------------------------- 9. the painter, both themes
+// -------------------------------------------- 10. deep-link mode precedence
+{
+  const cases: Array<[string, Parameters<typeof defaultViewMode>[0], string]> = [
+    ['fresh load', {}, 'building'],
+    ['?view=building', { view: 'building' }, 'building'],
+    ['?view=building&face=dev', { view: 'building', agentLink: true }, 'building'],
+    ['?view=floor', { view: 'floor' }, 'floor'],
+    ['?floor=2', { floor: 2 }, 'floor'],
+    ['?floor=3&view=building', { floor: 3, view: 'building' }, 'floor'],
+    ['?spot=lobby (legacy)', { spot: 'lobby' }, 'floor'],
+    ['?face=dev', { agentLink: true }, 'floor'],
+  ]
+  let bad = 0
+  for (const [name, input, want] of cases) {
+    const got = defaultViewMode(input)
+    if (got !== want) {
+      bad++
+      fail(`${name} → ${got}, want ${want}`)
+    }
+  }
+  if (!bad) ok(`deep-link precedence: ${cases.length} cases ok (GEDUNG default, ?floor wins, ?view=building honoured)`)
+}
+
+// ------------------------------------------------- 11. the painter, both themes
 interface Op {
   name: string
   box: [number, number, number, number]

@@ -12,6 +12,23 @@ import type { FloorId } from './rooms'
 /** Which camera the scene is in: the 3-floor building overview or one floor. */
 export type ViewMode = 'building' | 'floor'
 
+/**
+ * Which view a fresh load opens in. GEDUNG is the default; an explicit floor
+ * link wins, then `?view=`, then the legacy agent/spot links (which are all
+ * floor views). Pure, so `verify/building_check.ts` can pin the precedence.
+ */
+export function defaultViewMode(o: {
+  floor?: FloorId | null
+  spot?: string | null
+  view?: ViewMode | null
+  agentLink?: boolean
+}): ViewMode {
+  if (o.floor !== null && o.floor !== undefined) return 'floor'
+  if (o.view) return o.view
+  if (o.spot || o.agentLink) return 'floor'
+  return 'building'
+}
+
 /** One command the HUD / deep links send to the scene. */
 export interface RigCommand {
   spot: string

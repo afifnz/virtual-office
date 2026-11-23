@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Scene } from './components/Scene'
 import type { MoveIntent, RigCommand, ViewMode } from './lib/view'
+import { defaultViewMode } from './lib/view'
 import { Hud } from './components/Hud'
 import { Roster } from './components/Roster'
 import { Feed, type FeedTab } from './components/Feed'
@@ -67,11 +68,7 @@ function writeViewToUrl(mode: ViewMode, floor: FloorId): void {
 
 /** The mode a fresh load opens in: explicit links win, GEDUNG is the default. */
 function initialMode(floor: FloorId | null, spot: string | null): ViewMode {
-  const view = queryView()
-  if (floor !== null) return 'floor'
-  if (view) return view
-  if (spot || hasAgentLink()) return 'floor'
-  return 'building'
+  return defaultViewMode({ floor, spot, view: queryView(), agentLink: hasAgentLink() })
 }
 
 export default function App() {
