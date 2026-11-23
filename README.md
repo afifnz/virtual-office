@@ -488,7 +488,9 @@ done
   menutupi fasad; 0 bbox kendaraan bertumpuk dalam 120 dtk pada 30 Hz
   (jarak bumper minimum 29 px); lampu merah menghentikan kendaraan (0 yang
   menembus zebra, antrean diam di garis, clearance zebra 2,2 dtk dihitung dari
-  bus 318 px / 151 px·dtk⁻¹); penyeberangan 184 px (7 m) dalam 5,8 dtk =
+  bus 318 px / 151 px·dtk⁻¹); penyeberangan 184 px (7,51 m jarak jalan kaki;
+  jalan kerb-ke-kerb 172 px = 7,02 m, 12 px terakhir mencapai garis berdiri
+  seberang) dalam 5,8 dtk =
   1,29 m/dtk, jendela 10,2–16,0 dtk masuk fase merah 9 dtk (siklus 6/2/9);
   posisi identik untuk `t` yang sama (`?still=1`); headlight hanya malam dan
   selalu mengarah ke depan; awan/burung/kedip jendela

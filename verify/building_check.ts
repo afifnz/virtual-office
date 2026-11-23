@@ -74,6 +74,7 @@ import {
 } from '../frontend/src/scene2d/building'
 import {
   BUILDING_PHASES,
+  CACHE_SCALE,
   buildingHit,
   clearBuildingCache,
   createBuildingLayer,
@@ -126,6 +127,12 @@ if (seats.length !== 13) fail(`${seats.length} building seats, want 13`)
   const wantBand = m2px(3.4)
   const bandErr = Math.abs(BLD_BAND_H - wantBand) / wantBand
   if (bandErr > 0.05) fail(`BLD_BAND_H ${BLD_BAND_H} vs m2px(3.4) ${r2(wantBand)} (${r2(bandErr * 100)} % off, limit 5 %)`)
+  // (a) and the slab exactly — not just the self-referential gap === BLD_SLAB_H:
+  // 9 px, and exactly round(m2px(0.35)), the 0.35 m spandrel it claims to be
+  if (BLD_SLAB_H !== 9) fail(`BLD_SLAB_H is ${BLD_SLAB_H}, want exactly 9`)
+  if (BLD_SLAB_H !== Math.round(m2px(0.35))) {
+    fail(`BLD_SLAB_H is ${BLD_SLAB_H}, want exactly round(m2px(0.35)) = ${Math.round(m2px(0.35))}`)
+  }
   for (const b of bands) {
     if (!(b.y1 > b.y0)) fail(`L${b.floor}: band height ${b.y1 - b.y0}`)
     if (b.y1 - b.y0 !== BLD_BAND_H) fail(`L${b.floor}: band ${b.y1 - b.y0} px, want ${BLD_BAND_H}`)
@@ -398,7 +405,14 @@ interface Op {
   box: [number, number, number, number]
 }
 const newRec = () => ({ ops: [] as Op[], texts: [] as string[] })
-function recordCtx(rec: { ops: Op[]; texts: string[] }): CanvasRenderingContext2D {
+/**
+ * A canvas 2D recorder. With `track` it follows the painter's translate/scale
+ * transforms (never rotation — these painters do not rotate), so a `fill` under
+ * `translate(cx, y); scale(1, 0.12)` records its TRUE painted box instead of the
+ * local one; the frame pass (track = false) keeps the raw design coords the
+ * desk-matching gate expects.
+ */
+function recordCtx(rec: { ops: Op[]; texts: string[] }, track = false): CanvasRenderingContext2D {
   const styles: Record<string, unknown> = {
     fillStyle: '#000000',
     strokeStyle: '#000000',
@@ -410,13 +424,21 @@ function recordCtx(rec: { ops: Op[]; texts: string[] }): CanvasRenderingContext2
     imageSmoothingEnabled: true,
   }
   let path: [number, number, number, number] | null = null
+  // CTM: x' = a·x + e, y' = d·y + f (translate + scale only)
+  let a = 1
+  let d = 1
+  let e = 0
+  let f = 0
+  const ctm: Array<[number, number, number, number]> = []
   const grow = (x: number, y: number) => {
-    if (!path) path = [x, y, x, y]
+    const X = a * x + e
+    const Y = d * y + f
+    if (!path) path = [X, Y, X, Y]
     else {
-      path[0] = Math.min(path[0], x)
-      path[1] = Math.min(path[1], y)
-      path[2] = Math.max(path[2], x)
-      path[3] = Math.max(path[3], y)
+      path[0] = Math.min(path[0], X)
+      path[1] = Math.min(path[1], Y)
+      path[2] = Math.max(path[2], X)
+      path[3] = Math.max(path[3], Y)
     }
   }
   const push = (name: string, box: [number, number, number, number]) => rec.ops.push({ name, box })
@@ -427,13 +449,18 @@ function recordCtx(rec: { ops: Op[]; texts: string[] }): CanvasRenderingContext2
   const textW = (s: string) => String(s).length * fontPx() * 0.62
   const gradient = { addColorStop() {} }
   const methods: Record<string, (...a: never[]) => unknown> = {
-    fillRect: ((x: number, y: number, w: number, h: number) => push('fillRect', [x, y, x + w, y + h])) as never,
+    fillRect: ((x: number, y: number, w: number, h: number) =>
+      push('fillRect', [a * x + e, d * y + f, a * (x + w) + e, d * (y + h) + f])) as never,
     strokeRect: (() => undefined) as never,
     fillText: ((t: string, x: number, y: number) => {
       rec.texts.push(String(t))
-      push(`fillText:${t}`, [x, y, x + textW(String(t)), y + fontPx()])
+      push(
+        `fillText:${t}`,
+        [a * x + e, d * y + f, a * (x + textW(String(t))) + e, d * (y + fontPx()) + f],
+      )
     }) as never,
-    drawImage: ((_img: unknown, x: number, y: number, w = 0, h = 0) => push('drawImage', [x, y, x + w, y + h])) as never,
+    drawImage: ((_img: unknown, x: number, y: number, w = 0, h = 0) =>
+      push('drawImage', [a * x + e, d * y + f, a * (x + w) + e, d * (y + h) + f])) as never,
     beginPath: (() => {
       path = null
     }) as never,
@@ -461,12 +488,41 @@ function recordCtx(rec: { ops: Op[]; texts: string[] }): CanvasRenderingContext2
     }) as never,
     stroke: (() => undefined) as never,
     clip: (() => undefined) as never,
-    save: (() => undefined) as never,
-    restore: (() => undefined) as never,
-    translate: ((x: number, y: number) => push('translate', [x, y, 0, 0])) as never,
-    scale: ((x: number, y: number) => push('scale', [x, y, 0, 0])) as never,
+    save: (() => {
+      if (track) ctm.push([a, d, e, f])
+    }) as never,
+    restore: (() => {
+      if (track && ctm.length) {
+        const m = ctm.pop()!
+        a = m[0]!
+        d = m[1]!
+        e = m[2]!
+        f = m[3]!
+      }
+    }) as never,
+    translate: ((x: number, y: number) => {
+      if (track) {
+        e += a * x
+        f += d * y
+      }
+      push('translate', [x, y, 0, 0])
+    }) as never,
+    scale: ((x: number, y: number) => {
+      if (track) {
+        a *= x
+        d *= y
+      }
+      push('scale', [x, y, 0, 0])
+    }) as never,
     rotate: (() => undefined) as never,
-    setTransform: (() => undefined) as never,
+    setTransform: ((a2: number, _b: number, _c: number, d2: number, e2: number, f2: number) => {
+      if (track) {
+        a = a2
+        d = d2
+        e = e2
+        f = f2
+      }
+    }) as never,
     measureText: ((s: string) => ({ width: textW(String(s)) })) as never,
     createLinearGradient: (() => gradient) as never,
     createRadialGradient: (() => gradient) as never,
@@ -723,16 +779,21 @@ else ok(`${frames} building frames (${THEMES.length} themes × desktop/phone × 
   }
 
   // z-order: every furniture op is painted BEFORE the facade starts
+  /** running min/max painted x of furniture-phase ops, both themes, design px */
+  let furnMinX = Infinity
+  let furnMaxX = -Infinity
   for (const theme of THEMES) {
     clearBuildingCache()
     const rec = newRec()
     const marks: Partial<Record<BuildingPhase, number>> = {}
-    // the sheet paints through `document.createElement`; point it at OUR recorder
+    // the sheet paints through `document.createElement`; point it at OUR
+    // recorder, transform-aware so a fill under translate/scale records its
+    // true painted box
     const doc = (globalThis as unknown as { document: unknown }).document
     ;(globalThis as unknown as { document: unknown }).document = {
       createElement: (tag: string) => {
         if (tag !== 'canvas') throw new Error(`unexpected createElement(${tag})`)
-        return { width: 0, height: 0, style: {}, getContext: () => recordCtx(rec) }
+        return { width: 0, height: 0, style: {}, getContext: () => recordCtx(rec, true) }
       },
     }
     try {
@@ -760,10 +821,41 @@ else ok(`${frames} building frames (${THEMES.length} themes × desktop/phone × 
       fail(`${theme}: furniture ${furnStart} / facade ${facadeStart} / lift ${liftStart} are not in painting order`)
       continue
     }
-    const furnOps = rec.ops.slice(furnStart, facadeStart)
-    const facadeOps = rec.ops.slice(facadeStart, liftStart)
+    // the sheet records backing-store px (createBuildingLayer paints at
+    // CACHE_SCALE); divide back to design px so the boxes compare against the
+    // design geometry below
+    const design = (op: Op): Op => ({
+      name: op.name,
+      box: [op.box[0] / CACHE_SCALE, op.box[1] / CACHE_SCALE, op.box[2] / CACHE_SCALE, op.box[3] / CACHE_SCALE] as [
+        number,
+        number,
+        number,
+        number,
+      ],
+    })
+    const furnOps = rec.ops.slice(furnStart, facadeStart).map(design)
+    const facadeOps = rec.ops.slice(facadeStart, liftStart).map(design)
     if (furnOps.length < BLD_FURNITURE.length) {
       fail(`${theme}: only ${furnOps.length} furniture ops for ${BLD_FURNITURE.length} props`)
+    }
+    // the painted-bounds gate: EVERY op the furniture phase emits — canopy
+    // lobes at their honest 1.17 R reach, lamp heads, night halos, ground
+    // shadows — must sit fully inside the design sheet. Recorded boxes are
+    // true painted bounds (the recorder applies translate/scale), not just
+    // the analytic `propSpan` the layout gate above already checks.
+    let offSheet = 0
+    for (const op of furnOps) {
+      const [x0, y0, x1, y1] = op.box
+      if (x1 <= x0 || y1 <= y0) continue // translate/scale bookkeeping, not paint
+      furnMinX = Math.min(furnMinX, x0)
+      furnMaxX = Math.max(furnMaxX, x1)
+      if (x0 < -0.01 || y0 < -0.01 || x1 > SCENE_W + 0.01 || y1 > SCENE_H + 0.01) {
+        offSheet++
+        fail(
+          `${theme}: furniture op ${op.name} box ${r2(x0)},${r2(y0)}…${r2(x1)},${r2(y1)} ` +
+            `leaves the design sheet 0…${r2(SCENE_W)} × 0…${r2(SCENE_H)}`,
+        )
+      }
     }
     // nothing the furniture paints above the facade base may survive the facade
     let uncovered = 0
@@ -798,11 +890,19 @@ else ok(`${frames} building frames (${THEMES.length} themes × desktop/phone × 
         if (uncovered < 4) fail(`${theme}: a ${op.name} above the facade base at y ${r2(r.y)} is painted after nothing that covers it`)
       }
     }
-    if (uncovered === 0) {
+    if (uncovered === 0 && offSheet === 0) {
       ok(
         `${theme}/sheet: phases ${BUILDING_PHASES.length} in order, ${furnOps.length} furniture ops painted BEFORE the facade ` +
-          `(${facadeOps.length} facade ops after them) — occlusion only, never over the tower`,
+          `(${facadeOps.length} facade ops after them) — occlusion only, never over the tower; every furniture box ` +
+          `inside 0…${r2(SCENE_W)} × 0…${r2(SCENE_H)} (painted x so far ${r2(furnMinX)}…${r2(furnMaxX)})`,
       )
+    }
+  }
+  if (Number.isFinite(furnMinX) && Number.isFinite(furnMaxX)) {
+    if (furnMinX < 0 || furnMaxX > SCENE_W) {
+      fail(`furniture painted x ${r2(furnMinX)}…${r2(furnMaxX)} leaves the design sheet`)
+    } else {
+      ok(`furniture painted bounds: x ${r2(furnMinX)}…${r2(furnMaxX)} inside 0…${r2(SCENE_W)} (design px, both themes)`)
     }
   }
 }

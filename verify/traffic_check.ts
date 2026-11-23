@@ -342,7 +342,7 @@ const DT = 1 / 30
     fail(`crossing ${CROSS_START}…${r2(CROSS_START + CROSS_DUR)} s overruns the red phase (ends ${RED_START + LIGHT.red})`)
   } else {
     ok(
-      `pedestrian window ${r2(CROSS_START)}…${r2(CROSS_START + CROSS_DUR)} s (${CROSS_DUR} s for ${CROSS_PX} px kerb-to-kerb) ` +
+      `pedestrian window ${r2(CROSS_START)}…${r2(CROSS_START + CROSS_DUR)} s (${CROSS_DUR} s for the ${CROSS_PX} px walking distance) ` +
         `fits inside the ${LIGHT.red} s red phase`,
     )
   }
@@ -492,13 +492,15 @@ const DT = 1 / 30
   } else if (!bad) {
     ok(`light cycle 6 s green · 2 s yellow · 9 s red (${LIGHT.cycle} s); pedestrian green exactly during red`)
   }
-  // the 7 m crossing needs a longer red: 184 px at 1.29 m/s = 5.8 s walk,
-  // and the pedestrian window 10.2…16.0 must sit inside the 8…17 red phase
+  // the 7.51 m crossing (184 px of walking distance; the kerb-to-kerb road is
+  // 172 px = 7.02 m, the last 12 px reach the far standing line) needs a
+  // longer red: 184 px at 1.29 m/s = 5.8 s walk, and the pedestrian window
+  // 10.2…16.0 must sit inside the 8…17 red phase
   const mps = (CROSS_PX / CROSS_DUR) / PX_PER_M
   if (!(mps >= 1.2 && mps <= 1.4)) fail(`crossing speed ${r2(mps)} m/s, want 1.2–1.4 (a brisk walk)`)
   if (CROSS_START < RED_START + CROSS_CLEARANCE - 1e-9) fail(`CROSS_START ${CROSS_START} < red + clearance ${RED_START + CROSS_CLEARANCE}`)
   if (CROSS_START + CROSS_DUR > RED_START + LIGHT.red - 0.1) fail(`pedestrian window ${CROSS_START}…${r2(CROSS_START + CROSS_DUR)} overruns the red phase`)
-  else ok(`crossing: ${CROSS_PX} px (7 m kerb-to-kerb) in ${CROSS_DUR} s = ${r2(CROSS_PX / CROSS_DUR)} px/s = ${r2(mps)} m/s, window ${CROSS_START}…${r2(CROSS_START + CROSS_DUR)} s inside the ${RED_START}…${RED_START + LIGHT.red} red`)
+  else ok(`crossing: ${CROSS_PX} px of walking (7.51 m; kerb-to-kerb road 172 px = 7.02 m) in ${CROSS_DUR} s = ${r2(CROSS_PX / CROSS_DUR)} px/s = ${r2(mps)} m/s, window ${CROSS_START}…${r2(CROSS_START + CROSS_DUR)} s inside the ${RED_START}…${RED_START + LIGHT.red} red`)
 }
 
 // ------------------------------------------------------ pedestrians + light

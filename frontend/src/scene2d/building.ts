@@ -151,35 +151,47 @@ export const STREET_PROPS = {
  * Street furniture layout, shared by the painter and the gate. The side bays
  * are 169 px wide now (the tower is 480 px on an 833 px sheet), so four props
  * fit: a tree + a lamp on the left, a lamp + the accent tree on the right.
- * Every prop keeps its painted span clear of the facade bay and of its
- * neighbours (see `propSpan`).
+ * Every prop keeps its PAINTED span (`propSpan`, canopy reach included) on the
+ * sheet, inside its side bay and clear of its neighbours.
  */
 export const BLD_FURNITURE: ReadonlyArray<{ kind: 'tree' | 'lamp'; x: number; h: number }> = [
-  // left bay: tree first (56 keeps the 53 px canopy on the sheet), lamp after
-  { kind: 'tree', x: 56, h: STREET_PROPS.treeH },
-  { kind: 'lamp', x: 124, h: STREET_PROPS.lampH },
+  // left bay: tree first (its 1.17 R canopy paints 1.62…126.38), lamp after
+  // (post + head 150.5…168), both clear of the 0…169 bay edge and of each other
+  { kind: 'tree', x: 64, h: STREET_PROPS.treeH },
+  { kind: 'lamp', x: 152, h: STREET_PROPS.lampH },
   // right bay: the lamp head reaches right of the post, the accent tree after
+  // (R 47.12 → painted 688.87…799.13, inside the 833.33 px sheet)
   { kind: 'lamp', x: 664, h: STREET_PROPS.lampH },
-  { kind: 'tree', x: 736, h: STREET_PROPS.treeH2 },
+  { kind: 'tree', x: 744, h: STREET_PROPS.treeH2 },
 ]
+
+/**
+ * How far the painter's canopy really reaches: the side lobes are centred at
+ * ±0.55 R with radius 0.62 R (see `drawTree`), so the canopy paints out to
+ * 0.55 + 0.62 = 1.17 R — not the 1.0 R the trunk-centred circle suggests.
+ */
+export const CANOPY_LOBE_REACH = 1.17
 
 /** Canopy radius + trunk + head sizes in px, from the one scale. */
 export const STREET_SHAPE = {
   canopyR: (h: number) => h * 0.31,
+  /** honest painted reach of the canopy: the side lobes reach 1.17 R. */
+  canopyReach: (h: number) => h * 0.31 * CANOPY_LOBE_REACH,
   trunkH: (h: number) => h * 0.42,
   trunkW: (h: number) => Math.max(4, h * 0.045),
   /** widest horizontal reach of any part of a prop from its x */
-  reach: (kind: 'tree' | 'lamp', h: number) => (kind === 'tree' ? h * 0.31 : 16),
+  reach: (kind: 'tree' | 'lamp', h: number) => (kind === 'tree' ? h * 0.31 * CANOPY_LOBE_REACH : 16),
 } as const
 
 /**
- * Painted x-span of a prop: a tree is a symmetric canopy, a lamp is a 3 px
- * post with its arm + head reaching RIGHT. Shared by the painter's occlusion
- * rule and the gate's facade/prop clearance proofs.
+ * Painted x-span of a prop: a tree is a canopy whose side lobes reach 1.17 R
+ * (`canopyReach`), a lamp is a 3 px post with its arm + head reaching RIGHT.
+ * Shared by the painter's occlusion rule and the gate's facade/prop clearance
+ * proofs.
  */
 export function propSpan(prop: { kind: 'tree' | 'lamp'; x: number; h: number }): readonly [number, number] {
   if (prop.kind === 'tree') {
-    const r = STREET_SHAPE.canopyR(prop.h)
+    const r = STREET_SHAPE.canopyReach(prop.h)
     return [prop.x - r, prop.x + r]
   }
   return [prop.x - 1.5, prop.x + STREET_SHAPE.reach('lamp', prop.h)]

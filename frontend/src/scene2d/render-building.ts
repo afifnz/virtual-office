@@ -99,8 +99,8 @@ function groundShadow(ctx: Ctx, cx: number, y: number, rx: number, alpha: number
 // ------------------------------------------------------------ static layer
 
 const staticCache = new Map<ThemeName, HTMLCanvasElement>()
-/** Backing-store supersample of the design sheet (SCENE_W × SCENE_H). */
-const CACHE_SCALE = 1.5
+/** Backing-store supersample of the design sheet (SCENE_W × SCENE_H). Exported so the verify gate can turn recorded backing px back into design px. */
+export const CACHE_SCALE = 1.5
 
 export function clearBuildingCache(): void {
   staticCache.clear()
@@ -273,7 +273,9 @@ function drawFurniture(ctx: Ctx, theme: ThemeName): void {
   }
 }
 
-/** A street tree `h` px tall (trunk + canopy, a 7 m tree is 172 px). */
+/** A street tree `h` px tall (trunk + canopy, a 7 m tree is 172 px). The side
+ * canopy lobes (centre ±0.55 R, radius 0.62 R) paint out to 1.17 R — the
+ * geometry module's `STREET_SHAPE.canopyReach` is the honest span. */
 function drawTree(ctx: Ctx, theme: ThemeName, cx: number, h: number): void {
   const t = THEME_TOKENS[theme]
   const foot = BLD_STREET.walk - STREET_PROPS.inset
@@ -760,11 +762,18 @@ export function buildingReport(
 ) {
   const seats = buildingSeats(metas)
   const { plates, violations } = layoutBuildingPlates(seats)
+  const building = { x: BLD.x0, y: BLD.roofTop, w: BLD.x1 - BLD.x0, h: BLD.baseY - BLD.roofTop }
   return {
     mode: 'building' as const,
     stage: { w: BUILDING_W, h: BUILDING_H },
+    /** uniform design→stage zoom, so the probe can compare design rects to 1000×688 */
+    zoom: SCENE_ZOOM,
+    /** the design sheet every rect below lives on, with its zoom */
+    scene: { w: SCENE_W, h: SCENE_H, zoom: SCENE_ZOOM },
+    building,
+    /** |building centre − design sheet centre| in design px (same number as `buildingGeometry`) */
+    centreOffset: Math.abs(building.x + building.w / 2 - SCENE_W / 2),
     bands: BLD_BAND_ORDER.map((floor) => ({ ...BLD_BANDS[floor], name: FLOORS[floor].name })),
-    building: { x: BLD.x0, y: BLD.roofTop, w: BLD.x1 - BLD.x0, h: BLD.baseY - BLD.roofTop },
     desks: seats.map((s) => ({ id: s.meta.id, floor: s.floor, ...buildingDeskRect(s) })),
     plates,
     plateViolations: violations,

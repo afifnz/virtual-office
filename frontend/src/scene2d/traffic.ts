@@ -307,9 +307,13 @@ export const CROSS_PERIOD = LIGHT.cycle * 2
 /** Kerb lines: the two pavement edges the crossing spans. */
 export const CURB = { near: BLD_STREET.walk, far: BLD_STREET.road } as const
 
-/** Kerb to kerb: 184 px = 7 m of road at the street scale (true depth). */
+/**
+ * The full walking distance, near standing line to far standing line: 184 px
+ * = 7.51 m at the street scale. The kerb-to-kerb road itself is only
+ * 172 px = 7.02 m — the last 12 px carry the walker to the far standing line.
+ */
 export const CROSS_PX = WALK.far.feet - WALK.near.feet
-/** 184 px in 5.8 s = 31.7 px/s = 1.29 m/s: a brisk, readable walk. */
+/** The whole 184 px walk in 5.8 s = 31.7 px/s = 1.29 m/s: a brisk, readable walk. */
 export const CROSS_DUR = 5.8
 export const CROSS_SPEED = CROSS_PX / CROSS_DUR // 31.7 px/s
 
