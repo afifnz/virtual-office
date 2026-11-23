@@ -12,7 +12,11 @@
  *   d. the procedural skyline never covers the facade: 0 city rect ∩ building;
  *   e. the painter itself runs for both themes, desktop and phone, online and
  *      offline — 13 desks and 13 plates every frame (the offline seed is a
- *      first-class case, not an accident).
+ *      first-class case, not an accident);
+ *   f. street scale: the 7 m tree (172 px) and the 6 m lamp (147 px) are
+ *      `PX_PER_M × metres`, they stand clear of the facade bay, and every piece
+ *      of street furniture is painted BEFORE the facade — so a canopy can only
+ *      be occluded by the tower, never painted over it.
  *
  * The old per-floor gates stay as they are; this file never replaces them.
  *
@@ -27,12 +31,18 @@ import {
   BLD,
   BLD_BAND_ORDER,
   BLD_BANDS,
+  BLD_FURNITURE,
   BLD_STREET,
   BUILDING_H,
   BUILDING_W,
   BLD_AVATAR_H,
   BLD_DESK,
   BLD_LIFT,
+  LANE_DEPTH,
+  LANE_W,
+  PX_PER_M,
+  STREET_PROPS,
+  STREET_SHAPE,
   buildingCityRects,
   buildingDeskRect,
   buildingGeometry,
@@ -44,7 +54,14 @@ import {
   cityOverlapsBuilding,
   layoutBuildingPlates,
 } from '../frontend/src/scene2d/building'
-import { buildingHit, clearBuildingCache, renderBuildingFrame } from '../frontend/src/scene2d/render-building'
+import {
+  BUILDING_PHASES,
+  buildingHit,
+  clearBuildingCache,
+  createBuildingLayer,
+  renderBuildingFrame,
+  type BuildingPhase,
+} from '../frontend/src/scene2d/render-building'
 import { PHONE_CTRL_BAND, fitScale, sideTransform } from '../frontend/src/scene2d/side'
 import { fitZoom } from '../frontend/src/scene2d/viewport'
 import { shortName, measureSans } from '../frontend/src/scene2d/labels'
@@ -501,6 +518,162 @@ else ok(`${frames} building frames (${THEMES.length} themes × desktop/phone × 
   else if (g.centreOffset > BUILDING_W * 0.02) fail(`buildingGeometry centreOffset ${g.centreOffset}`)
   else if (g.city.overlaps !== 0) fail(`buildingGeometry city overlaps ${g.city.overlaps}`)
   else ok(`building report: 3 bands, 13 seats, 13 plates, centreOffset ${g.centreOffset}, city overlaps 0`)
+}
+
+
+// ------------------------------- 12. street scale + z-order (furniture vs facade)
+{
+  /** ±10 % window over `PX_PER_M × real metres`. */
+  const scaleNear = (got: number, real: number, name: string, slack = 0.1) => {
+    const want = real * PX_PER_M
+    const dev = Math.abs(got - want) / want
+    if (dev > slack) fail(`${name}: ${got} px vs ${want.toFixed(1)} px (${(dev * 100).toFixed(1)} % off, limit ${slack * 100} %)`)
+  }
+  if (Math.abs(PX_PER_M - 42 / 1.7) > 0.5) fail(`PX_PER_M ${PX_PER_M} is not 42 px / 1.7 m (${(42 / 1.7).toFixed(2)})`)
+  else ok(`scale anchor: ${PX_PER_M} px/m = the 42 px overview avatar / 1.7 m`)
+  scaleNear(STREET_PROPS.treeH, 7, 'tree height', 0.15)
+  scaleNear(STREET_PROPS.lampH, 6, 'lamp height')
+  scaleNear(LANE_W, 3.5, 'lane width')
+  scaleNear(BLD_STREET.walk - BLD_STREET.top, 1.8, 'near sidewalk')
+  scaleNear(BLD_STREET.far - BLD_STREET.road, 0.8, 'far sidewalk', 0.25)
+  if (STREET_PROPS.treeH < 150 || STREET_PROPS.treeH > 200) fail(`tree ${STREET_PROPS.treeH} px outside the 150–200 px window`)
+  if (LANE_DEPTH < 44 || LANE_DEPTH > 52) fail(`lane depth ${LANE_DEPTH} px outside the foreshortened 44–52 px window`)
+  if (!fails) {
+    ok(
+      `street scale ${PX_PER_M} px/m: tree ${STREET_PROPS.treeH} px (7 m), lamp ${STREET_PROPS.lampH} px (6 m), ` +
+        `lane ${LANE_W} px wide / ${LANE_DEPTH} px deep, sidewalks ${BLD_STREET.walk - BLD_STREET.top}+${BLD_STREET.far - BLD_STREET.road} px`,
+    )
+  }
+
+  // each prop stands on the kerb, whole canopy clear of the facade bay
+  const foot = BLD_STREET.walk - STREET_PROPS.inset
+  let offStreet = 0
+  let inFacadeBay = 0
+  for (const prop of BLD_FURNITURE) {
+    const top = foot - prop.h
+    const reach = STREET_SHAPE.reach(prop.kind, prop.h)
+    if (top < 0 || foot > BUILDING_H) {
+      offStreet++
+      fail(`${prop.kind} at x ${prop.x} spans y ${r2(top)}…${foot}, outside the sheet`)
+    }
+    if (prop.x - reach < BLD.x0 && prop.x + reach > BLD.x1) {
+      inFacadeBay++
+      fail(`${prop.kind} at x ${prop.x} covers the whole facade bay`)
+    }
+    // it may touch the bay only if the facade (painted later) can cover it
+    if (prop.x + reach > BLD.x0 && prop.x - reach < BLD.x1) {
+      fail(`${prop.kind} at x ${prop.x} reaches into the facade bay by ${r2(Math.min(prop.x + reach - BLD.x0, BLD.x1 - (prop.x - reach)))} px`)
+    }
+  }
+  // a lamp head must never grow out of a canopy: keep the x-intervals apart
+  const spanOf = (prop: { kind: 'tree' | 'lamp'; x: number; h: number }) => {
+    if (prop.kind === 'tree') return [prop.x - STREET_SHAPE.canopyR(prop.h), prop.x + STREET_SHAPE.canopyR(prop.h)] as const
+    return [prop.x - 1.5, prop.x + STREET_SHAPE.reach('lamp', prop.h)] as const
+  }
+  let propHits = 0
+  for (let i = 0; i < BLD_FURNITURE.length; i++) {
+    for (let j = i + 1; j < BLD_FURNITURE.length; j++) {
+      const a = spanOf(BLD_FURNITURE[i]!)
+      const b = spanOf(BLD_FURNITURE[j]!)
+      if (a[1] > b[0] && b[1] > a[0]) {
+        propHits++
+        fail(`${BLD_FURNITURE[i]!.kind}@${BLD_FURNITURE[i]!.x} overlaps ${BLD_FURNITURE[j]!.kind}@${BLD_FURNITURE[j]!.x} (${r2(a[0])}…${r2(a[1])} vs ${r2(b[0])}…${r2(b[1])})`)
+      }
+    }
+  }
+  if (!propHits) ok(`${BLD_FURNITURE.length} props keep clear of each other (no lamp head inside a canopy)`)
+  const trees = BLD_FURNITURE.filter((p) => p.kind === 'tree')
+  const lamps = BLD_FURNITURE.filter((p) => p.kind === 'lamp')
+  if (!offStreet && !inFacadeBay) {
+    ok(
+      `${BLD_FURNITURE.length} props on the near kerb (${trees.length} trees ${STREET_PROPS.treeH}/${STREET_PROPS.treeH2} px, ` +
+        `${lamps.length} lamps ${STREET_PROPS.lampH} px), all inside the ${BUILDING_W}×${BUILDING_H} sheet and clear of the facade bay`,
+    )
+  }
+
+  // z-order: every furniture op is painted BEFORE the facade starts
+  for (const theme of THEMES) {
+    clearBuildingCache()
+    const rec = newRec()
+    const marks: Partial<Record<BuildingPhase, number>> = {}
+    // the sheet paints through `document.createElement`; point it at OUR recorder
+    const doc = (globalThis as unknown as { document: unknown }).document
+    ;(globalThis as unknown as { document: unknown }).document = {
+      createElement: (tag: string) => {
+        if (tag !== 'canvas') throw new Error(`unexpected createElement(${tag})`)
+        return { width: 0, height: 0, style: {}, getContext: () => recordCtx(rec) }
+      },
+    }
+    try {
+      createBuildingLayer(theme, (phase) => {
+        marks[phase] = rec.ops.length
+      })
+    } catch (err) {
+      fail(`${theme}: createBuildingLayer threw: ${(err as Error).message}`)
+      continue
+    } finally {
+      ;(globalThis as unknown as { document: unknown }).document = doc
+    }
+    const order = BUILDING_PHASES.map((p) => marks[p])
+    if (order.some((m) => m === undefined)) {
+      fail(`${theme}: phases not all reported (${JSON.stringify(marks)})`)
+      continue
+    }
+    let monotone = true
+    for (let i = 1; i < order.length; i++) if (order[i]! < order[i - 1]!) monotone = false
+    if (!monotone) fail(`${theme}: paint phases out of order (${BUILDING_PHASES.join(' → ')})`)
+    const furnStart = marks.furniture!
+    const facadeStart = marks.facade!
+    const liftStart = marks.lift!
+    if (!(furnStart < facadeStart && facadeStart < liftStart)) {
+      fail(`${theme}: furniture ${furnStart} / facade ${facadeStart} / lift ${liftStart} are not in painting order`)
+      continue
+    }
+    const furnOps = rec.ops.slice(furnStart, facadeStart)
+    const facadeOps = rec.ops.slice(facadeStart, liftStart)
+    if (furnOps.length < BLD_FURNITURE.length) {
+      fail(`${theme}: only ${furnOps.length} furniture ops for ${BLD_FURNITURE.length} props`)
+    }
+    // nothing the furniture paints above the facade base may survive the facade
+    let uncovered = 0
+    for (const op of furnOps) {
+      const r = { x: op.box[0], y: op.box[1], w: op.box[2] - op.box[0], h: op.box[3] - op.box[1] }
+      if (r.y >= BLD.baseY - 0.5 || r.w <= 0 || r.h <= 0) continue
+      if (r.x + r.w <= BLD.x0 || r.x >= BLD.x1) continue // outside the facade bay: nothing to cover
+      const need = { x: Math.max(r.x, BLD.x0), y: r.y, w: 0, h: Math.min(r.y + r.h, BLD.baseY) - r.y }
+      need.w = Math.min(r.x + r.w, BLD.x1) - need.x
+      // several facade ops may share the job (pilaster + wall), so sample the
+      // region on a small grid instead of demanding one covering rect
+      let samples = 0
+      let hit = 0
+      for (let gx = 0; gx <= 4; gx++) {
+        for (let gy = 0; gy <= 4; gy++) {
+          const px = need.x + (need.w * gx) / 4
+          const py = need.y + (need.h * gy) / 4
+          samples++
+          if (
+            facadeOps.some((f) => {
+              const fr = { x: f.box[0], y: f.box[1], w: f.box[2] - f.box[0], h: f.box[3] - f.box[1] }
+              return px > fr.x - 0.6 && px < fr.x + fr.w + 0.6 && py > fr.y - 0.6 && py < fr.y + fr.h + 0.6
+            })
+          ) {
+            hit++
+          }
+        }
+      }
+      const covered = hit === samples
+      if (!covered) {
+        uncovered++
+        if (uncovered < 4) fail(`${theme}: a ${op.name} above the facade base at y ${r2(r.y)} is painted after nothing that covers it`)
+      }
+    }
+    if (uncovered === 0) {
+      ok(
+        `${theme}/sheet: phases ${BUILDING_PHASES.length} in order, ${furnOps.length} furniture ops painted BEFORE the facade ` +
+          `(${facadeOps.length} facade ops after them) — occlusion only, never over the tower`,
+      )
+    }
+  }
 }
 
 console.log('')

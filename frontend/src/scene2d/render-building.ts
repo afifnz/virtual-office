@@ -24,16 +24,21 @@ import { cityWindowCells, trafficAt } from './traffic'
 import {
   BLD,
   BLD_AVATAR_H,
+  BLD_FURNITURE,
   BLD_BAND_ORDER,
   BLD_BANDS,
+  BLD_DASH,
   BLD_LIFT,
   BLD_STREET,
+  BLD_ZEBRA,
   BUILDING_H,
   BUILDING_W,
   B_PLATE_DOT,
   B_PLATE_DOT_GAP,
   B_PLATE_FONT,
   B_PLATE_PAD,
+  STREET_PROPS,
+  STREET_SHAPE,
   buildingCityRects,
   buildingDeskRect,
   buildingLift,
@@ -204,78 +209,112 @@ function drawSkyline(ctx: Ctx, theme: ThemeName): void {
 }
 
 function drawStreet(ctx: Ctx, theme: ThemeName): void {
+  const { top, walk, road, far, bottom } = BLD_STREET
+  const z = BLD_ZEBRA
+  const dash = BLD_DASH
+  const centre = (walk + road) / 2
+
   // near sidewalk (the building stands on it)
   ctx.fillStyle = theme === 'day' ? '#DCE4EE' : '#1B2433'
-  ctx.fillRect(0, BLD_STREET.top, BUILDING_W, BLD_STREET.walk - BLD_STREET.top)
+  ctx.fillRect(0, top, BUILDING_W, walk - top)
   ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.1)' : 'rgba(255,255,255,0.07)'
-  for (let x = 0; x < BUILDING_W; x += 34) ctx.fillRect(x, BLD_STREET.top + 3, 1, BLD_STREET.walk - BLD_STREET.top - 6)
-  ctx.fillRect(0, BLD_STREET.walk - 1, BUILDING_W, 1)
+  for (let x = 0; x < BUILDING_W; x += 20) ctx.fillRect(x, top + 3, 1, walk - top - 6)
+  ctx.fillRect(0, walk - 1, BUILDING_W, 1)
 
   // road
   ctx.fillStyle = theme === 'day' ? '#7C8794' : '#0D1420'
-  ctx.fillRect(0, BLD_STREET.walk, BUILDING_W, BLD_STREET.road - BLD_STREET.walk)
+  ctx.fillRect(0, walk, BUILDING_W, road - walk)
   ctx.fillStyle = theme === 'day' ? '#9AA4B0' : '#151E2C'
-  ctx.fillRect(0, BLD_STREET.walk + 4, BUILDING_W, 2)
-  // dashed centre line
+  ctx.fillRect(0, walk + 4, BUILDING_W, 2)
+  // dashed centre line: 3 m of paint, 6 m of gap, at PX_PER_M
   ctx.fillStyle = theme === 'day' ? '#F3F6FA' : '#C9BFA0'
   ctx.globalAlpha = theme === 'day' ? 0.85 : 0.5
-  for (let x = 6; x < BUILDING_W; x += 54) ctx.fillRect(x, (BLD_STREET.walk + BLD_STREET.road) / 2 - 1, 28, 2)
+  for (let x = 8; x < BUILDING_W; x += dash.line + dash.gap) {
+    // the centre line stops at the crossing, like a real marka putus
+    if (x + dash.line > z.x0 - 10 && x < z.x1 + 10) continue
+    ctx.fillRect(x, centre - dash.thick / 2, dash.line, dash.thick)
+  }
   ctx.globalAlpha = 1
-  // crosswalk under the tower entrance
+  // crosswalk under the tower entrance: 3.6 m wide, 0.45 m stripes
   ctx.fillStyle = theme === 'day' ? 'rgba(255,255,255,0.8)' : 'rgba(220,228,240,0.35)'
-  for (let x = 420; x < 580; x += 18) {
-    ctx.fillRect(x, BLD_STREET.walk + 8, 10, BLD_STREET.road - BLD_STREET.walk - 16)
+  for (let x = z.x0; x + z.stripe <= z.x1; x += z.stripe + z.gap) {
+    ctx.fillRect(x, walk + 6, z.stripe, road - walk - 12)
   }
 
-  // far sidewalk + foreground pavement
+  // foreground pavement (the kerb the camera stands on) + its paving joints,
+  // so a 42 px walker there clearly stands on pavement and not on asphalt
   ctx.fillStyle = theme === 'day' ? '#CDD7E3' : '#141C2B'
-  ctx.fillRect(0, BLD_STREET.road, BUILDING_W, BLD_STREET.far - BLD_STREET.road)
+  ctx.fillRect(0, road, BUILDING_W, far - road)
   ctx.fillStyle = theme === 'day' ? '#B9C5D3' : '#0C1320'
-  ctx.fillRect(0, BLD_STREET.far, BUILDING_W, BLD_STREET.bottom - BLD_STREET.far)
+  ctx.fillRect(0, far, BUILDING_W, bottom - far)
+  ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.1)' : 'rgba(255,255,255,0.07)'
+  for (let x = 10; x < BUILDING_W; x += 20) ctx.fillRect(x, road + 4, 1, far - road - 6)
   ctx.fillStyle = theme === 'day' ? 'rgba(15,36,64,0.08)' : 'rgba(255,255,255,0.05)'
-  ctx.fillRect(0, BLD_STREET.road, BUILDING_W, 1)
-  ctx.fillRect(0, BLD_STREET.far, BUILDING_W, 1)
+  ctx.fillRect(0, road, BUILDING_W, 1)
+  ctx.fillRect(0, far - 1, BUILDING_W, 1)
 }
 
-function drawTree(ctx: Ctx, theme: ThemeName, cx: number, scale = 1): void {
+/**
+ * Street furniture at the one scale: a 7 m tree (172 px) and a 6 m lamp post
+ * (147 px), feet on the near sidewalk. Painted BEFORE the facade — a canopy
+ * that reaches into the facade bay is occluded by the tower, never plastered
+ * over it (gate: no street-life pixel above the facade base after the facade).
+ */
+function drawFurniture(ctx: Ctx, theme: ThemeName): void {
+  for (const prop of BLD_FURNITURE) {
+    if (prop.kind === 'tree') drawTree(ctx, theme, prop.x, prop.h)
+    else drawLamp(ctx, theme, prop.x)
+  }
+}
+
+/** A street tree `h` px tall (trunk + canopy, a 7 m tree is 172 px). */
+function drawTree(ctx: Ctx, theme: ThemeName, cx: number, h: number): void {
   const t = THEME_TOKENS[theme]
-  const y = BLD_STREET.top + 4
-  groundShadow(ctx, cx, y, 22 * scale, theme === 'day' ? 0.18 : 0.3)
+  const foot = BLD_STREET.walk - STREET_PROPS.inset
+  const canopyR = STREET_SHAPE.canopyR(h)
+  const trunkH = STREET_SHAPE.trunkH(h)
+  const trunkW = STREET_SHAPE.trunkW(h)
+  const cy = foot - h + canopyR
+  groundShadow(ctx, cx, foot, canopyR * 0.95, theme === 'day' ? 0.18 : 0.3)
   ctx.fillStyle = theme === 'day' ? '#8A6A4A' : '#2C2118'
-  ctx.fillRect(cx - 2 * scale, y - 30 * scale, 4 * scale, 30 * scale)
+  ctx.fillRect(cx - trunkW / 2, foot - trunkH, trunkW, trunkH)
   for (const [dx, dy, r] of [
-    [0, -44, 18],
-    [-11, -36, 13],
-    [11, -37, 13],
+    [0, 0, 1],
+    [-0.55, 0.5, 0.62],
+    [0.55, 0.5, 0.62],
   ] as const) {
     ctx.fillStyle = t.plant
     ctx.beginPath()
-    ctx.ellipse(cx + dx * scale, y + dy * scale, r * scale, r * 0.82 * scale, 0, 0, Math.PI * 2)
+    ctx.ellipse(cx + dx * canopyR, cy + dy * canopyR, r * canopyR, r * canopyR * 0.92, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.fillStyle = t.plantDark
     ctx.beginPath()
-    ctx.ellipse(cx + (dx + 3) * scale, y + (dy + 3) * scale, r * 0.55 * scale, r * 0.45 * scale, 0, 0, Math.PI * 2)
+    ctx.ellipse(cx + (dx + 0.12) * canopyR, cy + (dy + 0.12) * canopyR, r * canopyR * 0.52, r * canopyR * 0.44, 0, 0, Math.PI * 2)
     ctx.fill()
   }
 }
 
+/** A 6 m lamp post, head included — 147 px from pavement to lamp. */
 function drawLamp(ctx: Ctx, theme: ThemeName, cx: number): void {
-  const y = BLD_STREET.top + 3
-  groundShadow(ctx, cx, y, 9, theme === 'day' ? 0.16 : 0.3)
+  const foot = BLD_STREET.walk - STREET_PROPS.inset
+  const h = STREET_PROPS.lampH
+  const headH = 8
+  const top = foot - h
+  groundShadow(ctx, cx, foot, 9, theme === 'day' ? 0.16 : 0.3)
   ctx.fillStyle = theme === 'day' ? '#5A6675' : '#39434F'
-  ctx.fillRect(cx - 1.5, y - 74, 3, 74)
-  ctx.fillRect(cx - 1.5, y - 74, 13, 2.5)
+  ctx.fillRect(cx - 1.5, top, 3, h)
+  ctx.fillRect(cx - 1.5, top, 13, 2.5)
   if (theme === 'night') {
-    const g = ctx.createRadialGradient(cx + 11, y - 71, 1, cx + 11, y - 71, 22)
+    const g = ctx.createRadialGradient(cx + 11, top + 3, 1, cx + 11, top + 3, 26)
     g.addColorStop(0, 'rgba(243,197,123,0.55)')
     g.addColorStop(1, 'rgba(243,197,123,0)')
     ctx.fillStyle = g
     ctx.beginPath()
-    ctx.arc(cx + 11, y - 71, 22, 0, Math.PI * 2)
+    ctx.arc(cx + 11, top + 3, 26, 0, Math.PI * 2)
     ctx.fill()
   }
   ctx.fillStyle = theme === 'day' ? '#E9EFF6' : THEME_TOKENS[theme].lamp
-  rr(ctx, cx + 6, y - 75, 10, 4, 2)
+  rr(ctx, cx + 6, top - 2, 10, headH, 2)
   ctx.fill()
 }
 
@@ -342,25 +381,26 @@ function drawFacade(ctx: Ctx, theme: ThemeName): void {
   }
 
   // roof: coping overhangs 8 px each side, then the fascia band
+  const roofY = BLD.roofTop
   const roofX = BLD.roofOverhangX
   const roofW = BLD.x1 - BLD.x0 + (BLD.x0 - BLD.roofOverhangX) * 2
   ctx.fillStyle = theme === 'day' ? '#E9EFF6' : '#1B2536'
-  ctx.fillRect(roofX, BLD.roofTop, roofW, 8)
+  ctx.fillRect(roofX, roofY, roofW, 8)
   ctx.fillStyle = theme === 'day' ? '#CBD6E3' : '#101827'
-  ctx.fillRect(BLD.x0, 78, BLD.x1 - BLD.x0, 16)
+  ctx.fillRect(BLD.x0, roofY + 8, BLD.x1 - BLD.x0, 16)
   ctx.fillStyle = theme === 'day' ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.12)'
-  ctx.fillRect(roofX, BLD.roofTop, roofW, 1)
-  // rooftop plant + antenna
+  ctx.fillRect(roofX, roofY, roofW, 1)
+  // rooftop plant + antenna, anchored to the roof line (the sky strip is 38 px)
   ctx.fillStyle = theme === 'day' ? '#B7C4D3' : '#0C1320'
-  ctx.fillRect(320, 58, 46, 12)
-  ctx.fillRect(600, 52, 34, 18)
-  ctx.fillRect(640, 30, 3, 22)
+  ctx.fillRect(320, roofY - 12, 46, 12)
+  ctx.fillRect(600, roofY - 18, 34, 18)
+  ctx.fillRect(640, roofY - 26, 3, 16)
   ctx.fillStyle = THEME_STATUS[theme].danger
   ctx.beginPath()
-  ctx.arc(641.5, 28, 2.5, 0, Math.PI * 2)
+  ctx.arc(641.5, roofY - 28, 2.5, 0, Math.PI * 2)
   ctx.fill()
   // building name on the fascia
-  text(ctx, 'AGENT OFFICE', BLD.cx - 43, 82, 10, theme === 'day' ? '#2B3A4D' : '#C6D0E0', 800)
+  text(ctx, 'AGENT OFFICE', BLD.cx - 43, roofY + 12, 10, theme === 'day' ? '#2B3A4D' : '#C6D0E0', 800)
 }
 
 function drawLiftShaftStatic(ctx: Ctx, theme: ThemeName): void {
@@ -392,26 +432,36 @@ function drawLiftShaftStatic(ctx: Ctx, theme: ThemeName): void {
   text(ctx, 'LIFT', x + 10, bottom - 26, 6, theme === 'day' ? '#3B4A5E' : '#93A0B6', 700)
 }
 
-export function createBuildingLayer(theme: ThemeName): HTMLCanvasElement {
+/**
+ * Paint phases of the cached sheet, in the order they are painted. The gate
+ * replays them to prove that every piece of street furniture is drawn BEFORE
+ * the facade (`furniture` < `facade`), so a 172 px tree in the facade bay is
+ * occluded by the tower instead of covering it.
+ */
+export type BuildingPhase = 'sky' | 'skyline' | 'street' | 'furniture' | 'facade' | 'lift'
+export const BUILDING_PHASES: readonly BuildingPhase[] = ['sky', 'skyline', 'street', 'furniture', 'facade', 'lift']
+
+export function createBuildingLayer(theme: ThemeName, onPhase?: (phase: BuildingPhase) => void): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(BUILDING_W * CACHE_SCALE)
   canvas.height = Math.round(BUILDING_H * CACHE_SCALE)
   const ctx = canvas.getContext('2d')!
   ctx.scale(CACHE_SCALE, CACHE_SCALE)
 
+  onPhase?.('sky')
   drawSky(ctx, theme)
+  onPhase?.('skyline')
   drawSkyline(ctx, theme)
+  onPhase?.('street')
   drawStreet(ctx, theme)
+  // street furniture BEFORE the facade: occlusion by the tower is the rule,
+  // painting over the tower is the bug this order makes impossible.
+  onPhase?.('furniture')
+  drawFurniture(ctx, theme)
+  onPhase?.('facade')
   drawFacade(ctx, theme)
+  onPhase?.('lift')
   drawLiftShaftStatic(ctx, theme)
-
-  // street furniture in front of the skyline, outside the facade bay
-  for (const x of [44, 142, 224]) drawTree(ctx, theme, x, x === 44 ? 1 : 0.86)
-  for (const x of [776, 872, 958]) drawTree(ctx, theme, x, x === 958 ? 0.86 : 1)
-  drawLamp(ctx, theme, 110)
-  drawLamp(ctx, theme, 296)
-  drawLamp(ctx, theme, 704)
-  drawLamp(ctx, theme, 890)
 
   return canvas
 }

@@ -3,20 +3,23 @@
  *
  * Proves, without a browser and without screenshots:
  *
- *   a. the fleet and the crowd exist (2 lanes × 5 vehicles incl. bus/van/moto,
+ *   a. one scale: every prop is `PX_PER_M × real metres` within ±10 % — car
+ *      110×37, van 135×54, bus 220×78 (shortened from 294 on purpose), moto
+ *      49×27, walker 11×42, lane 86 px wide, zebra 88 px, sidewalk 44 px;
+ *   b. the fleet and the crowd exist (2 lanes × 5 vehicles incl. bus/van/moto,
  *      5 pedestrians: 3 pavement walkers + 2 zebra crossers) and every one of
- *      them stays inside the road / pavement / zebra bands — never on the
- *      facade and never on a nameplate;
- *   b. no two vehicles in the same lane ever overlap their bbox (sampled at
- *      30 Hz for 2 minutes, minimum bumper gap 16 px);
- *   c. the light stops the traffic: from 2.8 s into the red phase the zebra is
- *      empty, no vehicle crosses the stop line while the light is red, and the
- *      queue in front of the line is stationary;
- *   d. `?still=1` is a frozen phase: two fresh computations of the same t (and
+ *      them keeps its ground line inside its own band — never on the facade;
+ *   c. no two vehicles in the same lane ever overlap their bbox (sampled at
+ *      30 Hz for 2 minutes, minimum bumper gap 29 px = 1.2 m);
+ *   d. the light stops the traffic: from `CROSS_CLEARANCE` (recomputed from the
+ *      new bus length and speed) into the red phase the zebra is empty, no
+ *      vehicle crosses the stop line while the light is red, and the queue in
+ *      front of the line is stationary;
+ *   e. `?still=1` is a frozen phase: two fresh computations of the same t (and
  *      two painted frames) are identical to the last digit;
- *   e. headlights/tail lights are painted at night and never by day;
- *   f. the street life never paints over the facade rect (clipped sky
- *      included) and the light cycle is the published 6 / 2 / 6.
+ *   f. headlights/tail lights are painted at night and never by day;
+ *   g. the street life never paints over the facade rect (clipped sky
+ *      included), and the painted road/zebra/sidewalk widths match the scale.
  *
  * It also reports the painter cost: ops added by the traffic layer, and a
  * mock-ctx frame time (JS only, no rasterisation — the real `__office2dPerf()`
@@ -29,21 +32,38 @@
 import type { Agent, Comm } from '../frontend/src/lib/types'
 import { agentsFor } from '../frontend/src/lib/roster'
 import type { AgentMeta } from '../frontend/src/lib/agents'
-import { BLD_STREET, BUILDING_H, BUILDING_W, buildingRect } from '../frontend/src/scene2d/building'
+import {
+  BLD_AVATAR_H,
+  BLD_DASH,
+  BLD_STREET,
+  BLD_ZEBRA,
+  BUILDING_H,
+  BUILDING_W,
+  LANE_DEPTH,
+  LANE_W,
+  PX_PER_M,
+  STREET_PROPS,
+  buildingRect,
+} from '../frontend/src/scene2d/building'
 import { renderBuildingFrame } from '../frontend/src/scene2d/render-building'
 import { drawSkyLife, drawStreetLife } from '../frontend/src/scene2d/render-traffic'
 import {
   BIRDS,
   CLOUDS,
-  CURB,
+  CROSS_CLEARANCE,
+  CROSS_DUR,
+  CROSS_PX,
+  CROSS_START,
   LIGHT,
   PED_SPECS,
+  RED_START,
   ROAD,
   SPEED_RANGE,
   STOP_LINE,
   VEHICLE,
   WALK,
   ZEBRA,
+  ZEBRA_CLEAR_PX,
   birdAt,
   blinkAt,
   cloudX,
@@ -85,11 +105,11 @@ const vehicleRect = (v: TrafficFrame['vehicles'][number]): Rect => ({ x: v.x - v
 const pedRect = (p: TrafficFrame['peds'][number]): Rect => ({ x: p.x - p.w / 2, y: p.y - p.h, w: p.w, h: p.h })
 
 const FACADE = buildingRect()
-// a vehicle bbox may hang off the loop ends while it wraps (it is off-canvas)
-const ROAD_BAND: Rect = { x: ROAD.x0 - 40, y: ROAD.top, w: ROAD.x1 - ROAD.x0 + 80, h: ROAD.bottom - ROAD.top }
+/** How far a vehicle may hang off the loop ends while it wraps. */
+const LOOP_MARGIN = Math.max(...Object.values(VEHICLE).map((v) => v.w / 2)) + 20
+/** The whole street: sidewalk → road → far sidewalk (vehicle bodies may rise above their lane). */
+const STREET_BAND: Rect = { x: ROAD.x0 - LOOP_MARGIN, y: BLD_STREET.top, w: ROAD.x1 - ROAD.x0 + LOOP_MARGIN * 2, h: BUILDING_H - BLD_STREET.top }
 const ZEBRA_RECT: Rect = { x: ZEBRA.x0, y: ROAD.top, w: ZEBRA.x1 - ZEBRA.x0, h: ROAD.bottom - ROAD.top }
-const NEAR_WALK: Rect = { x: 0, y: BLD_STREET.top, w: BUILDING_W, h: BLD_STREET.walk - BLD_STREET.top }
-const FAR_WALK: Rect = { x: 0, y: BLD_STREET.road, w: BUILDING_W, h: BLD_STREET.far - BLD_STREET.road }
 
 const DT = 1 / 30
 
@@ -102,7 +122,52 @@ const DT = 1 / 30
   },
 }
 
-// --------------------------------------------------------- a. fleet + crowd
+// ------------------------------------------------------- a. one scale, all props
+{
+  /** ±10 % window the boss asked for. */
+  const near = (got: number, real: number, name: string, slack = 0.1) => {
+    const want = real * PX_PER_M
+    const dev = Math.abs(got - want) / want
+    if (dev > slack) fail(`${name}: ${got} px vs ${want.toFixed(1)} px (${(dev * 100).toFixed(1)} % off, limit ${slack * 100} %)`)
+    return dev
+  }
+  const devs: string[] = []
+  // the anchor itself: 42 px for 1.7 m
+  if (Math.abs(PX_PER_M - 42 / 1.7) > 0.5) fail(`PX_PER_M ${PX_PER_M} is not the 42 px / 1.7 m avatar scale (${(42 / 1.7).toFixed(2)})`)
+  devs.push(`px/m ${PX_PER_M} = 42/1.7`)
+  devs.push(`car ${VEHICLE.car.w}×${VEHICLE.car.h} (${near(VEHICLE.car.h, 1.5, 'car h').toFixed(3)}/${near(VEHICLE.car.w, 4.5, 'car w').toFixed(3)})`)
+  devs.push(`van ${VEHICLE.van.w}×${VEHICLE.van.h} (${near(VEHICLE.van.h, 2.2, 'van h').toFixed(3)}/${near(VEHICLE.van.w, 5.5, 'van w').toFixed(3)})`)
+  // the bus keeps its true height (3.2 m) but is shortened to 9 m so a 14 s
+  // cycle can still clear the zebra; 220 px is inside the "may be shortened" bill
+  near(VEHICLE.bus.h, 3.2, 'bus h')
+  if (VEHICLE.bus.w < 200 || VEHICLE.bus.w > 294) fail(`bus length ${VEHICLE.bus.w} px outside the 200…294 px window`)
+  devs.push(`bus ${VEHICLE.bus.w}×${VEHICLE.bus.h} (h ${near(VEHICLE.bus.h, 3.2, 'bus h').toFixed(3)}, length shortened from ${Math.round(12 * PX_PER_M)})`)
+  devs.push(`moto ${VEHICLE.moto.w}×${VEHICLE.moto.h} (${near(VEHICLE.moto.h, 1.1, 'moto h').toFixed(3)}/${near(VEHICLE.moto.w, 2.0, 'moto w').toFixed(3)})`)
+  const ped = trafficSnapshot(0).peds[0]!
+  devs.push(`person ${ped.w}×${ped.h} (${near(ped.h, 1.7, 'ped h').toFixed(3)}/${near(ped.w, 0.45, 'ped w').toFixed(3)})`)
+  if (ped.h !== BLD_AVATAR_H) {
+    fail(`street walker ${ped.h} px ≠ the ${BLD_AVATAR_H} px overview avatar (inside and outside must share one person)`)
+  }
+  if (ped.h > BLD_AVATAR_H + 0.5) fail(`street walker is taller than the ${BLD_AVATAR_H} px overview avatar`)
+  near(STREET_PROPS.treeH, 7, 'tree', 0.15)
+  if (STREET_PROPS.treeH < 150 || STREET_PROPS.treeH > 200) fail(`tree ${STREET_PROPS.treeH} px outside the 150–200 px window`)
+  devs.push(`tree ${STREET_PROPS.treeH} px (7 m)`)
+  near(STREET_PROPS.lampH, 6, 'lamp')
+  devs.push(`lamp ${STREET_PROPS.lampH} px (6 m)`)
+  near(LANE_W, 3.5, 'lane width')
+  devs.push(`lane ${LANE_W.toFixed(2)} px wide (3.5 m), ${LANE_DEPTH} px deep on the sheet (foreshortened ×0.56)`)
+  near(ZEBRA.x1 - ZEBRA.x0, 3.5, 'zebra width')
+  devs.push(`zebra ${ZEBRA.x1 - ZEBRA.x0} px`)
+  near(BLD_STREET.walk - BLD_STREET.top, 1.8, 'near sidewalk')
+  near(BLD_STREET.far - BLD_STREET.road, 0.8, 'far sidewalk', 0.2)
+  near(BLD_DASH.line, 3, 'dash')
+  near(BLD_DASH.line + BLD_DASH.gap, 9, 'dash pitch')
+  devs.push(`dash ${BLD_DASH.line}+${BLD_DASH.gap} px (3 m + 6 m)`)
+  devs.push(`sidewalk ${BLD_STREET.walk - BLD_STREET.top}+${BLD_STREET.far - BLD_STREET.road} px`)
+  if (!fails) ok(`one scale ${PX_PER_M} px/m: ${devs.join(' · ')}`)
+}
+
+// --------------------------------------------------------- b. fleet + crowd
 {
   resetTraffic()
   const f = trafficSnapshot(0)
@@ -127,55 +192,68 @@ const DT = 1 / 30
   )
 }
 
-// --------------------------------------------------- a. everyone in its band
+// --------------------------------------- b. everyone in its own band
 {
   resetTraffic()
   let bad = 0
   let worstLane = 0
+  let tallestOver = 0
   for (let i = 0; i <= 120 / DT; i++) {
     const t = i * DT
     const f = trafficSnapshot(t)
     for (const v of f.vehicles) {
       const r = vehicleRect(v)
-      if (!inside(r, ROAD_BAND)) {
+      // the wheels line is what must sit in the lane; a 3.2 m bus at the far
+      // kerb legitimately rises above the foreshortened lane depth
+      const ground = v.y + v.h
+      const laneBase = v.lane === 'near' ? ROAD.nearBase : ROAD.farBase
+      if (Math.abs(ground - laneBase) > 0.51) {
+        worstLane++
+        if (worstLane < 3) fail(`t=${r2(t)} ${v.id} wheels at ${r2(ground)}, want its lane line ${laneBase}`)
+      }
+      if (!inside(r, STREET_BAND)) {
         bad++
-        if (bad < 4) fail(`t=${r2(t)} ${v.id} is outside the road band: y ${r2(r.y)}…${r2(r.y + r.h)}`)
+        if (bad < 4) fail(`t=${r2(t)} ${v.id} leaves the street: y ${r2(r.y)}…${r2(r.y + r.h)}`)
+      }
+      tallestOver = Math.max(tallestOver, ROAD.top - r.y)
+      if (r.y < BLD_STREET.top) {
+        bad++
+        if (bad < 4) fail(`t=${r2(t)} ${v.id} paints above the sidewalk (y ${r2(r.y)} < ${BLD_STREET.top})`)
       }
       if (overlap(r, FACADE)) {
         bad++
         if (bad < 4) fail(`t=${r2(t)} ${v.id} covers the facade`)
       }
-      // lane discipline: near lane below the centre line, far lane above it
-      const below = r.y >= ROAD.centre - 1
-      if (v.lane === 'near' ? !below : below) {
-        worstLane++
-        if (worstLane < 3) fail(`t=${r2(t)} ${v.id} is in the wrong lane (y ${r2(r.y)})`)
-      }
     }
     for (const p of f.peds) {
       const r = pedRect(p)
-      const onNear = inside(r, NEAR_WALK)
-      const onFar = inside(r, FAR_WALK)
+      // feet decide the band: a 42 px walker is taller than a 20 px far kerb
+      const onNear = p.y > BLD_STREET.top - 0.01 && p.y <= BLD_STREET.walk + 0.01
+      const onFar = p.y > BLD_STREET.road - 0.01 && p.y <= BLD_STREET.bottom + 0.01
       const onZebra =
         p.crossing &&
         r.x >= ZEBRA.x0 - 0.01 &&
         r.x + r.w <= ZEBRA.x1 + 0.01 &&
-        r.y >= BLD_STREET.top - 0.01 &&
-        r.y + r.h <= WALK.far.feet + 0.01
+        p.y >= WALK.near.feet - 0.01 &&
+        p.y <= WALK.far.feet + 0.01
       if (!onNear && !onFar && !onZebra) {
         bad++
-        if (bad < 6) fail(`t=${r2(t)} ${p.id} is neither on a pavement nor on the zebra (y ${r2(r.y)}…${r2(r.y + r.h)})`)
+        if (bad < 6) fail(`t=${r2(t)} ${p.id} is neither on a pavement nor on the zebra (feet ${r2(p.y)})`)
       }
       if (overlap(r, FACADE)) {
         bad++
-        if (bad < 6) fail(`t=${r2(t)} ${p.id} covers the facade`)
+        if (bad < 6) fail(`t=${r2(t)} ${p.id} covers the facade (head ${r2(r.y)} < ${BLD_STREET.top})`)
+      }
+      if (r.y < BLD_STREET.top - 0.01) {
+        bad++
+        if (bad < 6) fail(`t=${r2(t)} ${p.id} paints above the sidewalk: head ${r2(r.y)}`)
       }
     }
   }
-  if (!bad) {
+  if (!bad && !worstLane) {
     ok(
-      `120 s swept at 30 Hz: every vehicle stays in the ${ROAD.top}…${ROAD.bottom} road band and its own lane; ` +
-        `every pedestrian on a pavement or the zebra (${ZEBRA.x0}…${ZEBRA.x1})`,
+      `120 s swept at 30 Hz: every vehicle keeps its wheels on its lane line (near ${ROAD.nearBase}, far ${ROAD.farBase}), ` +
+        `every walker's feet on a pavement or the zebra (${ZEBRA.x0}…${ZEBRA.x1}); tallest body rises ${r2(tallestOver)} px above the road line (a bus roof at the far kerb)`,
     )
   }
 }
@@ -213,8 +291,13 @@ const DT = 1 / 30
   let inZebra = 0
   let crossed = 0
   let queued = 0
+  // the clearance the sheet promises, derived from the longest vehicle
+  const busClear = ZEBRA_CLEAR_PX / VEHICLE.bus.speed
+  if (CROSS_CLEARANCE < busClear) {
+    fail(`CROSS_CLEARANCE ${CROSS_CLEARANCE} s < bus clearance ${r2(busClear)} s (${ZEBRA_CLEAR_PX} px at ${VEHICLE.bus.speed} px/s)`)
+  }
   for (let cycle = 0; cycle < 8; cycle++) {
-    const redStart = LIGHT.green + LIGHT.yellow + cycle * LIGHT.cycle
+    const redStart = RED_START + cycle * LIGHT.cycle
     let prev = trafficSnapshot(redStart + 0.05)
     for (let i = 1; i <= Math.round(LIGHT.red / DT); i++) {
       const t = redStart + 0.05 + i * DT
@@ -231,9 +314,9 @@ const DT = 1 / 30
           crossed++
           if (crossed < 4) fail(`t=${r2(t)} ${v.id} crossed the stop line ${line} during red`)
         }
-        if (t >= redStart + 2.8 && overlap(vehicleRect(v), ZEBRA_RECT)) {
+        if (t >= redStart + CROSS_CLEARANCE && overlap(vehicleRect(v), ZEBRA_RECT)) {
           inZebra++
-          if (inZebra < 4) fail(`t=${r2(t)} ${v.id} is inside the zebra during red`)
+          if (inZebra < 4) fail(`t=${r2(t)} ${v.id} is inside the zebra during red + ${CROSS_CLEARANCE} s`)
         }
         // a car that has reached the queue is parked on the line, not creeping
         if (lightAt(t).phase === 'red' && front <= line && line - front <= 12 && v.speed < 0.5) queued++
@@ -243,12 +326,20 @@ const DT = 1 / 30
   }
   if (!crossed && !inZebra) {
     ok(
-      `8 red phases: 0 vehicles enter the zebra, zebra empty from red+2.8 s to red+6 s ` +
-        `(${queued} queue samples stationary)`,
+      `8 red phases: 0 vehicles enter the zebra, zebra empty from red+${CROSS_CLEARANCE} s to red+${LIGHT.red} s ` +
+        `(clearance ${r2(busClear)} s for a ${VEHICLE.bus.w} px bus over ${ZEBRA_CLEAR_PX} px; ${queued} queue samples stationary)`,
     )
   }
-  if (queued > 50) ok(`queue in front of the line is stationary on red (${queued} stopped samples)`)
   if (queued <= 50) fail(`only ${queued} stopped-at-the-line samples during 8 red phases`)
+  // and the crossing fits inside the red phase: clearance + walk < red
+  if (CROSS_START + CROSS_DUR > RED_START + LIGHT.red - 0.1) {
+    fail(`crossing ${CROSS_START}…${r2(CROSS_START + CROSS_DUR)} s overruns the red phase (ends ${RED_START + LIGHT.red})`)
+  } else {
+    ok(
+      `pedestrian window ${r2(CROSS_START)}…${r2(CROSS_START + CROSS_DUR)} s (${CROSS_DUR} s for ${CROSS_PX} px kerb-to-kerb) ` +
+        `fits inside the ${LIGHT.red} s red phase`,
+    )
+  }
 }
 
 // ------------------------------------------------------- d. determinism
@@ -288,6 +379,34 @@ const DT = 1 / 30
   }
   const day = count('day')
   const night = count('night')
+
+  // direction check: a headlight cone must sit in FRONT of a vehicle, a tail
+  // light behind it — the one bug a count could never catch
+  resetTraffic()
+  const frec = newRec()
+  const fctx = recordCtx(frec)
+  const ft = 3.3
+  const fframe = trafficAt(ft)
+  fctx.save()
+  drawSkyLife(fctx, 'night', ft)
+  drawStreetLife(fctx, 'night', { ...fframe, vehicles: fframe.vehicles.map((v) => ({ ...v })), peds: fframe.peds.map((p) => ({ ...p })) })
+  fctx.restore()
+  const cars = fframe.vehicles
+  const frontOf = (v: TrafficFrame['vehicles'][number]) => (v.dir > 0 ? v.x + v.w / 2 : v.x - v.w / 2)
+  const cones = frec.ops.filter((o) => String(o.fill).toLowerCase() === 'rgba(255,228,150,0.16)')
+  let wrongSide = 0
+  for (const op of cones) {
+    const cx = (op.box[0] + op.box[2]) / 2
+    const okSide = cars.some((v) => {
+      const front = frontOf(v)
+      return v.dir > 0 ? cx > front - 1 : cx < front + 1
+    })
+    if (!okSide) {
+      wrongSide++
+      if (wrongSide < 3) fail(`a headlight cone at x ${r2(cx)} points away from every front bumper`)
+    }
+  }
+  if (!wrongSide && cones.length) ok(`headlight cones point the way each vehicle drives (${cones.length} cones, 0 backwards)`)
   if (day.head !== 0 || day.tail !== 0) fail(`day frame paints ${day.head} headlight / ${day.tail} tail fills, want 0`)
   if (night.head < 10) fail(`night frame paints only ${night.head} headlight fills, want ≥ 10`)
   if (night.tail < 5) fail(`night frame paints only ${night.tail} tail fills, want ≥ 5`)
@@ -322,12 +441,7 @@ const DT = 1 / 30
           if (offFacade < 4) fail(`${theme} t=${t}: ${op.name} (${r2(r.x)},${r2(r.y)}) covers the facade`)
         }
         const sky = r.y + r.h <= BLD_STREET.top + 0.5
-        const street = inside(r, {
-          x: ROAD.x0 - 40,
-          y: BLD_STREET.top,
-          w: ROAD.x1 - ROAD.x0 + 80,
-          h: BLD_STREET.far - BLD_STREET.top,
-        })
+        const street = inside(r, STREET_BAND)
         if (!sky && !street) {
           outside++
           if (outside < 4) fail(`${theme} t=${t}: ${op.name} at y ${r2(r.y)}…${r2(r.y + r.h)} is neither sky nor street`)
@@ -427,9 +541,16 @@ const DT = 1 / 30
   if (!inRange) fail('no vehicle ever moved inside the promised speed window')
   else ok(`moving speeds ${r2(SPEED_RANGE.min)}…${r2(SPEED_RANGE.max)} px/s promised, observed max ${r2(fastest)} (${moving} moving samples)`)
 
-  const bus = Object.values(VEHICLE).find((v) => v.speed === 58)!
-  if (bus.speed >= VEHICLE.car.speed) fail('the bus is not slower than a car')
-  else ok(`bus free speed ${bus.speed} px/s < car ${VEHICLE.car.speed} px/s (moto ${VEHICLE.moto.speed})`)
+  const kmh = (px: number) => (px / PX_PER_M) * 3.6
+  if (!(VEHICLE.bus.speed < VEHICLE.van.speed && VEHICLE.van.speed < VEHICLE.car.speed && VEHICLE.car.speed < VEHICLE.moto.speed)) {
+    fail(`speed order is not bus < van < car < moto (${VEHICLE.bus.speed}/${VEHICLE.van.speed}/${VEHICLE.car.speed}/${VEHICLE.moto.speed})`)
+  } else {
+    ok(
+      `free-flow speeds ${kmh(VEHICLE.bus.speed).toFixed(0)}/${kmh(VEHICLE.van.speed).toFixed(0)}/` +
+        `${kmh(VEHICLE.car.speed).toFixed(0)}/${kmh(VEHICLE.moto.speed).toFixed(0)} km/h (bus/van/car/moto) — ` +
+        `cars inside the 30–50 km/h bill at the low end, the moto nimbler`,
+    )
+  }
 }
 
 // -------------------------------------------------------------- wrap safety
@@ -444,8 +565,12 @@ const DT = 1 / 30
       const A = prev.vehicles[j]!
       const B = f.vehicles[j]!
       if (Math.abs(B.x - A.x) < 200) continue
+      const half = Math.max(A.w, B.w) / 2
+      // a wrap is only legal when the WHOLE body was off-canvas on one side
+      const offA = A.x + half < 1 || A.x - half > BUILDING_W - 1
+      const offB = B.x + half < 1 || B.x - half > BUILDING_W - 1
       wraps++
-      const off = A.x > BUILDING_W - 1 || B.x < 1 || A.x < 1 || B.x > BUILDING_W - 1
+      const off = offA && offB
       if (!off) {
         wrapsOnScreen++
         if (wrapsOnScreen < 3) fail(`a vehicle wrapped at x ${r2(A.x)} → ${r2(B.x)}, inside the canvas`)

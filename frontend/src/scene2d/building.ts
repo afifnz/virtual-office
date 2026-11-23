@@ -4,13 +4,19 @@
  * This file is pure geometry — no DOM, no canvas — so the painter, the camera
  * and `verify/building_check.ts` all read the same numbers:
  *
- *   78–94    roof (coping + fascia)
- *   94–244   L3 Tim Dev     (band 150, floor line 234)
- *   244–252  slab
- *   252–402  L2 Tim Edu     (band 150, floor line 392)
- *   402–410  slab
- *   410–560  L1 Lobby       (band 150, floor line 550)
- *   560–688  street: near sidewalk, road, far sidewalk, foreground
+ *   0–38     sky strip above the roof
+ *   38–54    roof (coping + fascia)
+ *   54–212   L3 Tim Dev     (band 150, floor line 202)
+ *   212–220  slab
+ *   220–370  L2 Tim Edu     (band 150, floor line 360)
+ *   370–378  slab
+ *   378–528  L1 Lobby       (band 150, floor line 518)
+ *   528–688  street: near sidewalk 44, road 96, far sidewalk 20
+ *
+ * ONE scale for the street: `PX_PER_M = 24.5`, taken from the 42 px overview
+ * avatar for a 1.7 m person. Every street prop (car, bus, van, moto, walker,
+ * tree, lamp, lane marking, zebra) is derived from that constant — never sized
+ * ad hoc, never inherited from the old toy scale.
  *
  * The building is 480 px wide and centred on the 1000 px sheet (x 260–740), so
  * its centre IS the canvas centre — the difference is 0, well inside the 2 %
@@ -25,15 +31,48 @@ import { measureSans, shortName } from './labels'
 export const BUILDING_W = 1000
 export const BUILDING_H = 688
 
+// --------------------------------------------------------------- the scale
+
+/**
+ * The single scale of the GEDUNG view: 24.5 design px per metre.
+ *
+ * It is not invented — it is the overview avatar (42 px) divided by a real
+ * person (1.7 m), rounded to the nearest 0.5. Everything the street paints is
+ * `PX_PER_M × real metres`; `verify/traffic_check.ts` re-derives each prop from
+ * the table below and fails outside ±10 %.
+ */
+export const PX_PER_M = 24.5
+
+/** Metres → design px at the one street scale. */
+export const m2px = (metres: number): number => metres * PX_PER_M
+
+/**
+ * Street depth is the one axis the sheet cannot draw at 1:1.
+ *
+ * A true 2 × 3.5 m carriageway plus two sidewalks is 10–12 m = 245–294 px.
+ * The sheet is 688 px tall and the three 150 px bands + roof are untouchable,
+ * so after lifting the whole building 32 px the street has 160 px. Drawing the
+ * depth axis at 1:1 would need either a ~900 px canvas (which shrinks the
+ * 42 px avatar at fit — not allowed) or a one-lane road. The scene is a 3/4
+ * view, not an elevation, so the depth axis is foreshortened by one documented
+ * constant: 0.56 → a 3.5 m lane is 48 px deep on screen while staying 85.75 px
+ * wide wherever it is measurable (zebra, stop line, dash pattern).
+ */
+export const STREET_DEPTH_K = 0.56
+/** 3.5 m lane, full scale along the street (dash pattern, stop distance). */
+export const LANE_W = m2px(3.5) // 85.75
+/** The same lane measured across the road, on the sheet: 48 px. */
+export const LANE_DEPTH = Math.round(LANE_W * STREET_DEPTH_K) // 48
+
 /** Facade rectangle — the city must never intersect it (gate d). */
 export const BLD = {
   x0: 260,
   x1: 740,
   cx: 500,
   roofOverhangX: 252,
-  roofTop: 70,
+  roofTop: 38,
   roofH: 24,
-  baseY: 560,
+  baseY: 528,
 } as const
 
 export interface BuildingBand {
@@ -46,32 +85,97 @@ export interface BuildingBand {
   floorY: number
 }
 
-/** Top → bottom, exactly as painted. */
+/** Top → bottom, exactly as painted (the whole building sits 32 px higher than
+ * the first draft so the street band can carry a scaled road). */
 export const BLD_BANDS: Record<FloorId, BuildingBand> = {
-  3: { floor: 3, y0: 94, y1: 244, floorY: 234 },
-  2: { floor: 2, y0: 252, y1: 402, floorY: 392 },
-  1: { floor: 1, y0: 410, y1: 560, floorY: 550 },
+  3: { floor: 3, y0: 62, y1: 212, floorY: 202 },
+  2: { floor: 2, y0: 220, y1: 370, floorY: 360 },
+  1: { floor: 1, y0: 378, y1: 528, floorY: 518 },
 }
 export const BLD_BAND_ORDER: FloorId[] = [3, 2, 1]
 export const BLD_BAND_H = 150
 export const BLD_SLAB_H = 8
 
-/** Street bands under the building base. */
+/**
+ * Street bands under the building base, sized from `PX_PER_M`:
+ *
+ *   528–572  near sidewalk  44 px (1.8 m) — walkers stand at feet 572
+ *   572–668  road           96 px = 2 lanes × 48 px deep (see STREET_DEPTH_K)
+ *   668–688  far sidewalk   20 px (0.8 m)
+ */
 export const BLD_STREET = {
-  top: 560,
-  walk: 578,
-  road: 640,
-  far: 660,
+  top: 528,
+  walk: 572,
+  road: 668,
+  far: 688,
   bottom: 688,
 } as const
 
+/**
+ * Street furniture, also pure scale: a 7 m street tree is 172 px, a 6 m lamp
+ * post 147 px. Both stand on the near sidewalk with their feet a few px above
+ * the kerb, and both are painted BEFORE the facade so a canopy that reaches
+ * into the facade bay is occluded by the tower instead of plastered on it.
+ */
+export const STREET_PROPS = {
+  /** 7 m tree, the boss's table (150–200 px window) */
+  treeH: Math.round(m2px(7)), // 172
+  /** 6.2 m accent tree, the smaller one at each end */
+  treeH2: Math.round(m2px(6.2)), // 152
+  /** 6 m lamp post, head included */
+  lampH: Math.round(m2px(6)), // 147
+  /** feet of the furniture above the kerb line */
+  inset: 6,
+} as const
+
+/**
+ * Street furniture layout, shared by the painter and the gate. Every tree and
+ * lamp stands clear of the facade x-range (260…740) by its whole canopy, so the
+ * static sheet never needs to hide one behind the tower — and if it ever did,
+ * the painter draws furniture BEFORE the facade, so occlusion would be the only
+ * possible outcome (never a canopy over the glass).
+ */
+export const BLD_FURNITURE: ReadonlyArray<{ kind: 'tree' | 'lamp'; x: number; h: number }> = [
+  // left bay: tree, lamp, tree, lamp — the lamp heads (+16 px) fall in the gaps
+  { kind: 'tree', x: 60, h: STREET_PROPS.treeH },
+  { kind: 'lamp', x: 122, h: STREET_PROPS.lampH },
+  { kind: 'tree', x: 190, h: STREET_PROPS.treeH2 },
+  { kind: 'lamp', x: 240, h: STREET_PROPS.lampH },
+  // right bay: the two canopies leave no gap for a second head, so one lamp
+  { kind: 'lamp', x: 760, h: STREET_PROPS.lampH },
+  { kind: 'tree', x: 830, h: STREET_PROPS.treeH2 },
+  { kind: 'tree', x: 940, h: STREET_PROPS.treeH },
+]
+
+/** Canopy radius + trunk + head sizes in px, from the one scale. */
+export const STREET_SHAPE = {
+  canopyR: (h: number) => h * 0.31,
+  trunkH: (h: number) => h * 0.42,
+  trunkW: (h: number) => Math.max(4, h * 0.045),
+  /** widest horizontal reach of any part of a prop from its x */
+  reach: (kind: 'tree' | 'lamp', h: number) => (kind === 'tree' ? h * 0.31 : 16),
+} as const
+
+/**
+ * Road paint. The zebra is 3.6 m wide along the street (88 px) with 0.45 m
+ * stripes; the centre line is 3 m of paint and 6 m of gap, exactly the
+ * Indonesian marka putus the boss asked for (74 px + 147 px).
+ */
+export const BLD_ZEBRA = { x0: 456, x1: 544, stripe: 11, gap: 11 } as const
+export const BLD_DASH = {
+  line: Math.round(m2px(3)), // 74
+  gap: Math.round(m2px(6)), // 147
+  thick: 3,
+} as const
+
 /** One shaft through all three floors, in the east bay. */
-export const BLD_LIFT = { x: 692, w: 32, top: 120, bottom: 556 } as const
+export const BLD_LIFT = { x: 692, w: 32, top: 88, bottom: 524 } as const
 /** Car height; its centre rides between `floorY - 18` values. */
 export const BLD_CAR_H = 36
 
 /** The row of desks inside the facade, clear of the lift bay. */
 export const BLD_DESK = { x0: 276, x1: 684, maxPitch: 56, scale: 0.38 } as const
+/** 1.7 m at `PX_PER_M` — the anchor of the whole street scale. */
 export const BLD_AVATAR_H = 42
 
 export interface BuildingSeat {
@@ -247,7 +351,7 @@ export const CITY_GAP = 8
 export const CITY_LEFT_X1 = BLD.x0 - CITY_GAP
 export const CITY_RIGHT_X0 = BLD.x1 + CITY_GAP
 
-/** Buildings stand on the same street line as ours (y = 560). */
+/** Buildings stand on the same street line as ours (y = BLD.baseY, 528). */
 export function buildingCityRects(): CityRect[] {
   const rand = rng(0x51ed_270b)
   const rects: CityRect[] = []

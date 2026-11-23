@@ -6,19 +6,23 @@
  * gradients in the loop, no images, no per-frame allocation (the geometry comes
  * from `traffic.ts`, which reuses its buffers).
  *
- * Occlusion rules (gate f):
- *   - vehicles only ever paint inside the road band;
- *   - pedestrians only on the two pavements or on the zebra;
+ * Occlusion rules (gate g):
+ *   - vehicles keep their wheels on their lane line; a 3.2 m bus legitimately
+ *     rises above the foreshortened lane depth, never above `BLD.baseY`;
+ *   - pedestrians stand on a pavement (feet in the band) or walk the zebra;
  *   - clouds and birds are clipped to the sky above the roof and to the two
  *     side bays, so nothing ever covers the facade — the smoke just disappears
  *     behind the tower, which is what it should do;
- *   - the signal head stands on the near pavement, clear of `BLD.baseY`.
+ *   - the signal head stands on the near pavement, clear of `BLD.baseY`;
+ *   - every part is painted from the bbox (`PX_PER_M × metres`), never from a
+ *     hardcoded pixel size.
  */
 import { BLD, BLD_STREET, BUILDING_W } from './building'
 import { THEME_TOKENS, type ThemeName } from './palette'
 import {
   BIRDS,
   CLOUDS,
+  ROAD,
   SIGNAL,
   birdAt,
   blinkAt,
@@ -73,7 +77,7 @@ const SKIN = { day: '#E8C39B', night: '#AF9273' } as const
 
 /** Nothing in the sky may paint over the facade bay (see the file header). */
 const SKY_CLIP: ReadonlyArray<readonly [number, number, number, number]> = [
-  [0, 0, BUILDING_W, 66], // above the roof
+  [0, 0, BUILDING_W, BLD.roofTop], // above the roof
   [0, 0, BLD.x0 - 8, BLD_STREET.top], // left bay
   [BLD.x1 + 8, 0, BUILDING_W - (BLD.x1 + 8), BLD_STREET.top], // right bay
 ]
@@ -151,43 +155,52 @@ export function drawSkyLife(ctx: Ctx, theme: ThemeName, t: number): void {
 function headlight(ctx: Ctx, v: VehicleView): void {
   const front = v.dir > 0 ? v.x + v.w / 2 : v.x - v.w / 2
   const base = v.y + v.h
-  const cy = base - v.h * 0.36
+  const cy = base - v.h * 0.38
+  const cone = v.w * 0.2
   // two alpha layers only: a soft cone and the lamp itself
   ctx.fillStyle = 'rgba(255,228,150,0.16)'
   ctx.beginPath()
-  ctx.moveTo(front, cy - 2.4)
-  ctx.lineTo(front + v.dir * 22, cy - 6.5)
-  ctx.lineTo(front + v.dir * 22, cy + 3.6)
+  ctx.moveTo(front, cy - v.h * 0.07)
+  ctx.lineTo(front + v.dir * cone, cy - v.h * 0.18)
+  ctx.lineTo(front + v.dir * cone, cy + v.h * 0.1)
   ctx.closePath()
   ctx.fill()
   ctx.fillStyle = 'rgba(255,236,178,0.3)'
   ctx.beginPath()
-  ctx.moveTo(front, cy - 1.6)
-  ctx.lineTo(front + v.dir * 12, cy - 3.6)
-  ctx.lineTo(front + v.dir * 12, cy + 2.2)
+  ctx.moveTo(front, cy - v.h * 0.04)
+  ctx.lineTo(front + v.dir * cone * 0.55, cy - v.h * 0.1)
+  ctx.lineTo(front + v.dir * cone * 0.55, cy + v.h * 0.06)
   ctx.closePath()
   ctx.fill()
   ctx.fillStyle = '#FFEDB0'
-  ctx.fillRect(v.dir > 0 ? front - 2.2 : front - 0.6, cy - 1.8, 2.8, 3)
+  ctx.fillRect(v.dir > 0 ? front - v.w * 0.025 : front - v.w * 0.005, cy - v.h * 0.05, v.w * 0.03, v.h * 0.1)
 }
 
 function tailLight(ctx: Ctx, v: VehicleView): void {
   const rear = v.dir > 0 ? v.x - v.w / 2 : v.x + v.w / 2
   const base = v.y + v.h
   ctx.fillStyle = 'rgba(255,86,74,0.92)'
-  ctx.fillRect(v.dir > 0 ? rear + 1 : rear - 3.6, base - 8, 2.6, 3.2)
+  ctx.fillRect(v.dir > 0 ? rear + v.w * 0.01 : rear - v.w * 0.035, base - v.h * 0.34, v.w * 0.025, v.h * 0.1)
 }
 
+/**
+ * One side-view vehicle, every part derived from the bbox — never from a
+ * hardcoded pixel size. The bbox is `PX_PER_M × real metres` (110×37 car,
+ * 220×78 bus), so the same routine paints a correct car and a correct bus.
+ */
 function drawVehicle(ctx: Ctx, theme: ThemeName, v: VehicleView): void {
   const night = theme === 'night'
   const x0 = v.x - v.w / 2
   const base = v.y + v.h
   const body = BODY[theme][hash(v.id, BODY[theme].length)]!
   const glass = GLASS[theme]
+  const wheelH = Math.round(v.h * 0.34)
+  const wheelW = Math.round(wheelH * 0.95)
+  const bodyBottom = base - Math.round(wheelH * 0.5)
 
   // contact shadow
   ctx.fillStyle = night ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.15)'
-  ctx.fillRect(x0 + 2, base - 1.4, v.w - 4, 2.4)
+  ctx.fillRect(x0 + v.w * 0.02, base - Math.max(2, v.h * 0.05), v.w * 0.96, Math.max(2, v.h * 0.07))
 
   if (night) {
     headlight(ctx, v)
@@ -195,90 +208,124 @@ function drawVehicle(ctx: Ctx, theme: ThemeName, v: VehicleView): void {
 
   if (v.kind === 'moto') {
     const cx = v.x
+    const wr = v.h * 0.22
+    const headR = v.h * 0.16
     ctx.fillStyle = WHEEL[theme]
-    ctx.fillRect(cx - 8, base - 4, 4, 4)
-    ctx.fillRect(cx + 4, base - 4, 4, 4)
+    ctx.beginPath()
+    ctx.arc(cx - v.w * 0.32, base - wr, wr, 0, TAU)
+    ctx.arc(cx + v.w * 0.32, base - wr, wr, 0, TAU)
+    ctx.fill()
+    // frame + rider (head tops out exactly at v.y)
     ctx.fillStyle = body
-    ctx.fillRect(cx - 5, base - 9, 10, 4)
+    ctx.fillRect(cx - v.w * 0.28, base - v.h * 0.42, v.w * 0.56, v.h * 0.16)
+    ctx.fillStyle = night ? '#0B111B' : '#26303E'
+    ctx.fillRect(cx - v.w * 0.11, base - v.h * 0.68, v.w * 0.22, v.h * 0.28)
     ctx.fillStyle = SKIN[theme]
     ctx.beginPath()
-    ctx.arc(cx + v.dir * 1.5, base - 12, 2.6, 0, TAU)
+    ctx.arc(cx + v.dir * v.w * 0.03, v.y + headR, headR, 0, TAU)
     ctx.fill()
     ctx.fillStyle = glass
-    ctx.fillRect(cx + v.dir * 1.5 - 2.4, base - 13.4, 4.8, 3)
-    ctx.fillStyle = night ? '#0B111B' : '#26303E'
-    ctx.fillRect(cx - 2, base - 10.4, 4, 2.2) // rider torso
+    ctx.fillRect(cx + v.dir * v.w * 0.03 - v.w * 0.1, v.y + v.h * 0.06, v.w * 0.2, v.h * 0.14)
     if (night) {
       ctx.fillStyle = 'rgba(255,86,74,0.9)'
-      ctx.fillRect(cx - v.dir * 5.5, base - 9, 2, 2.6)
+      ctx.fillRect(cx - v.dir * v.w * 0.46, base - v.h * 0.46, v.w * 0.035, v.h * 0.14)
     }
     return
   }
 
-  const bodyTop = v.kind === 'bus' ? base - 17 : v.kind === 'van' ? base - 13 : base - 12
-  const bodyH = base - 3.5 - bodyTop
-  ctx.fillStyle = body
-  rr(ctx, x0, bodyTop, v.w, bodyH, v.kind === 'bus' ? 2.5 : 3)
-  ctx.fill()
-  // one highlight along the shoulder gives the slab some volume
-  ctx.fillStyle = night ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.45)'
-  ctx.fillRect(x0 + 1.5, bodyTop + 0.8, v.w - 3, 1)
-
-  // cabin / roof, mirrored by direction (it sinks 1.6 px into the body)
-  if (v.kind === 'bus') {
-    ctx.fillStyle = glass
-    const winW = (v.w - 14) / 4
-    for (let i = 0; i < 4; i++) ctx.fillRect(x0 + 6 + i * (winW + 2), bodyTop + 3, winW - 2, 5)
+  const slabTop = base - Math.round(v.h * 0.5)
+  if (v.kind === 'bus' || v.kind === 'van') {
+    // one tall box from the roof line down to the skirt
+    const bodyTop = v.y + 1
+    const bodyH = bodyBottom - bodyTop
+    ctx.fillStyle = body
+    rr(ctx, x0, bodyTop, v.w, bodyH, Math.max(2, v.h * 0.08))
+    ctx.fill()
+    ctx.fillStyle = night ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.45)'
+    ctx.fillRect(x0 + v.w * 0.012, bodyTop + Math.max(1, v.h * 0.02), v.w * 0.976, Math.max(1, v.h * 0.025))
+    if (v.kind === 'bus') {
+      // continuous window band: five bays
+      const pad = v.w * 0.035
+      const bays = 5
+      const bay = (v.w - pad * 2) / bays
+      ctx.fillStyle = glass
+      for (let i = 0; i < bays; i++) {
+        ctx.fillRect(x0 + pad + i * bay + bay * 0.08, bodyTop + bodyH * 0.16, bay * 0.84, bodyH * 0.34)
+      }
+      // headlights strip + door pillar
+      ctx.fillStyle = night ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)'
+      ctx.fillRect(x0 + v.w * 0.94, bodyTop, Math.max(1, v.w * 0.01), bodyH)
+    } else {
+      // windshield at the leading end, cargo panel behind
+      const winW = v.w * 0.16
+      const winX = v.dir > 0 ? x0 + v.w * 0.08 : x0 + v.w * 0.92 - winW
+      ctx.fillStyle = glass
+      rr(ctx, winX, bodyTop + bodyH * 0.12, winW, bodyH * 0.34, Math.max(1, v.h * 0.03))
+      ctx.fill()
+      const panelX = v.dir > 0 ? winX + winW + v.w * 0.04 : x0 + v.w * 0.08
+      ctx.fillStyle = night ? 'rgba(0,0,0,0.28)' : 'rgba(0,0,0,0.1)'
+      ctx.fillRect(panelX, bodyTop + bodyH * 0.16, v.w * 0.34, bodyH * 0.4)
+    }
   } else {
-    const cabH = v.kind === 'van' ? 6.5 : 5.5
-    const cabW = v.kind === 'van' ? v.w - 14 : v.w - 20
-    const inset = v.kind === 'van' ? 6 : 9
+    // car: a body slab plus a greenhouse whose roof touches the bbox top
+    const bodyH = bodyBottom - slabTop
+    ctx.fillStyle = body
+    rr(ctx, x0, slabTop, v.w, bodyH, Math.max(2, v.h * 0.08))
+    ctx.fill()
+    ctx.fillStyle = night ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.45)'
+    ctx.fillRect(x0 + v.w * 0.012, slabTop + Math.max(1, v.h * 0.02), v.w * 0.976, Math.max(1, v.h * 0.025))
+    const cabH = slabTop - v.y + 2
+    const cabW = v.w * 0.42
+    const inset = v.w * 0.14
     const cabX = v.dir > 0 ? x0 + inset : x0 + v.w - inset - cabW
-    const cabY = bodyTop - cabH + 1.6
     ctx.fillStyle = glass
-    rr(ctx, cabX, cabY, cabW, cabH, 1.2)
+    rr(ctx, cabX, v.y, cabW, cabH, Math.max(1, v.h * 0.05))
     ctx.fill()
     ctx.fillStyle = night ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.55)'
-    ctx.fillRect(cabX + 1, cabY + 1, cabW - 2, 1)
+    ctx.fillRect(cabX + cabW * 0.06, v.y + Math.max(1, v.h * 0.03), cabW * 0.88, Math.max(1, v.h * 0.03))
   }
 
   // wheels
   ctx.fillStyle = WHEEL[theme]
-  const wy = base - 4.6
-  ctx.fillRect(x0 + 4, wy, 7, 4.6)
-  ctx.fillRect(x0 + v.w - 11, wy, 7, 4.6)
+  ctx.fillRect(x0 + v.w * 0.16, base - wheelH, wheelW, wheelH)
+  ctx.fillRect(x0 + v.w * 0.8 - wheelW, base - wheelH, wheelW, wheelH)
 
   if (night) tailLight(ctx, v)
 }
 
 // ------------------------------------------------------------- pedestrians
 
+/** One 42 px walker: limbs and torso are fractions of `p.h`, never constants. */
 function drawPed(ctx: Ctx, theme: ThemeName, p: PedView): void {
   const night = theme === 'night'
   const base = p.y
-  const top = base - p.h
   const coat = PED_COAT[theme][p.coat % PED_COAT[theme].length]!
+  const headR = p.h * 0.12
+  const headCy = base - p.h + headR
+  const torsoTop = headCy + headR * 0.8
+  const legH = p.h * 0.24
+  const torsoH = base - legH - torsoTop
+  const torsoW = p.h * 0.2
 
   if (!p.crossing) {
     ctx.fillStyle = night ? 'rgba(0,0,0,0.32)' : 'rgba(0,0,0,0.13)'
-    ctx.fillRect(p.x - p.w / 2, base - 1, p.w, 2)
+    ctx.fillRect(p.x - p.w * 0.65, base - 1, p.w * 1.3, 2)
   }
 
   // legs: two frames, feet apart / together
-  const swing = p.frame === 0 ? 1.5 : 0
+  const swing = p.frame === 0 ? p.h * 0.05 : 0
   ctx.fillStyle = PED_LEG[theme]
-  ctx.fillRect(p.x - 1.9 + swing * 0.5, base - 3.4, 1.5, 3.4)
-  ctx.fillRect(p.x + 0.4 - swing * 0.5, base - 3.4, 1.5, 3.4)
+  ctx.fillRect(p.x - p.w * 0.22 + swing * 0.5, base - legH, Math.max(1.5, p.w * 0.16), legH)
+  ctx.fillRect(p.x + p.w * 0.06 - swing * 0.5, base - legH, Math.max(1.5, p.w * 0.16), legH)
   // torso
   ctx.fillStyle = coat
-  ctx.fillRect(p.x - 2.1, top + 4.6, 4.2, p.h - 8.4)
+  ctx.fillRect(p.x - torsoW / 2, torsoTop, torsoW, torsoH)
   // arm swing
-  ctx.fillStyle = coat
-  ctx.fillRect(p.x + p.facing * (1.4 + swing * 0.4), top + 5.4, 1.2, 4)
+  ctx.fillRect(p.x + p.facing * (torsoW * 0.62 + swing * 0.4), torsoTop + p.h * 0.04, Math.max(1.2, p.w * 0.11), p.h * 0.24)
   // head
   ctx.fillStyle = SKIN[theme]
   ctx.beginPath()
-  ctx.arc(p.x + p.facing * 0.4, top + 2.6, 2.3, 0, TAU)
+  ctx.arc(p.x + p.facing * p.w * 0.05, headCy, headR, 0, TAU)
   ctx.fill()
 }
 
@@ -288,19 +335,22 @@ function drawPed(ctx: Ctx, theme: ThemeName, p: PedView): void {
  * Two small housings on one post: the vehicle head (red / amber / green) and,
  * 2 px to its right, the pedestrian head (green = walk, red = wait). Two
  * separate boxes, so a red walk lamp can never read as a red vehicle lamp.
+ * The housing is 20 px (0.8 m) tall and stands between the facade base and the
+ * kerb, so it never paints over the tower.
  */
 function drawSignal(ctx: Ctx, theme: ThemeName, light: LightState): void {
   const night = theme === 'night'
   const { x, y, h } = SIGNAL
   const post = night ? '#111927' : '#5B6675'
   const housing = night ? '#090F18' : '#2B3543'
-  const headW = 14
+  const headW = 16
   const pedX = x + headW + 2
+  const lampR = h * 0.1
 
   // post down to the pavement, under both heads
   ctx.fillStyle = post
-  ctx.fillRect(pedX + 2, y + h, 2, 2)
-  ctx.fillRect(x + 2, y + h, 2, 2)
+  ctx.fillRect(pedX + 2, y + h, 2, BLD_STREET.walk - (y + h))
+  ctx.fillRect(x + 2, y + h, 2, BLD_STREET.walk - (y + h))
 
   ctx.fillStyle = housing
   rr(ctx, x, y, headW, h, 2)
@@ -309,21 +359,21 @@ function drawSignal(ctx: Ctx, theme: ThemeName, light: LightState): void {
   ctx.fill()
 
   const lamps: Array<[LightState['phase'], number, string]> = [
-    ['red', y + 3.5, '#E4574A'],
-    ['yellow', y + 8, '#E8B23C'],
-    ['green', y + 12.5, '#4FBF7B'],
+    ['red', y + h * 0.2, '#E4574A'],
+    ['yellow', y + h * 0.5, '#E8B23C'],
+    ['green', y + h * 0.8, '#4FBF7B'],
   ]
   for (const [phase, ly, colour] of lamps) {
     const on = light.phase === phase
     ctx.fillStyle = colour
     ctx.globalAlpha = on ? 1 : 0.16
     ctx.beginPath()
-    ctx.arc(x + 7, ly, 1.9, 0, TAU)
+    ctx.arc(x + headW / 2, ly, lampR, 0, TAU)
     ctx.fill()
     if (on) {
       ctx.globalAlpha = 0.28
       ctx.beginPath()
-      ctx.arc(x + 7, ly, 3.4, 0, TAU)
+      ctx.arc(x + headW / 2, ly, lampR * 1.8, 0, TAU)
       ctx.fill()
     }
     ctx.globalAlpha = 1
@@ -334,12 +384,12 @@ function drawSignal(ctx: Ctx, theme: ThemeName, light: LightState): void {
   ctx.fillStyle = walk ? '#4FBF7B' : '#E4574A'
   ctx.globalAlpha = walk ? 0.95 : 0.8
   if (walk) {
-    ctx.fillRect(pedX + 3.4, y + 4, 1.6, 1.6) // head
-    ctx.fillRect(pedX + 2.4, y + 6, 3.4, 1.3) // stride
-    ctx.fillRect(pedX + 2.9, y + 7.3, 1.4, 3.2) // body
+    ctx.fillRect(pedX + 3.6, y + 5, 1.6, 1.6) // head
+    ctx.fillRect(pedX + 2.6, y + 7.5, 3.6, 1.4) // stride
+    ctx.fillRect(pedX + 3.1, y + 9, 1.4, 4.2) // body
   } else {
-    ctx.fillRect(pedX + 3.6, y + 5, 1.8, 1.8)
-    ctx.fillRect(pedX + 3, y + 7.2, 3, 3.4)
+    ctx.fillRect(pedX + 3.8, y + 6.2, 1.8, 1.8)
+    ctx.fillRect(pedX + 3.2, y + 8.6, 3, 4.4)
   }
   ctx.globalAlpha = 1
 }
@@ -354,20 +404,33 @@ function laneVehicles(ctx: Ctx, theme: ThemeName, frame: TrafficFrame, lane: 'ne
   }
 }
 
+/**
+ * Paint order is depth order — back to front:
+ *   1. walkers on the pavement the tower stands on (they are BEHIND the road),
+ *   2. the far lane, the signal head on that kerb,
+ *   3. the near lane,
+ *   4. walkers on the foreground kerb at the bottom of the sheet (they are
+ *      closer to the camera than any car and 42 px tall, so they overlap the
+ *      road exactly like the real thing),
+ *   5. the crossers last.
+ * Getting 1 and 4 the wrong way round makes a foreground walker vanish behind
+ * a bus, which is the bug this split exists to prevent.
+ */
 export function drawStreetLife(ctx: Ctx, theme: ThemeName, frame: TrafficFrame): void {
-  // far lane first: the signal and the near lane read in front of it
+  for (const p of frame.peds) {
+    if (p.crossing || p.y > ROAD.centre) continue
+    drawPed(ctx, theme, p)
+  }
   laneVehicles(ctx, theme, frame, 'far')
   drawSignal(ctx, theme, frame.light)
   laneVehicles(ctx, theme, frame, 'near')
 
-  for (let i = 0; i < frame.peds.length; i++) {
-    const p = frame.peds[i]!
-    if (p.crossing) continue
+  for (const p of frame.peds) {
+    if (p.crossing || p.y <= ROAD.centre) continue
     drawPed(ctx, theme, p)
   }
   // crossers last: they walk in front of the stopped near lane
-  for (let i = 0; i < frame.peds.length; i++) {
-    const p = frame.peds[i]!
+  for (const p of frame.peds) {
     if (!p.crossing) continue
     drawPed(ctx, theme, p)
   }
