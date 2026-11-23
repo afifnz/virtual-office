@@ -496,7 +496,9 @@ function shapeFor(key: keyof typeof THEME_STATUS.day): 'circle' | 'ring' | 'squa
 }
 
 function drawStation(ctx: Ctx, theme: ThemeName, seat: BuildingSeat, placed: PlacedAgent | undefined, agent: Agent | undefined, r: BuildingRenderInput): void {
-  const offline = !agent || agent.status === 'offline' || !placed || placed.pose.offline
+  // offline is the API row, never "his desk is empty right now": a delegate
+  // walking to the lift still owns a lit desk, he is just not sitting at it.
+  const offline = !agent || agent.status === 'offline'
   const key = statusOf(agent, offline)
   const scale = seat.scale
   groundShadow(ctx, seat.cx, seat.floorY, 18 * scale * 2.2, theme === 'day' ? 0.16 : 0.24)
@@ -650,8 +652,7 @@ export function renderBuildingFrame(ctx: CanvasRenderingContext2D, r: BuildingRe
     const seat = seatOf.get(plate.id)
     if (!seat) continue
     const agent = r.byId.get(plate.id)
-    const p = bySeat.get(plate.id)
-    const offline = !agent || agent.status === 'offline' || !p || p.pose.offline
+    const offline = !agent || agent.status === 'offline'
     drawPlate(ctx, theme, plate, seat, statusOf(agent, offline), offline)
   }
 
