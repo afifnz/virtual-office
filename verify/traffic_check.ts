@@ -37,11 +37,11 @@ import {
   BLD_DASH,
   BLD_STREET,
   BLD_ZEBRA,
-  BUILDING_H,
-  BUILDING_W,
   LANE_DEPTH,
   LANE_W,
   PX_PER_M,
+  SCENE_H,
+  SCENE_W,
   STREET_PROPS,
   buildingRect,
 } from '../frontend/src/scene2d/building'
@@ -58,6 +58,8 @@ import {
   PED_SPECS,
   RED_START,
   ROAD,
+  SKY_HI,
+  SKY_LO,
   SPEED_RANGE,
   STOP_LINE,
   VEHICLE,
@@ -107,8 +109,8 @@ const pedRect = (p: TrafficFrame['peds'][number]): Rect => ({ x: p.x - p.w / 2, 
 const FACADE = buildingRect()
 /** How far a vehicle may hang off the loop ends while it wraps. */
 const LOOP_MARGIN = Math.max(...Object.values(VEHICLE).map((v) => v.w / 2)) + 20
-/** The whole street: sidewalk → road → far sidewalk (vehicle bodies may rise above their lane). */
-const STREET_BAND: Rect = { x: ROAD.x0 - LOOP_MARGIN, y: BLD_STREET.top, w: ROAD.x1 - ROAD.x0 + LOOP_MARGIN * 2, h: BUILDING_H - BLD_STREET.top }
+/** The whole street: sidewalk → road → far sidewalk, on the design sheet. */
+const STREET_BAND: Rect = { x: ROAD.x0 - LOOP_MARGIN, y: BLD_STREET.top, w: ROAD.x1 - ROAD.x0 + LOOP_MARGIN * 2, h: SCENE_H - BLD_STREET.top }
 const ZEBRA_RECT: Rect = { x: ZEBRA.x0, y: ROAD.top, w: ZEBRA.x1 - ZEBRA.x0, h: ROAD.bottom - ROAD.top }
 
 const DT = 1 / 30
@@ -155,8 +157,11 @@ const DT = 1 / 30
   near(STREET_PROPS.lampH, 6, 'lamp')
   devs.push(`lamp ${STREET_PROPS.lampH} px (6 m)`)
   near(LANE_W, 3.5, 'lane width')
-  devs.push(`lane ${LANE_W.toFixed(2)} px wide (3.5 m), ${LANE_DEPTH} px deep on the sheet (foreshortened ×0.56)`)
-  near(ZEBRA.x1 - ZEBRA.x0, 3.5, 'zebra width')
+  // true depth: the lane is as deep as it is wide, the road exactly 2 lanes
+  if (LANE_DEPTH !== LANE_W) fail(`lane depth ${LANE_DEPTH} ≠ lane width ${LANE_W} (the ×0.56 squeeze is back?)`)
+  if (BLD_STREET.road - BLD_STREET.walk !== 2 * LANE_W) fail(`road depth ${BLD_STREET.road - BLD_STREET.walk} ≠ 2 lanes (${2 * LANE_W})`)
+  devs.push(`lane ${LANE_W.toFixed(2)} px wide AND deep (3.5 m, true depth — no squeeze), road ${BLD_STREET.road - BLD_STREET.walk} px = 2 lanes`)
+  near(ZEBRA.x1 - ZEBRA.x0, 3.6, 'zebra width')
   devs.push(`zebra ${ZEBRA.x1 - ZEBRA.x0} px`)
   near(BLD_STREET.walk - BLD_STREET.top, 1.8, 'near sidewalk')
   near(BLD_STREET.far - BLD_STREET.road, 0.8, 'far sidewalk', 0.2)
@@ -203,8 +208,7 @@ const DT = 1 / 30
     const f = trafficSnapshot(t)
     for (const v of f.vehicles) {
       const r = vehicleRect(v)
-      // the wheels line is what must sit in the lane; a 3.2 m bus at the far
-      // kerb legitimately rises above the foreshortened lane depth
+      // the wheels line is what must sit in the lane
       const ground = v.y + v.h
       const laneBase = v.lane === 'near' ? ROAD.nearBase : ROAD.farBase
       if (Math.abs(ground - laneBase) > 0.51) {
@@ -215,10 +219,11 @@ const DT = 1 / 30
         bad++
         if (bad < 4) fail(`t=${r2(t)} ${v.id} leaves the street: y ${r2(r.y)}…${r2(r.y + r.h)}`)
       }
+      // true lane depth: even the 3.2 m bus fits INSIDE the road band now
       tallestOver = Math.max(tallestOver, ROAD.top - r.y)
-      if (r.y < BLD_STREET.top) {
+      if (r.y < ROAD.top - 0.01) {
         bad++
-        if (bad < 4) fail(`t=${r2(t)} ${v.id} paints above the sidewalk (y ${r2(r.y)} < ${BLD_STREET.top})`)
+        if (bad < 4) fail(`t=${r2(t)} ${v.id} rises above the road band (y ${r2(r.y)} < ${ROAD.top})`)
       }
       if (overlap(r, FACADE)) {
         bad++
@@ -252,8 +257,9 @@ const DT = 1 / 30
   }
   if (!bad && !worstLane) {
     ok(
-      `120 s swept at 30 Hz: every vehicle keeps its wheels on its lane line (near ${ROAD.nearBase}, far ${ROAD.farBase}), ` +
-        `every walker's feet on a pavement or the zebra (${ZEBRA.x0}…${ZEBRA.x1}); tallest body rises ${r2(tallestOver)} px above the road line (a bus roof at the far kerb)`,
+      `120 s swept at 30 Hz: every vehicle keeps its wheels on its lane line (near ${ROAD.nearBase}, far ${ROAD.farBase}) and its ` +
+        `whole body inside the ${ROAD.bottom - ROAD.top} px road band (${r2(-tallestOver)} px of headroom over the tallest roof), ` +
+        `every walker's feet on a pavement or the zebra (${ZEBRA.x0}…${ZEBRA.x1})`,
     )
   }
 }
@@ -336,7 +342,7 @@ const DT = 1 / 30
     fail(`crossing ${CROSS_START}…${r2(CROSS_START + CROSS_DUR)} s overruns the red phase (ends ${RED_START + LIGHT.red})`)
   } else {
     ok(
-      `pedestrian window ${r2(CROSS_START)}…${r2(CROSS_START + CROSS_DUR)} s (${CROSS_DUR} s for ${CROSS_PX} px kerb-to-kerb) ` +
+      `pedestrian window ${r2(CROSS_START)}…${r2(CROSS_START + CROSS_DUR)} s (${CROSS_DUR} s for the ${CROSS_PX} px walking distance) ` +
         `fits inside the ${LIGHT.red} s red phase`,
     )
   }
@@ -463,8 +469,8 @@ const DT = 1 / 30
     [6.0, 'yellow'],
     [7.9, 'yellow'],
     [8.0, 'red'],
-    [13.9, 'red'],
-    [14.0, 'green'],
+    [16.9, 'red'],
+    [17.0, 'green'],
   ]
   let bad = 0
   for (const [t, phase] of seq) {
@@ -481,11 +487,20 @@ const DT = 1 / 30
   if (LIGHT.cycle !== LIGHT.green + LIGHT.yellow + LIGHT.red) {
     fail(`LIGHT.cycle ${LIGHT.cycle} ≠ ${LIGHT.green}+${LIGHT.yellow}+${LIGHT.red}`)
   }
-  if (LIGHT.green !== 6 || LIGHT.yellow !== 2 || LIGHT.red !== 6) {
-    fail(`cycle is ${LIGHT.green}/${LIGHT.yellow}/${LIGHT.red}, want 6/2/6`)
+  if (LIGHT.green !== 6 || LIGHT.yellow !== 2 || LIGHT.red !== 9) {
+    fail(`cycle is ${LIGHT.green}/${LIGHT.yellow}/${LIGHT.red}, want 6/2/9`)
   } else if (!bad) {
-    ok(`light cycle 6 s green · 2 s yellow · 6 s red; pedestrian green exactly during red`)
+    ok(`light cycle 6 s green · 2 s yellow · 9 s red (${LIGHT.cycle} s); pedestrian green exactly during red`)
   }
+  // the 7.51 m crossing (184 px of walking distance; the kerb-to-kerb road is
+  // 172 px = 7.02 m, the last 12 px reach the far standing line) needs a
+  // longer red: 184 px at 1.29 m/s = 5.8 s walk, and the pedestrian window
+  // 10.2…16.0 must sit inside the 8…17 red phase
+  const mps = (CROSS_PX / CROSS_DUR) / PX_PER_M
+  if (!(mps >= 1.2 && mps <= 1.4)) fail(`crossing speed ${r2(mps)} m/s, want 1.2–1.4 (a brisk walk)`)
+  if (CROSS_START < RED_START + CROSS_CLEARANCE - 1e-9) fail(`CROSS_START ${CROSS_START} < red + clearance ${RED_START + CROSS_CLEARANCE}`)
+  if (CROSS_START + CROSS_DUR > RED_START + LIGHT.red - 0.1) fail(`pedestrian window ${CROSS_START}…${r2(CROSS_START + CROSS_DUR)} overruns the red phase`)
+  else ok(`crossing: ${CROSS_PX} px of walking (7.51 m; kerb-to-kerb road 172 px = 7.02 m) in ${CROSS_DUR} s = ${r2(CROSS_PX / CROSS_DUR)} px/s = ${r2(mps)} m/s, window ${CROSS_START}…${r2(CROSS_START + CROSS_DUR)} s inside the ${RED_START}…${RED_START + LIGHT.red} red`)
 }
 
 // ------------------------------------------------------ pedestrians + light
@@ -567,8 +582,8 @@ const DT = 1 / 30
       if (Math.abs(B.x - A.x) < 200) continue
       const half = Math.max(A.w, B.w) / 2
       // a wrap is only legal when the WHOLE body was off-canvas on one side
-      const offA = A.x + half < 1 || A.x - half > BUILDING_W - 1
-      const offB = B.x + half < 1 || B.x - half > BUILDING_W - 1
+      const offA = A.x + half < 1 || A.x - half > SCENE_W - 1
+      const offB = B.x + half < 1 || B.x - half > SCENE_W - 1
       wraps++
       const off = offA && offB
       if (!off) {
@@ -579,7 +594,7 @@ const DT = 1 / 30
     prev = f
   }
   if (!wraps) fail('no vehicle ever wrapped in 2 minutes')
-  else if (!wrapsOnScreen) ok(`${wraps} wraps in 2 minutes, every one outside the 0…${BUILDING_W} canvas`)
+  else if (!wrapsOnScreen) ok(`${wraps} wraps in 2 minutes, every one outside the 0…${r2(SCENE_W)} design sheet`)
 }
 
 // ------------------------------------------------------------------ sky
@@ -589,10 +604,10 @@ const DT = 1 / 30
   if (moved !== CLOUDS.length) fail(`${CLOUDS.length - moved} clouds are static`)
   else ok(`${CLOUDS.length} clouds drift (${CLOUDS.map((c) => c.speed).join('/')} px/s), all above the roof`)
 
-  const span = 1170 - -170
-  const wrapped = CLOUDS.every((c) => cloudX(c, 10_000) >= -170 && cloudX(c, 10_000) <= 1170)
+  const span = SKY_HI - SKY_LO
+  const wrapped = CLOUDS.every((c) => cloudX(c, 10_000) >= SKY_LO && cloudX(c, 10_000) <= SKY_HI)
   if (!wrapped) fail('a cloud leaves the wrap window')
-  else ok(`clouds wrap inside ${-170}…${1170} (span ${span} px), always off-canvas`)
+  else ok(`clouds wrap inside ${SKY_LO}…${r2(SKY_HI)} (span ${r2(span)} px, SCENE_W + 170 each side), always off-sheet`)
 
   const seen = new Set<number>()
   const flaps = new Set<number>()

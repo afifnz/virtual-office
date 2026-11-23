@@ -181,21 +181,39 @@
     if (building.stage.w !== 1000 || building.stage.h !== 688) {
       problems.push(`building stage ${JSON.stringify(building.stage)}, want 1000×688`)
     }
+    // the report must publish the scene scale: design sheet + its uniform zoom
+    if (!building.scene || building.scene.zoom !== 1.2) {
+      problems.push(`building scene ${JSON.stringify(building.scene)}, want { w, h, zoom: 1.2 }`)
+    }
     if (building.bands.length !== 3) problems.push(`building has ${building.bands.length} bands, want 3`)
     if (building.desks.length !== 13) problems.push(`building paints ${building.desks.length} desks, want 13`)
     if (building.plates.length !== 13) problems.push(`building has ${building.plates.length} nameplates, want 13`)
     if ((building.plateViolations ?? []).length) problems.push(`building plates: ${building.plateViolations.join('; ')}`)
-    if (building.centreOffset > 1000 * 0.02) problems.push(`building centre is ${building.centreOffset} px off (limit 20)`)
+    // centreOffset is a design-px number: a missing one must NEVER pass as
+    // `undefined > limit` (always false)
+    if (!Number.isFinite(building.centreOffset)) {
+      problems.push(`building centreOffset is ${JSON.stringify(building.centreOffset)}, want a finite number`)
+    } else if (building.scene && building.centreOffset > building.scene.w * 0.02) {
+      problems.push(`building centre is ${building.centreOffset} design px off (limit ${building.scene.w * 0.02})`)
+    }
     if (building.city < 20) problems.push(`skyline only ${building.city} buildings`)
+    // desks/plates are DESIGN px: scale by the scene zoom before the 1000×688
+    // final-px bounds check
+    const zoom = (building.scene && building.scene.zoom) || building.zoom
+    if (zoom !== 1.2) problems.push(`building zoom ${zoom}, want 1.2`)
     const outside = [...building.desks, ...building.plates].filter(
-      (r) => r.x < 0 || r.y < 0 || r.x + r.w > 1000 || r.y + r.h > 688,
+      (r) =>
+        r.x * zoom < 0 ||
+        r.y * zoom < 0 ||
+        (r.x + r.w) * zoom > 1000 ||
+        (r.y + r.h) * zoom > 688,
     )
-    if (outside.length) problems.push(`${outside.length} building rect(s) leave the 1000×688 sheet`)
+    if (outside.length) problems.push(`${outside.length} building rect(s) leave the 1000×688 sheet after ×${zoom}`)
     // the lift is parked at L1 when nobody rides; the vertikal ride is gated
     // headless in verify/building_check.ts (time-dependent)
     if (!building.lift || !Number.isFinite(building.lift.y)) problems.push('building lift geometry is missing')
     notes.push(
-      `GEDUNG: ${building.desks.length} desks · ${building.plates.length} plates · centre offset ${building.centreOffset} px · ${building.city} city buildings · lift y ${Math.round(building.lift.y)}`,
+      `GEDUNG: ${building.desks.length} desks · ${building.plates.length} plates · scene ${Math.round(building.scene?.w)}×${Math.round(building.scene?.h)} ×${zoom} · centre offset ${building.centreOffset} px · ${building.city} city buildings · lift y ${Math.round(building.lift.y)}`,
     )
   } else if (tabEls.length === 4) {
     problems.push('window.__office2dBuilding() is missing')
