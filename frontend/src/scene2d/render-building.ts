@@ -445,6 +445,8 @@ export interface BuildingRenderInput {
 
 function statusOf(agent: Agent | undefined, offline: boolean): keyof typeof THEME_STATUS.day {
   if (offline || !agent) return 'offline'
+  // A stale verdict is painted as idle: the desk is not working.
+  if (agent.stale === true) return 'idle'
   return (agent.status as keyof typeof THEME_STATUS.day) ?? 'offline'
 }
 
@@ -488,6 +490,7 @@ function dotShape(ctx: Ctx, shape: 'circle' | 'ring' | 'square' | 'diamond', x: 
 function shapeFor(key: keyof typeof THEME_STATUS.day): 'circle' | 'ring' | 'square' | 'diamond' {
   if (key === 'blocked') return 'diamond'
   if (key === 'offline') return 'square'
+  if (key === 'waiting') return 'square'
   if (key === 'idle' || key === 'reviewing') return 'ring'
   return 'circle'
 }

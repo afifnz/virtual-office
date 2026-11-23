@@ -154,6 +154,7 @@ func (l *Loader) Snapshot(now time.Time) derive.Snapshot {
 		Gateway:      l.gateway(),
 		Now:          nowF,
 		Location:     l.loc,
+		StaleAfter:   float64(l.cfg.StaleSeconds),
 
 		DBsChecked: r.ok + r.bad,
 		DBsOK:      r.ok,

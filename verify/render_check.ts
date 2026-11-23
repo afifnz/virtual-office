@@ -34,7 +34,7 @@ import {
   placeAgents,
   renderFrame,
 } from '../frontend/src/scene2d/render'
-import type { ThemeName } from '../frontend/src/scene2d/palette'
+import { THEME_STATUS, type ThemeName } from '../frontend/src/scene2d/palette'
 import {
   SIDE_BOARD_H,
   SIDE_BOARD_TOP,
@@ -425,6 +425,56 @@ else ok(`${painted}/${frames} frames painted (${FLOOR_IDS.length} floors × ${TH
       expect(`L1 board count while he walks the lobby (t=${walkT.toFixed(1)})`, rec.texts.find((t) => /^\d+\/\d+$/.test(t)), '1/1')
     }
   }
+}
+
+// -------------------------------------------- 2b. waiting / stale on the wall
+
+// `waiting` and `stale` are states the canvas has to tell apart from working:
+// the plate/board must paint waiting in its own amber and a stale verdict as
+// idle, never as one more working dot.
+{
+  const waitingAgents = metasOf().map((m) =>
+    agent({
+      id: m.id,
+      status: 'waiting',
+      current: { kind: 'tool', tools: ['delegate_task'] },
+      children: { total: 1, running: 1 },
+      last_kind: 'tool',
+    }),
+  )
+  const staleAgents = metasOf().map((m) =>
+    // the real backend shape: already demoted to idle, flagged stale
+    agent({ id: m.id, status: 'idle', current: { kind: 'tool', tools: ['terminal'] }, stale: true, last_kind: 'tool' }),
+  )
+  const paint = (theme: ThemeName, agents: Agent[]) => {
+    const rec = newRecorder()
+    renderFrame(recordCtx(rec), {
+      theme,
+      metas: metasOf(),
+      byId: new Map(agents.map((a) => [a.id, a])),
+      now: NOW,
+      comms: [],
+      vp: { camX: SIDE_W / 2, zoom: 2, floor: 3 },
+      viewW,
+      viewH,
+      dpr: 1,
+      still: true,
+      t: 0,
+      hour: 14,
+      minute: 5,
+    })
+    return rec
+  }
+  for (const theme of THEMES) {
+    const waitColour = THEME_STATUS[theme].waiting.toUpperCase()
+    const idleColour = THEME_STATUS[theme].idle.toUpperCase()
+    const w = paint(theme, waitingAgents)
+    expect(`${theme}: a waiting desk is painted in the waiting colour`, w.ops.some((o) => o.fill.toUpperCase() === waitColour), true)
+    const s = paint(theme, staleAgents)
+    expect(`${theme}: a stale verdict never paints the waiting colour`, s.ops.some((o) => o.fill.toUpperCase() === waitColour), false)
+    expect(`${theme}: stale desks paint the idle colour`, s.ops.some((o) => o.fill.toUpperCase() === idleColour), true)
+  }
+  ok('waiting paints its own amber; stale working desks paint as idle')
 }
 
 // ------------------------------------------------------------ 3. lift labels

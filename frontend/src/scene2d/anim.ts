@@ -100,17 +100,26 @@ function base(kind: PoseKind, extra: Partial<Pose> = {}): Pose {
 }
 
 /**
- * Map one agent to its pose. Priority: offline > blocked > walk (delegate) >
- * typing > reading > generic working > relax (reply) > idle.
+ * Map one agent to its pose. Priority: offline > blocked > waiting > walk
+ * (delegate) > typing > reading > generic working > relax (reply) > idle.
+ *
+ * `waiting` and `stale` are deliberately *not* working poses: a parent whose
+ * subagent is running sits back and waits, and a verdict the backend flagged
+ * stale no longer animates as typing (which is what made a stuck desk look
+ * busy for minutes).
  */
 export function poseFor(agent: Agent, now: number, comms: Comm[]): Pose {
   const tools = agent.current?.tools ?? []
   const kind = agent.current?.kind ?? ''
+  const stale = agent.stale === true
 
   if (agent.status === 'offline') return base('offline', { offline: true })
   if (agent.status === 'blocked') return base('blocked', { blocked: true })
 
-  if (isDelegating(agent, now, comms)) {
+  // Waiting on children: seated, relaxed, no delegate walk and no tool chip.
+  if (agent.status === 'waiting') return base('relax')
+
+  if (!stale && isDelegating(agent, now, comms)) {
     return base('walk', {
       walkTo: walkTarget(agent, now, comms),
       tool: toolLabel(tools),
@@ -121,12 +130,12 @@ export function poseFor(agent: Agent, now: number, comms: Comm[]): Pose {
   const hasTyping = tools.some((t) => TYPING_TOOLS.has(t))
   const hasReading = tools.some((t) => READING_TOOLS.has(t))
 
-  if (agent.status === 'reviewing') {
+  if (agent.status === 'reviewing' && !stale) {
     if (hasTyping) return base('typing', { typing: true, magnifier: true, tool: toolLabel(tools) })
     return base('reading', { reading: true, magnifier: true, tool: toolLabel(tools) })
   }
 
-  if (agent.status === 'working') {
+  if (agent.status === 'working' && !stale) {
     if (hasTyping) return base('typing', { typing: true, tool: toolLabel(tools) })
     if (hasReading) return base('reading', { reading: true, tool: toolLabel(tools) })
     return base('working', { tool: toolLabel(tools) })

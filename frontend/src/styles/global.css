@@ -32,6 +32,8 @@
   --accent-ink: #1a1206;
   --working: #f2b434;
   --reviewing: #a98ce0;
+  --waiting: #ffa94d;
+  --waiting-ink: #1a1206;
   --idle: #6fb1e8;
   --blocked: #ffc93b;
   --offline: #8b93a5;
@@ -106,6 +108,8 @@
   --accent-ink: #ffffff;
   --working: #8a5406;
   --reviewing: #6d28d9;
+  --waiting: #9a3412;
+  --waiting-ink: #ffffff;
   --idle: #1d4ed8;
   --blocked: #b33a12;
   --offline: #556073;
@@ -432,6 +436,13 @@ ul {
   background: var(--offline);
 }
 
+/* waiting on a subagent: amber, hollow dashed square — never a working dot */
+.dot.waiting {
+  background: transparent;
+  border: 1.5px dashed var(--waiting);
+  border-radius: 2px;
+}
+
 @keyframes pulse {
   0%,
   100% {
@@ -468,6 +479,31 @@ ul {
 }
 .chip.kind.steer {
   color: var(--idle);
+}
+
+/* waiting on children is a solid amber chip: not a tool bubble, not work */
+.chip.waiting {
+  color: var(--waiting-ink);
+  background: var(--waiting);
+  border-color: var(--waiting);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* `⤷ N` — how many subagents this agent has running right now */
+.child-badge {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid var(--waiting);
+  border-radius: 6px;
+  color: var(--waiting);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 14px;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .empty {
@@ -1168,6 +1204,13 @@ ul {
 }
 .card.offline {
   border-left-color: var(--offline);
+}
+.card.waiting {
+  border-left-color: var(--waiting);
+}
+/* a stale verdict is demoted, not deleted: dim the card, keep every number */
+.card.is-stale {
+  opacity: 0.68;
 }
 
 .card header {
@@ -1959,6 +2002,56 @@ body {
   border-radius: 10px;
 }
 
+/* a stale desk is still listed, dimmed, and named "tidak aktif" in the row */
+.roster-row.is-stale {
+  opacity: 0.6;
+}
+
+.roster-row.is-waiting .roster-meta em {
+  color: var(--waiting);
+}
+
+/* waiting on children is not work: amber chip in the card, not a tool line */
+.card-waiting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.card-waiting small {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.prox-chip.is-stale {
+  opacity: 0.7;
+}
+
+/* live truth on a KPI row (the KPI numbers themselves are window totals) */
+.kpi-live {
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kpi-live.waiting {
+  color: var(--waiting);
+}
+
+.kpi-live.stale {
+  color: var(--muted);
+}
+
+.kpi-row.is-stale {
+  opacity: 0.65;
+}
+
 .roster-row:hover {
   background: var(--surface-raised);
   border-color: var(--glass-border);
@@ -2078,6 +2171,13 @@ body {
   background: transparent;
   border: 1.5px solid var(--offline);
   border-radius: 1px;
+}
+
+/* waiting on children: a hollow dashed square, amber, 3:1 on both themes */
+.dot.waiting {
+  background: transparent;
+  border: 1.5px dashed var(--waiting);
+  border-radius: 2px;
 }
 
 .dot.ok {

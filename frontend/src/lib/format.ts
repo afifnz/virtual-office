@@ -44,6 +44,7 @@ export function officeClock(ts: number): string {
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   working: 'bekerja',
   reviewing: 'review',
+  waiting: 'menunggu anak',
   blocked: 'terblokir',
   idle: 'menganggur',
   offline: 'offline',

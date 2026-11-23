@@ -1,15 +1,17 @@
 import { useIsMobile } from '../hooks/useViewport'
-import type { StatusPayload } from '../lib/types'
+import type { AgentStatus, StatusPayload } from '../lib/types'
 import type { FloorId } from '../lib/rooms'
 import type { ViewMode } from '../lib/view'
 import { FloorTabs } from './FloorTabs'
 import { tzLabel } from '../lib/roster'
 import { compact } from '../lib/format'
+import { countStatuses } from '../lib/status'
 import type { ThemeMode, ThemeOverride, ThemeSource } from '../lib/theme'
 
-const DOTS: Array<{ key: string; label: string }> = [
+const DOTS: Array<{ key: AgentStatus; label: string }> = [
   { key: 'working', label: 'bekerja' },
   { key: 'reviewing', label: 'review' },
+  { key: 'waiting', label: 'menunggu' },
   { key: 'idle', label: 'menganggur' },
   { key: 'blocked', label: 'terblokir' },
 ]
@@ -135,8 +137,7 @@ export function Hud(props: HudProps) {
   const { status, expanded, onToggleExpanded, stale } = props
   const mobile = useIsMobile()
 
-  const counts = new Map<string, number>()
-  for (const a of status?.agents ?? []) counts.set(a.status, (counts.get(a.status) ?? 0) + 1)
+  const counts = countStatuses(status?.agents ?? [])
   const today = (status?.agents ?? []).reduce(
     (acc, a) => ({
       messages: acc.messages + a.today.messages,
@@ -190,6 +191,12 @@ export function Hud(props: HudProps) {
         <>
           {' · '}
           <b>{counts.get('reviewing')}</b> review
+        </>
+      ) : null}
+      {counts.get('waiting') ? (
+        <>
+          {' · '}
+          <b>{counts.get('waiting')}</b> menunggu anak
         </>
       ) : null}
       {counts.get('blocked') ? (

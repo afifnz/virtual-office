@@ -155,6 +155,48 @@ const staleComm = poseFor(
 if (staleComm.kind !== 'idle') fail(`stale comm → ${staleComm.kind}, want idle (not walk)`)
 else ok('a delegate comm older than 30 s → no walk')
 
+// --------------------------------------------------- 2b. waiting / stale truth
+
+// The parent of a running subagent sits back and waits: no delegate walk, no
+// tool chip — even though current.tools is still ['delegate_task'].
+const waiting = poseFor(
+  agent({
+    id: 'dev',
+    status: 'waiting',
+    current: { kind: 'tool', tools: ['delegate_task'] },
+    children: { total: 2, running: 1 },
+  }),
+  NOW,
+  [comm({ from: 'dev', to: 'planner', ts: NOW - 5 })],
+)
+if (waiting.kind !== 'relax' || waiting.tool !== '' || waiting.comming) {
+  fail(`waiting → ${JSON.stringify(waiting)}, want a relaxed seat with no tool chip`)
+} else ok('waiting on children → seated relax pose (no walk, no tool chip)')
+
+// A stale verdict must not animate as typing: the desk is quiet, not busy.
+const staleWorking = poseFor(
+  agent({
+    id: 'dev',
+    status: 'working',
+    current: { kind: 'tool', tools: ['terminal'] },
+    stale: true,
+  }),
+  NOW,
+  [comm({ from: 'dev', to: 'coder', ts: NOW - 5 })],
+)
+if (staleWorking.kind !== 'idle' || staleWorking.typing) {
+  fail(`stale working → ${JSON.stringify(staleWorking)}, want idle`)
+} else ok('stale working verdict → idle pose (never typing, never a delegate walk)')
+
+// The real backend row is already demoted to idle + stale:true — same pose.
+const staleReal = poseFor(
+  agent({ id: 'dev', status: 'idle', stale: true, last_kind: 'tool_result', current: { kind: 'tool_result', tools: ['terminal'] } }),
+  NOW,
+  [],
+)
+if (staleReal.kind !== 'idle') fail(`real stale row → ${staleReal.kind}, want idle`)
+else ok('real stale row (idle + stale) → idle pose')
+
 // -------------------------------------------------------------- 3. idle/reply
 
 const reply = poseFor(
@@ -267,6 +309,7 @@ else ok('pixel font: 5×7 glyphs, deterministic, used only for plaque + lift num
 // --------------------------------------------------------------- 10. palette
 if (TEAM.lobby !== '#D4805C' || TEAM.dev !== '#82AAC8' || TEAM.edu !== '#DEB860') fail('team accents drifted')
 if (THEME_STATUS.day.working !== '#8A5406' || THEME_STATUS.night.working !== '#F2B434') fail('status palette drifted')
+if (THEME_STATUS.day.waiting !== '#9A3412' || THEME_STATUS.night.waiting !== '#FFA94D') fail('waiting palette drifted')
 if (THEME_TOKENS.day.glass.alpha !== 0.66 || THEME_TOKENS.night.glass.alpha !== 0.62) fail('glass alpha drifted')
 if (THEME_TOKENS.day.city.layers.length !== 4 || THEME_TOKENS.night.city.layers.length !== 4) fail('city layers drifted')
 else ok('palette: two themes, published status colours, 4 city layers')

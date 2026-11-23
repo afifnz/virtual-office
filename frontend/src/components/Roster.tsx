@@ -1,23 +1,14 @@
 import { useState } from 'react'
 import { agentMeta } from '../lib/roster'
 import { FLOORS } from '../lib/rooms'
-import type { Agent, StatusPayload } from '../lib/types'
-import { relTime, statusLabel } from '../lib/format'
+import type { StatusPayload } from '../lib/types'
+import { relTime } from '../lib/format'
+import { childBadge, effectiveStatus, isStaleAgent, runningChildren, statusSummary, statusText } from '../lib/status'
 
 type FloorId = 1 | 2 | 3
 
 /** Floors in climb order; every floor shows even when it has no agents yet. */
 const FLOOR_ORDER: FloorId[] = [1, 2, 3]
-
-/** Compact per-group status summary, e.g. "4 aktif · 1 idle". */
-function floorSummary(agents: Agent[]): string {
-  const counts = new Map<string, number>()
-  for (const a of agents) counts.set(a.status, (counts.get(a.status) ?? 0) + 1)
-  const parts = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([status, n]) => `${n} ${statusLabel(status)}`)
-  return parts.join(' · ')
-}
 
 /**
  * Agent list: a docked sidebar on desktop, a bottom sheet on a phone. Rows are
@@ -73,22 +64,36 @@ export function Roster({
                   <i className={`team-bar floor-${floor}`} aria-hidden="true" />
                   L{floor} {FLOORS[floor].label}
                   <span>{agents.length}</span>
-                  <small className="roster-summary">{floorSummary(agents)}</small>
+                  <small className="roster-summary">{statusSummary(agents)}</small>
                   <b aria-hidden="true">{open ? '▾' : '▸'}</b>
                 </button>
               </h3>
               {open
                 ? agents.map((a) => {
                     const meta = agentMeta(a.id)
+                    const badge = childBadge(a)
                     return (
-                      <button key={a.id} type="button" className="roster-row" onClick={() => onPick(a.id)}>
-                        <i className={`dot ${a.status}`} aria-hidden="true" />
+                      <button
+                        key={a.id}
+                        type="button"
+                        className={`roster-row ${isStaleAgent(a) ? 'is-stale' : ''} ${a.status === 'waiting' ? 'is-waiting' : ''}`}
+                        onClick={() => onPick(a.id)}
+                        title={badge ? `${meta.name} menunggu ${runningChildren(a)} anak` : undefined}
+                      >
+                        <i className={`dot ${effectiveStatus(a)}`} aria-hidden="true" />
                         <span className="roster-name">
-                          <strong>{meta.name}</strong>
+                          <strong>
+                            {meta.name}
+                            {badge ? (
+                              <span className="child-badge" aria-label={`${runningChildren(a)} anak berjalan`}>
+                                {badge}
+                              </span>
+                            ) : null}
+                          </strong>
                           <small>{meta.role}</small>
                         </span>
                         <span className="roster-meta">
-                          <em>{statusLabel(a.status)}</em>
+                          <em>{statusText(a)}</em>
                           <small>{a.last_active ? relTime(a.last_active, now) : '—'}</small>
                         </span>
                       </button>
