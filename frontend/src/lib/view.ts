@@ -9,12 +9,17 @@
  */
 import type { FloorId } from './rooms'
 
+/** Which camera the scene is in: the 3-floor building overview or one floor. */
+export type ViewMode = 'building' | 'floor'
+
 /** One command the HUD / deep links send to the scene. */
 export interface RigCommand {
   spot: string
   nonce: number
   /** which floor to show (absent → keep the current one, default 1) */
   floor?: FloorId
+  /** `building` draws all three floors + the city in one frame (default) */
+  mode?: ViewMode
   /** fly to an agent's desk instead of a named spot */
   focus?: { id?: string; x: number; z: number; rot: number; floor: FloorId; seated?: boolean }
   /** portrait mode: get close enough to read the face */

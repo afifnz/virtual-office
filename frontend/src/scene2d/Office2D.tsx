@@ -12,12 +12,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusPayload, Agent, Comm } from '../lib/types'
 import type { AgentMeta } from '../lib/agents'
 import { agentsFor, officeTZ } from '../lib/roster'
-import { FLOORS, LIFT } from '../lib/rooms'
+import { FLOORS, LIFT, type FloorId } from '../lib/rooms'
 import type { MoveIntent, RigCommand } from '../lib/view'
 import { SPOT_VIEW } from '../lib/view'
 import { clockInTimeZone } from '../lib/theme'
 import type { ThemeName } from './palette'
 import { pickTargets, placeAgents, renderFrame } from './render'
+import { buildingHit, buildingReport, renderBuildingFrame } from './render-building'
+import { buildingSeats } from './building'
 import { labelAgentsFor, layoutSideLabels, sideGate } from './labels'
 import {
   PHONE_CTRL_BAND,
@@ -26,6 +28,7 @@ import {
   SIDE_ROOM_H,
   SIDE_W,
   clampSideCam,
+  clampSideCamY,
   screenToDesign,
   sideSeats,
   sideTransform,
@@ -33,7 +36,7 @@ import {
   worldXToDesign,
   type SideViewport,
 } from './side'
-import { clampZoom, fitZoom } from './viewport'
+import { MAX_ZOOM, clampZoom, fitZoom } from './viewport'
 import { useIsMobile } from '../hooks/useViewport'
 
 export interface OfficeProps {
@@ -43,6 +46,8 @@ export interface OfficeProps {
   onNear: (id: string | null) => void
   onMove: () => void
   onPick: (id: string) => void
+  /** click a floor band in the building view → open that floor */
+  onFloor?: (floor: FloorId) => void
   /** true while the stage is wider than the canvas, i.e. panning does something */
   onPan?: (canPan: boolean) => void
   theme: ThemeName
@@ -52,6 +57,12 @@ export interface OfficeProps {
 const PAN_SPEED = 380 // design px per second while a key/pad is held
 /** Phone zoom step: the fit is 0.78, so a whole step would jump past the floor. */
 const PHONE_ZOOM_STEP = 0.25
+/**
+ * The building overview may zoom past 1:1 (the per-floor camera stops at 2).
+ * On a desktop 2 is already the whole 1000×688 sheet, so 3 is what makes the
+ * two-axis pan meaningful; on a phone the fit is the floor of the range.
+ */
+const BUILDING_MAX_ZOOM = 3
 
 function initialVp(command: RigCommand): SideViewport {
   const floor = command.floor ?? 1
@@ -62,11 +73,14 @@ function zoomPercent(zoom: number): string {
   return `${Math.round(zoom * 100)}%`
 }
 
-export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, onPan, theme }: OfficeProps) {
+export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, onFloor, onPan, theme }: OfficeProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const vpRef = useRef<SideViewport>(initialVp(command))
+  /** the whole-building overview is a camera mode, not a different scene */
+  const buildingRef = useRef(command.mode === 'building')
+  buildingRef.current = command.mode === 'building'
   // null until the first resize knows the canvas: the label then shows the fit
   // (78 % on a phone), never a provisional 100 %
   const [zoomLabel, setZoomLabel] = useState<number | null>(null)
@@ -120,9 +134,19 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
     frame.current = { metas, byId, now: status?.now ?? 0, comms: status?.comms ?? [] }
   }, [metas, byId, status])
 
-  // spot / focus commands from the HUD, roster and deep links
+  // spot / focus / view-mode commands from the HUD, roster and deep links
   useEffect(() => {
     const floor = command.floor ?? vpRef.current.floor
+    if (command.mode === 'building') {
+      // overview: park on the sheet centre (the building is centred) and fit
+      const { w, h } = viewRef.current
+      const fit = w > 0 && h > 0 ? fitZoom(floor, w, h, bandRef.current) : 1
+      vpRef.current = { camX: SIDE_W / 2, camY: SIDE_H / 2, zoom: fit, floor }
+      fitPending.current = false
+      lastFitRef.current = fit
+      setZoomLabel(fit)
+      return
+    }
     if (command.focus) {
       fitPending.current = false
       const focusFloor = command.focus.floor
@@ -154,9 +178,11 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
     const band = bandRef.current
     // the phone's floor is the fit: you can zoom in, never out past the floor
     const min = band > 0 ? fitZoom(vpRef.current.floor, w, h, band) : undefined
-    const step = band > 0 ? PHONE_ZOOM_STEP : 1
-    const zoom = clampZoom(vpRef.current.zoom + delta * step, min)
-    vpRef.current = { ...vpRef.current, zoom, camX: clampSideCam(vpRef.current.camX, w, h, zoom, band) }
+    const step = band > 0 ? PHONE_ZOOM_STEP : buildingRef.current ? 0.5 : 1
+    const max = buildingRef.current ? BUILDING_MAX_ZOOM : MAX_ZOOM
+    const zoom = clampZoom(vpRef.current.zoom + delta * step, min, max)
+    const camY = clampSideCamY(vpRef.current.camY ?? SIDE_H / 2, w, h, zoom, band)
+    vpRef.current = { ...vpRef.current, zoom, camX: clampSideCam(vpRef.current.camX, w, h, zoom, band), camY }
     setZoomLabel(zoom)
   }, [])
 
@@ -183,7 +209,11 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
       setZoomLabel(fit)
     }
     lastFitRef.current = fit
-    vpRef.current = { ...vpRef.current, camX: clampSideCam(vpRef.current.camX, w, h, vpRef.current.zoom, bandRef.current) }
+    vpRef.current = {
+      ...vpRef.current,
+      camX: clampSideCam(vpRef.current.camX, w, h, vpRef.current.zoom, bandRef.current),
+      camY: clampSideCamY(vpRef.current.camY ?? SIDE_H / 2, w, h, vpRef.current.zoom, bandRef.current),
+    }
   }, [])
 
   // the render loop, mounted once; reads the latest data from refs
@@ -200,14 +230,32 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
     const applyPan = (dt: number) => {
       const mi = moveIntent.current
       let kx = 0
+      let ky = 0
       const k = keysRef.current
       if (k.has('a') || k.has('arrowleft')) kx -= 1
       if (k.has('d') || k.has('arrowright')) kx += 1
       kx += mi.x
-      if (kx !== 0) {
+      if (buildingRef.current) {
+        // the building is taller than a phone canvas once zoomed in: W/↑ (and
+        // the pad's forward arrow) look up, S/↓ look down
+        if (k.has('w') || k.has('arrowup')) ky += 1
+        if (k.has('s') || k.has('arrowdown')) ky -= 1
+        ky += mi.z
+      }
+      if (kx !== 0 || ky !== 0) {
+        const { w, h } = viewRef.current
+        const band = bandRef.current
+        const zoom = vpRef.current.zoom
         vpRef.current = {
           ...vpRef.current,
-          camX: clampSideCam(vpRef.current.camX - kx * PAN_SPEED * dt, viewRef.current.w, viewRef.current.h, vpRef.current.zoom, bandRef.current),
+          camX: clampSideCam(vpRef.current.camX - kx * PAN_SPEED * dt, w, h, zoom, band),
+          camY: clampSideCamY(
+            (vpRef.current.camY ?? SIDE_H / 2) - ky * PAN_SPEED * dt,
+            w,
+            h,
+            zoom,
+            band,
+          ),
         }
         onMove()
       }
@@ -229,22 +277,40 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         const f = frame.current
         const clock = clockInTimeZone(f.now || 0, officeTZ()) ?? { hour: 12, minute: 0 }
         const t0 = performance.now()
-        renderFrame(ctx, {
-          theme: themeRef.current,
-          metas: f.metas,
-          byId: f.byId,
-          now: f.now,
-          comms: f.comms,
-          vp: vpRef.current,
-          viewW: w,
-          viewH: h,
-          band: bandRef.current,
-          dpr,
-          still: still || reducedMotion,
-          t: tRef.current,
-          hour: clock.hour,
-          minute: clock.minute,
-        })
+        const building = buildingRef.current
+        if (building) {
+          renderBuildingFrame(ctx, {
+            theme: themeRef.current,
+            metas: f.metas,
+            byId: f.byId,
+            now: f.now,
+            comms: f.comms,
+            vp: vpRef.current,
+            viewW: w,
+            viewH: h,
+            band: bandRef.current,
+            dpr,
+            still: still || reducedMotion,
+            t: tRef.current,
+          })
+        } else {
+          renderFrame(ctx, {
+            theme: themeRef.current,
+            metas: f.metas,
+            byId: f.byId,
+            now: f.now,
+            comms: f.comms,
+            vp: vpRef.current,
+            viewW: w,
+            viewH: h,
+            band: bandRef.current,
+            dpr,
+            still: still || reducedMotion,
+            t: tRef.current,
+            hour: clock.hour,
+            minute: clock.minute,
+          })
+        }
         const cost = performance.now() - t0
         const perf = perfRef.current
         perf.samples.push(cost)
@@ -252,13 +318,16 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         perf.frames++
         perf.last = cost
 
-        // proximity: nearest agent to the viewport centre, on this floor
+        // proximity: nearest agent to the viewport centre. In the building view
+        // that is the nearest of all 13 seats; on a floor, only that floor's.
         const placed = placeAgents(f.metas, f.byId, f.now, f.comms, tRef.current)
-        const targets = pickTargets(placed).filter((p) => p.floor === vpRef.current.floor)
         const tr = sideTransform(w, h, vpRef.current, bandRef.current)
         // the D-pad only earns its place once there is something to pan to:
-        // at the fit zoom the whole floor is on screen and the pad is hidden
-        const canPan = SIDE_W * tr.s > w + 0.5
+        // at the fit zoom the whole building/floor is on screen and it is hidden
+        const usableH = Math.max(0, h - bandRef.current)
+        const canPan = building
+          ? SIDE_W * tr.s > w + 0.5 || SIDE_H * tr.s > usableH + 0.5
+          : SIDE_W * tr.s > w + 0.5
         if (canPan !== panRef.current) {
           panRef.current = canPan
           onPanRef.current?.(canPan)
@@ -266,14 +335,26 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         const centre = screenToDesign(tr, w / 2, h / 2)
         let near: string | null = null
         let best = Infinity
-        for (const p of targets) {
-          const d = Math.hypot(p.designX - centre.x, p.designY - p.h / 2 - centre.y)
-          if (d < best) {
-            best = d
-            near = p.id
+        if (building) {
+          for (const seat of buildingSeats(f.metas)) {
+            const d = Math.hypot(seat.cx - centre.x, seat.floorY - seat.avatarH / 2 - centre.y)
+            if (d < best) {
+              best = d
+              near = seat.meta.id
+            }
           }
+          if (best > 26) near = null
+        } else {
+          const targets = pickTargets(placed).filter((p) => p.floor === vpRef.current.floor)
+          for (const p of targets) {
+            const d = Math.hypot(p.designX - centre.x, p.designY - p.h / 2 - centre.y)
+            if (d < best) {
+              best = d
+              near = p.id
+            }
+          }
+          if (best > 160) near = null
         }
-        if (best > 160) near = null
         if (near !== nearRef.current) {
           nearRef.current = near
           onNear(near)
@@ -287,6 +368,16 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         w2.__office2dVp = () => vpRef.current
         w2.__office2dTheme = () => themeRef.current
         w2.__office2dPerf = () => perfReport(perfRef.current)
+        w2.__office2dMode = () => (buildingRef.current ? 'building' : 'floor')
+        // building geometry + gates for the browser probe (no privacy data)
+        w2.__office2dBuilding = () => {
+          const placedNow = placeAgents(frame.current.metas, frame.current.byId, frame.current.now, frame.current.comms, tRef.current)
+          return buildingReport(
+            frame.current.metas,
+            placedNow.map((p) => ({ id: p.meta.id, floor: p.floor, inLift: p.inLift, liftTo: p.liftTo })),
+            tRef.current,
+          )
+        }
         // verify-office probe hook: per-floor facts, no privacy data
         w2.__office2dFloors = () => {
           const metasNow = frame.current.metas
@@ -295,7 +386,8 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
             floor: vpRef.current.floor,
             zoom: vpRef.current.zoom,
             theme: themeRef.current,
-            camera: 'side',
+            mode: buildingRef.current ? 'building' : 'floor',
+            camera: buildingRef.current ? 'building' : 'side',
             floors: [1, 2, 3].map((fl) => ({
               floor: fl,
               desks: byFloor(fl).length,
@@ -369,11 +461,13 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
           const band = bandRef.current
           const { w, h } = viewRef.current
           const min = band > 0 ? fitZoom(vpRef.current.floor, w, h, band) : undefined
-          const zoom = clampZoom(vpRef.current.zoom * (d / pinchRef.current.d), min)
+          const max = buildingRef.current ? BUILDING_MAX_ZOOM : MAX_ZOOM
+          const zoom = clampZoom(vpRef.current.zoom * (d / pinchRef.current.d), min, max)
           vpRef.current = {
             ...vpRef.current,
             zoom,
             camX: clampSideCam(vpRef.current.camX, w, h, zoom, band),
+            camY: clampSideCamY(vpRef.current.camY ?? SIDE_H / 2, w, h, zoom, band),
           }
           setZoomLabel(zoom)
           onMove()
@@ -391,6 +485,15 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         vpRef.current = {
           ...vpRef.current,
           camX: clampSideCam(vpRef.current.camX - dx / tr.s, w, h, vpRef.current.zoom, bandRef.current),
+          camY: buildingRef.current
+            ? clampSideCamY(
+                (vpRef.current.camY ?? SIDE_H / 2) - dy / tr.s,
+                w,
+                h,
+                vpRef.current.zoom,
+                bandRef.current,
+              )
+            : vpRef.current.camY,
         }
         onMove()
       }
@@ -408,6 +511,14 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
         if (w > 0 && h > 0) {
           const tr = sideTransform(w, h, vpRef.current, bandRef.current)
           const pt = screenToDesign(tr, e.clientX - rect.left, e.clientY - rect.top)
+          if (buildingRef.current) {
+            // a desk → that agent's floor + desk; a bare band → that floor
+            const hit = buildingHit(buildingSeats(frame.current.metas), pt.x, pt.y)
+            if (hit && 'id' in hit) onPick(hit.id)
+            else if (hit && 'floor' in hit) onFloor?.(hit.floor)
+            else onPick('')
+            return
+          }
           const placed = placeAgents(frame.current.metas, frame.current.byId, frame.current.now, frame.current.comms, tRef.current)
           const targets = pickTargets(placed).filter((p) => p.floor === vpRef.current.floor)
           let hit: string | null = null
@@ -449,7 +560,7 @@ export function Office2D({ status, command, moveIntent, onNear, onMove, onPick, 
       canvas.removeEventListener('pointerup', up)
       canvas.removeEventListener('pointercancel', cancel)
     }
-  }, [onMove, onPick])
+  }, [onFloor, onMove, onPick])
 
   return (
     <div className="scene2d" ref={wrapRef}>

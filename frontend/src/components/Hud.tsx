@@ -1,6 +1,7 @@
 import { useIsMobile } from '../hooks/useViewport'
 import type { StatusPayload } from '../lib/types'
 import type { FloorId } from '../lib/rooms'
+import type { ViewMode } from '../lib/view'
 import { FloorTabs } from './FloorTabs'
 import { tzLabel } from '../lib/roster'
 import { compact } from '../lib/format'
@@ -28,6 +29,8 @@ interface HudProps {
   stale: boolean
   floor: FloorId
   onFloor: (floor: FloorId) => void
+  mode: ViewMode
+  onBuilding: () => void
   theme: ThemeMode
   themeOverride: ThemeOverride | null
   themeSource: ThemeSource
@@ -210,7 +213,14 @@ export function Hud(props: HudProps) {
             </span>
           </div>
 
-          <FloorTabs floor={props.floor} status={props.status} onFloor={props.onFloor} variant="hud" />
+          <FloorTabs
+            floor={props.floor}
+            status={props.status}
+            mode={props.mode}
+            onFloor={props.onFloor}
+            onBuilding={props.onBuilding}
+            variant="hud"
+          />
 
           {summary}
 
